@@ -26,10 +26,10 @@ export async function listDriveFiles() {
   return listGoogleDriveFiles();
 }
 
-export async function connectDrive() {
+export async function connectDrive(options = {}) {
   if (isMockDrive()) return { connected: true };
   assertGoogleDriveReady();
-  return connectGoogleDrive();
+  return connectGoogleDrive(options);
 }
 
 export function disconnectDrive() {

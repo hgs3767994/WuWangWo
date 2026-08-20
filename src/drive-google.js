@@ -69,8 +69,8 @@ export async function testGoogleDriveConnection() {
   };
 }
 
-export async function connectGoogleDrive() {
-  await ensureGoogleAccessToken({ interactive: true });
+export async function connectGoogleDrive(options = {}) {
+  await ensureGoogleAccessToken({ interactive: options.interactive !== false });
   return { connected: true };
 }
 

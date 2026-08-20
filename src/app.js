@@ -284,7 +284,12 @@ async function getKeyPackage() {
 async function getCurrentKeyPackage() {
   const localKeyPackage = await getKeyPackage();
   if (!state.appState?.googleDrive?.connected) return localKeyPackage;
-  const remoteKeyPackage = await readDriveFile(driveFileName("keyPackage"));
+  let remoteKeyPackage = null;
+  try {
+    remoteKeyPackage = await readDriveFile(driveFileName("keyPackage"));
+  } catch (error) {
+    markDriveSyncIssue(error);
+  }
   if (!remoteKeyPackage) return localKeyPackage;
   if ((remoteKeyPackage.securityMeta?.sessionEpoch ?? 0) >= (localKeyPackage?.securityMeta?.sessionEpoch ?? 0)) {
     return remoteKeyPackage;
@@ -385,7 +390,7 @@ async function syncNow(options = {}) {
   render();
 
   try {
-    await connectDrive();
+    await connectDrive({ interactive: !options.silent });
     const remoteEnvelope = await readDriveFile(driveFileName("vault"));
     let conflicts = [];
     if (remoteEnvelope && state.dekBytes) {
