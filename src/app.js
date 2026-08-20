@@ -80,7 +80,7 @@ async function checkTrustedSessionStillValid(appState, trustedSession) {
   if (!trustedSession) return { valid: false, message: "請輸入密碼以繼續使用" };
   const localKeyPackage = await getKeyPackage();
   let remoteKeyPackage = null;
-  if (appState.googleDrive?.connected) {
+  if (appState.googleDrive?.connected && driveAuthStatus().hasAccessToken) {
     try {
       remoteKeyPackage = await readDriveFile(driveFileName("keyPackage"));
     } catch {}
@@ -284,6 +284,7 @@ async function getKeyPackage() {
 async function getCurrentKeyPackage() {
   const localKeyPackage = await getKeyPackage();
   if (!state.appState?.googleDrive?.connected) return localKeyPackage;
+  if (!driveAuthStatus().hasAccessToken) return localKeyPackage;
   let remoteKeyPackage = null;
   try {
     remoteKeyPackage = await readDriveFile(driveFileName("keyPackage"));
@@ -312,9 +313,7 @@ async function saveEncryptedVaultEnvelope() {
   if (state.appState?.mode !== "driveSync" || !state.vault || !state.dekBytes) return;
   const envelope = await encryptVaultEnvelope(state.vault, state.dekBytes);
   await setItem("encryptedVaultEnvelope", envelope);
-  if (state.appState.googleDrive.connected) {
-    await writeDriveFile(driveFileName("vault"), envelope);
-  }
+  return envelope;
 }
 
 async function uploadKeyPackageToDrive() {
@@ -325,7 +324,10 @@ async function uploadKeyPackageToDrive() {
 
 async function uploadCurrentVaultToDrive() {
   if (!state.dekBytes) return;
-  await saveEncryptedVaultEnvelope();
+  const envelope = await saveEncryptedVaultEnvelope();
+  if (state.appState?.googleDrive?.connected && envelope) {
+    await writeDriveFile(driveFileName("vault"), envelope);
+  }
 }
 
 async function unlockExistingDriveVault(event) {
@@ -378,6 +380,7 @@ async function unlockExistingDriveVault(event) {
 async function syncNow(options = {}) {
   if (!state.appState?.googleDrive?.connected) return;
   if (state.appState.googleDrive.syncStatus === "syncing") return;
+  if (options.silent && !driveAuthStatus().hasAccessToken) return;
   state.appState = {
     ...state.appState,
     googleDrive: {
@@ -499,6 +502,7 @@ async function logoutGoogleDrive() {
 
 async function resumeDriveSyncInBackground() {
   if (!state.appState?.googleDrive?.connected || state.route.name !== "home") return;
+  if (!driveAuthStatus().hasAccessToken) return;
   try {
     await syncNow({ silent: true });
   } catch {}

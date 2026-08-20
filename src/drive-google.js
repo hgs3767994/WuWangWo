@@ -134,6 +134,7 @@ async function googleFetch(url, options = {}) {
 async function ensureGoogleAccessToken({ interactive = false } = {}) {
   if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
   if (!isGoogleDriveConfigured()) throw new Error(googleDriveReadiness().message);
+  if (!interactive) throw new Error("google-drive-auth-required");
   await loadGoogleIdentityServices();
   tokenClient ??= globalThis.google.accounts.oauth2.initTokenClient({
     client_id: APP_CONFIG.googleDrive.clientId,
