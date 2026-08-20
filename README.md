@@ -66,6 +66,15 @@ https://你的帳號.github.io/你的 repo 名稱
 
 若沒有設定 `GOOGLE_OAUTH_CLIENT_ID`，部署版會保持本機模擬同步模式；App 仍可使用，但不會連到真實 Google Drive。
 
+正式 OAuth 上線前，部署網址也會提供：
+
+```text
+https://你的帳號.github.io/你的 repo 名稱/privacy.html
+https://你的帳號.github.io/你的 repo 名稱/terms.html
+```
+
+這兩個網址可填入 Google Cloud Console 的 OAuth Branding。
+
 ## 專案檢查
 
 ```bash
@@ -131,6 +140,27 @@ https://www.googleapis.com/auth/drive.appdata
 
 請勿在前端放入 Google client secret。
 
+此 scope 在 Google Drive API 文件中屬於 non-sensitive scope，用於檢視與管理 App 自己的設定資料。正式公開給一般 Google 使用者時，仍需在 Google Cloud Console 完成 OAuth branding、隱私權政策、資料用途說明與發布設定。
+
+## 正式 OAuth 上線檢查
+
+Google Cloud Console 建議設定：
+
+- App name：勿忘我
+- App home page：GitHub Pages 正式 App 網址
+- Privacy policy：GitHub Pages 的 `/privacy.html`
+- Terms of service：GitHub Pages 的 `/terms.html`
+- Authorized JavaScript origins：GitHub Pages origin，例如 `https://hgs3767994.github.io`
+- OAuth scope：`https://www.googleapis.com/auth/drive.appdata`
+
+發布順序：
+
+- 先確認 GitHub Pages 正式 App、隱私權政策、服務條款都能公開開啟。
+- 在 OAuth Branding 填入首頁、隱私權政策、服務條款、支援信箱與開發者聯絡信箱。
+- 在 Data Access 只宣告 `drive.appdata`，用途寫明為儲存使用者加密後的勿忘我同步資料。
+- 將 Publishing status 從 Testing 發布到 Production。
+- 若 Google 要求驗證，依 Verification Center 補 scope justification 與 demo video。
+
 切換到 Google Drive 模式並填入 Client ID 後，可到 App：
 
 ```text
@@ -147,6 +177,8 @@ https://www.googleapis.com/auth/drive.appdata
 - 測試檔刪除
 
 一般使用時，人物資料仍會先穩定保存在本機；若 Google 授權暫時失效，畫面會提醒重新授權，不會因此中斷本機資料儲存。
+
+正式使用時，App 會在設定頁顯示同步狀態與上次同步摘要，包含本機版本、雲端版本、合併後版本、人物數與衝突數。若有本機變更尚未同步，狀態會明確顯示，需由使用者手動按「立即同步」才會開啟 Google 授權。
 
 開發測試時，也可以直接在「Google Drive 連線診斷」頁貼上 OAuth Client ID，使用「套用 Google 模式並重新載入」。這會把設定存在目前瀏覽器的 localStorage，不會寫入專案檔案。
 
@@ -174,7 +206,7 @@ http://localhost:4173
 本次快取版本：
 
 ```text
-forget-me-not-v37
+forget-me-not-v41
 ```
 
 ## 部署提醒
@@ -190,3 +222,5 @@ forget-me-not-v37
 ## 安全備註
 
 匯出的 JSON / XLSX 不包含密碼、資料金鑰或救援碼，但仍包含人物資料，應妥善保存。
+
+資料管理區會保留最近 3 份本機資料快照。匯入資料、處理衝突或重要修改前會建立快照，使用者可在設定頁的「本機資料快照」中下載、還原或刪除。

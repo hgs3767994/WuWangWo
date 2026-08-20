@@ -510,6 +510,72 @@ button:focus-visible,
   border-color: #fed7aa;
 }
 
+.data-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.data-summary span {
+  padding: 6px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--surface-section);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sync-summary {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--surface-section);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.sync-summary strong {
+  color: var(--text-primary);
+}
+
+.snapshot-card {
+  background: var(--surface-section);
+}
+
+.troubleshoot-item.ok {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.troubleshoot-item.warn {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.troubleshoot-item.error {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.legal-links {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.legal-links a {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.legal-page .panel h2 {
+  margin-top: 8px;
+}
+
 .diagnostic-success {
   border-color: #86efac;
   background: #f0fdf4;

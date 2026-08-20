@@ -30,6 +30,7 @@ let state = {
   appState: null,
   dekBytes: null,
   vault: null,
+  localSnapshots: [],
   route: { name: "loading" },
   updateAvailable: false,
   waitingServiceWorker: null
@@ -39,10 +40,12 @@ async function boot() {
   const appState = await getItem("appState");
   const vault = await getItem("vault");
   const trustedSession = await getItem("trustedSession");
+  const localSnapshots = await getItem("localSnapshots") ?? [];
+  state = { ...state, localSnapshots };
   if (!appState || !vault) {
     state = { ...state, route: { name: "welcome" } };
   } else if (appState.mode === "driveSync" && !trustedSession) {
-    state = { appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock" } };
+    state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock" } };
   } else {
     let dekBytes = null;
     if (appState.mode === "driveSync") {
@@ -50,6 +53,7 @@ async function boot() {
       if (!sessionCheck.valid) {
         await removeItem("trustedSession");
         state = {
+          ...state,
           appState,
           vault: normalizeVault(pruneDeleted(vault)),
           route: { name: "unlock", message: sessionCheck.message, showForgotPassword: true }
@@ -62,13 +66,13 @@ async function boot() {
         dekBytes = await restoreDekFromTrustedSession(trustedSession);
       } catch {
         await removeItem("trustedSession");
-        state = { appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock" } };
+        state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock" } };
         render();
         registerServiceWorker();
         return;
       }
     }
-    state = { appState, dekBytes, vault: normalizeVault(pruneDeleted(vault)), route: { name: "home" } };
+    state = { ...state, appState, dekBytes, vault: normalizeVault(pruneDeleted(vault)), route: { name: "home" } };
     await save();
     void resumeDriveSyncInBackground();
   }
@@ -189,8 +193,12 @@ async function beginDriveSetup() {
     render();
     return;
   }
+  const driveFiles = await listDriveFiles();
+  if (driveFiles.hasKeyPackage && driveFiles.hasVault && state.appState && state.vault && state.appState.mode !== "driveSync") {
+    navigate({ name: "driveCloudChoice" });
+    return;
+  }
   if (!state.appState || !state.vault) {
-    const driveFiles = await listDriveFiles();
     if (driveFiles.hasKeyPackage && driveFiles.hasVault) {
       navigate({ name: "driveExistingUnlock" });
       return;
@@ -214,6 +222,10 @@ async function beginDriveSetup() {
   navigate({ name: "driveIntro" });
 }
 
+function useLocalDataForDriveSetup() {
+  navigate({ name: "driveIntro", mode: "createFromLocal" });
+}
+
 function cancelDriveSetup() {
   navigate({ name: state.driveSetupCancelTo ?? "settings" });
 }
@@ -229,7 +241,9 @@ async function save() {
 }
 
 async function commitVault(vault) {
+  await createLocalSnapshot("修改前自動快照");
   state.vault = touchVault(vault, state.appState.deviceId);
+  markLocalVaultChanged();
   await save();
   render();
 }
@@ -396,13 +410,16 @@ async function syncNow(options = {}) {
     await connectDrive({ interactive: !options.silent });
     const remoteEnvelope = await readDriveFile(driveFileName("vault"));
     let conflicts = [];
+    const localBeforeSync = structuredClone(state.vault);
+    let remoteVault = null;
     if (remoteEnvelope && state.dekBytes) {
-      const remoteVault = await decryptVaultEnvelope(remoteEnvelope, state.dekBytes);
-      const merged = mergeVaults(state.vault, normalizeVault(pruneDeleted(remoteVault)), state.appState.deviceId);
+      remoteVault = normalizeVault(pruneDeleted(await decryptVaultEnvelope(remoteEnvelope, state.dekBytes)));
+      const merged = mergeVaults(state.vault, remoteVault, state.appState.deviceId);
       state.vault = merged.vault;
       conflicts = merged.conflicts;
       await setItem("vault", state.vault);
     }
+    const syncedAt = new Date().toISOString();
     await uploadKeyPackageToDrive();
     await uploadCurrentVaultToDrive();
     state.appState = {
@@ -410,14 +427,16 @@ async function syncNow(options = {}) {
       googleDrive: {
         ...state.appState.googleDrive,
         syncStatus: conflicts.length ? "needsResolution" : "synced",
-        lastSyncAt: new Date().toISOString(),
+        lastSyncAt: syncedAt,
+        lastLocalChangeAt: "",
+        lastSyncSummary: buildSyncSummary({ localBeforeSync, remoteVault, mergedVault: state.vault, conflicts, syncedAt }),
         pendingConflicts: conflicts,
         simulated: isSimulatedDrive(),
         lastSyncError: ""
       }
     };
     await save();
-    if (!options.silent) alert(conflicts.length ? "已同步，但有資料衝突需要處理" : `已同步（${driveProviderLabel()}）`);
+    if (!options.silent) alert(syncAlertMessage(state.appState.googleDrive.lastSyncSummary, conflicts.length));
     render();
   } catch (error) {
     const message = driveErrorMessage(error, "同步失敗，請稍後再試");
@@ -508,10 +527,74 @@ async function resumeDriveSyncInBackground() {
   } catch {}
 }
 
-function exportData() {
+async function exportData() {
   if (!state.vault) return;
   const exportedAt = new Date().toISOString();
+  const payload = buildExportPayload(exportedAt);
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  downloadBlob(blob, `勿忘我-資料備份-${fileDateTime(exportedAt)}.json`);
+  await rememberDataManagementEvent("lastJsonExportAt", exportedAt);
+}
+
+async function createLocalSnapshot(reason) {
+  if (!state.vault) return;
+  const createdAt = new Date().toISOString();
+  const snapshot = {
+    id: `snapshot-${crypto.randomUUID()}`,
+    reason,
+    createdAt,
+    peopleCount: state.vault.people.length,
+    vault: structuredClone(state.vault)
+  };
+  state.localSnapshots = [snapshot, ...(state.localSnapshots ?? [])].slice(0, 3);
+  await setItem("localSnapshots", state.localSnapshots);
+}
+
+async function restoreLocalSnapshot(id) {
+  const snapshot = state.localSnapshots.find((item) => item.id === id);
+  if (!snapshot) return;
+  if (!confirm(`確定要還原 ${formatDateTime(snapshot.createdAt)} 的本機快照嗎？\n目前資料會先自動建立一份快照，再還原到該時間點。`)) return;
+  await createLocalSnapshot("還原前自動快照");
+  state.vault = normalizeVault(pruneDeleted(snapshot.vault));
+  markLocalVaultChanged();
+  await save();
+  alert("本機快照已還原");
+  navigate({ name: "settings" });
+}
+
+async function deleteLocalSnapshot(id) {
+  const snapshot = state.localSnapshots.find((item) => item.id === id);
+  if (!snapshot || !confirm("確定要刪除這份本機快照嗎？")) return;
+  state.localSnapshots = state.localSnapshots.filter((item) => item.id !== id);
+  await setItem("localSnapshots", state.localSnapshots);
+  render();
+}
+
+function downloadLocalSnapshot(id) {
+  const snapshot = state.localSnapshots.find((item) => item.id === id);
+  if (!snapshot) return;
   const payload = {
+    fileType: "forget-me-not-vault-export",
+    schemaVersion: 1,
+    appName: "勿忘我",
+    exportedAt: new Date().toISOString(),
+    note: "此檔案來自本機快照，只包含人物資料，不包含密碼、資料金鑰或救援碼。",
+    vault: snapshot.vault
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  downloadBlob(blob, `勿忘我-本機快照-${fileDateTime(snapshot.createdAt)}.json`);
+}
+
+async function exportExcel() {
+  if (!state.vault) return;
+  const exportedAt = new Date().toISOString();
+  const blob = buildVaultXlsx(state.vault, exportedAt);
+  downloadBlob(blob, `勿忘我-資料匯出-${fileDateTime(exportedAt)}.xlsx`);
+  await rememberDataManagementEvent("lastExcelExportAt", exportedAt);
+}
+
+function buildExportPayload(exportedAt = new Date().toISOString()) {
+  return {
     fileType: "forget-me-not-vault-export",
     schemaVersion: 1,
     appName: "勿忘我",
@@ -519,15 +602,6 @@ function exportData() {
     note: "此檔案只包含人物資料，不包含密碼、資料金鑰或救援碼。",
     vault: state.vault
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `勿忘我-資料備份-${fileDateTime(exportedAt)}.json`);
-}
-
-function exportExcel() {
-  if (!state.vault) return;
-  const exportedAt = new Date().toISOString();
-  const blob = buildVaultXlsx(state.vault, exportedAt);
-  downloadBlob(blob, `勿忘我-資料匯出-${fileDateTime(exportedAt)}.xlsx`);
 }
 
 function downloadBlob(blob, filename) {
@@ -553,20 +627,28 @@ async function importDataFile(event) {
     const importedTagCount = importedVault.interestTags.length;
     if (
       !confirm(
-        `確定要匯入這份資料嗎？\n\n人物：${importedPeopleCount} 位\n興趣喜好：${importedTagCount} 個\n\n匯入會與目前資料合併，不會直接清空現有資料。`
+        `確定要匯入這份資料嗎？\n\n人物：${importedPeopleCount} 位\n興趣喜好：${importedTagCount} 個\n\n匯入會與目前資料合併，不會直接清空現有資料。\n匯入前會先下載一份目前本機資料備份。`
       )
     ) {
       return;
     }
+    exportPreImportBackup();
+    await createLocalSnapshot("匯入前自動快照");
     const merged = mergeVaults(state.vault, importedVault, state.appState.deviceId);
     state.vault = merged.vault;
+    const importedAt = new Date().toISOString();
     const existingConflicts = state.appState.googleDrive.pendingConflicts ?? [];
     state.appState = {
       ...state.appState,
+      dataManagement: {
+        ...(state.appState.dataManagement ?? {}),
+        lastImportAt: importedAt
+      },
       googleDrive: {
         ...state.appState.googleDrive,
-        syncStatus: merged.conflicts.length || existingConflicts.length ? "needsResolution" : state.appState.googleDrive.syncStatus,
+        syncStatus: merged.conflicts.length || existingConflicts.length ? "needsResolution" : syncStatusAfterLocalChange(state.appState.googleDrive),
         pendingConflicts: [...existingConflicts, ...merged.conflicts],
+        lastLocalChangeAt: importedAt,
         lastSyncError: ""
       }
     };
@@ -586,6 +668,25 @@ function readImportVault(payload) {
     return normalizeVault(pruneDeleted(payload));
   }
   throw new Error("invalid-import-file");
+}
+
+function exportPreImportBackup() {
+  const exportedAt = new Date().toISOString();
+  const payload = buildExportPayload(exportedAt);
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  downloadBlob(blob, `勿忘我-匯入前本機備份-${fileDateTime(exportedAt)}.json`);
+}
+
+async function rememberDataManagementEvent(key, value) {
+  state.appState = {
+    ...state.appState,
+    dataManagement: {
+      ...(state.appState.dataManagement ?? {}),
+      [key]: value
+    }
+  };
+  await setItem("appState", state.appState);
+  render();
 }
 
 async function unlockWithMasterPassword(event) {
@@ -839,10 +940,14 @@ function view() {
   if (state.route.name === "settings") return settingsView();
   if (state.route.name === "syncConflicts") return syncConflictsView();
   if (state.route.name === "dataHealth") return dataHealthView();
+  if (state.route.name === "localSnapshots") return localSnapshotsView();
+  if (state.route.name === "syncTroubleshooting") return syncTroubleshootingView();
   if (state.route.name === "driveDeveloperGuide") return driveDeveloperGuideView();
+  if (state.route.name === "oauthProductionGuide") return oauthProductionGuideView();
   if (state.route.name === "driveDiagnostics") return driveDiagnosticsView();
   if (state.route.name === "deleted") return deletedView();
   if (state.route.name === "driveIntro") return driveIntroView();
+  if (state.route.name === "driveCloudChoice") return driveCloudChoiceView();
   if (state.route.name === "driveExistingUnlock") return driveExistingUnlockView();
   if (state.route.name === "setupMasterPassword") return setupMasterPasswordView();
   if (state.route.name === "showRecoveryCode") return showRecoveryCodeView();
@@ -1000,6 +1105,8 @@ function settingsView() {
   const gd = state.appState.googleDrive;
   const authStatus = driveAuthStatus();
   const pendingConflicts = gd.pendingConflicts ?? [];
+  const dataSummary = vaultDataSummary();
+  const dataManagement = state.appState.dataManagement ?? {};
   const syncStatusText = gd.connected
     ? syncStatusLabel(gd)
     : "尚未啟用";
@@ -1014,15 +1121,27 @@ function settingsView() {
       ${authStatus.hasAccessToken ? `<p class="muted">Google 授權：已取得暫時授權</p>` : ""}
       ${authStatus.expiresAt ? `<p class="muted">授權到期：約 ${formatDateTime(authStatus.expiresAt)}</p>` : ""}
       ${gd.connected && !authStatus.hasAccessToken ? `<p class="muted">提醒：若剛重新開啟瀏覽器，首次同步時可能需要重新向 Google 確認授權。</p>` : ""}
+      ${gd.lastLocalChangeAt ? `<p class="muted">本機最近變更：${formatDateTime(gd.lastLocalChangeAt)}</p>` : ""}
       ${gd.lastSyncAt ? `<p class="muted">上次同步：${formatDateTime(gd.lastSyncAt)}</p>` : ""}
       ${gd.lastSyncError ? `<p class="danger-text">${escapeHtml(gd.lastSyncError)}</p>` : ""}
+      ${syncSummaryView(gd.lastSyncSummary)}
       ${pendingConflicts.length ? `<button data-nav="syncConflicts">處理衝突資料</button>` : ""}
       <button class="secondary" data-nav="driveDiagnostics">Google Drive 連線診斷</button>
+      <button class="secondary" data-nav="syncTroubleshooting">同步疑難排解</button>
       ${gd.connected ? `<button class="secondary" data-action="sync-now" ${gd.syncStatus === "syncing" ? "disabled" : ""}>立即同步</button><button class="secondary" data-action="drive-logout">登出 Google Drive</button>` : `<button data-action="drive-placeholder">連結 Google Drive</button>`}
     </section>
     ${gd.connected ? `<section class="panel stack"><h2 class="section-title">安全性</h2><button class="secondary" data-nav="changePassword">更改密碼</button><button class="secondary" data-nav="forgotPassword">忘記密碼</button><button class="secondary" data-nav="regenerateRecovery">重新產生救援碼</button><button class="danger" data-nav="logoutAllDevices">登出所有裝置</button></section>` : ""}
     <section class="panel stack">
       <h2 class="section-title">資料管理</h2>
+      <div class="data-summary">
+        <span>人物 ${dataSummary.peopleCount} 位</span>
+        <span>興趣喜好 ${dataSummary.interestTagCount} 個</span>
+        <span>自訂欄位 ${dataSummary.customFieldCount} 個</span>
+      </div>
+      ${dataManagement.lastJsonExportAt ? `<p class="muted">最近 JSON 備份：${formatDateTime(dataManagement.lastJsonExportAt)}</p>` : ""}
+      ${dataManagement.lastExcelExportAt ? `<p class="muted">最近 Excel 匯出：${formatDateTime(dataManagement.lastExcelExportAt)}</p>` : ""}
+      ${dataManagement.lastImportAt ? `<p class="muted">最近匯入：${formatDateTime(dataManagement.lastImportAt)}</p>` : ""}
+      <button class="secondary" data-nav="localSnapshots">本機資料快照</button>
       <button class="secondary" data-nav="deleted">最近刪除</button>
       <button class="secondary" data-action="export-data">匯出備份檔（JSON）</button>
       <button class="secondary" data-action="export-excel">匯出 Excel（XLSX）</button>
@@ -1036,6 +1155,11 @@ function settingsView() {
       <p>版本：${escapeHtml(APP_CONFIG.appVersion)}</p>
       <p class="muted">快取版本：${escapeHtml(APP_CONFIG.cacheName)}</p>
       <button class="secondary" data-nav="driveDeveloperGuide">Google Drive 開發設定說明</button>
+      <button class="secondary" data-nav="oauthProductionGuide">正式 OAuth 上線檢查</button>
+      <div class="legal-links">
+        <a href="./privacy.html">隱私權政策</a>
+        <a href="./terms.html">服務條款</a>
+      </div>
     </section>
     ${bottomNav("settings")}
   `;
@@ -1075,6 +1199,44 @@ function driveDeveloperGuideView() {
     <section class="panel stack">
       <h2 class="section-title">GitHub Pages 提醒</h2>
       <p class="muted">未來部署後，Google OAuth 的授權來源需要加入正式網址，例如 https://你的帳號.github.io。若使用專案頁，也要確認 PWA 路徑與 Service Worker 範圍。</p>
+    </section>
+  `;
+}
+
+function oauthProductionGuideView() {
+  const environment = oauthEnvironmentInfo();
+  const appUrl = environment.serviceWorkerScopeHint;
+  const privacyUrl = new URL("./privacy.html", appUrl).href;
+  const termsUrl = new URL("./terms.html", appUrl).href;
+  return `
+    <header class="topbar topbar-centered">
+      <button class="secondary" data-nav="settings">返回</button>
+      <h1 class="section-title">正式 OAuth 上線檢查</h1>
+      <span></span>
+    </header>
+    <section class="panel stack">
+      <h2 class="section-title">Google Console 建議填寫</h2>
+      <div class="checklist-item ok"><span>✓</span><span>App 名稱：勿忘我</span></div>
+      <div class="checklist-item ok"><span>✓</span><span>首頁網址：${escapeHtml(appUrl)}</span></div>
+      <div class="checklist-item ok"><span>✓</span><span>隱私權政策：${escapeHtml(privacyUrl)}</span></div>
+      <div class="checklist-item ok"><span>✓</span><span>服務條款：${escapeHtml(termsUrl)}</span></div>
+      <div class="checklist-item ok"><span>✓</span><span>Authorized JavaScript origin：${escapeHtml(environment.origin)}</span></div>
+      <div class="checklist-item ok"><span>✓</span><span>OAuth scope：https://www.googleapis.com/auth/drive.appdata</span></div>
+    </section>
+    <section class="panel stack">
+      <h2 class="section-title">發布順序</h2>
+      <ol class="guide-list">
+        <li>確認 GitHub Pages 正式網址可開啟 App、隱私權政策、服務條款。</li>
+        <li>在 Google Cloud Console 的 OAuth Branding 填入首頁、隱私權政策、服務條款、支援信箱與開發者聯絡信箱。</li>
+        <li>確認 Data Access 只宣告 drive.appdata，並說明用途是「儲存使用者加密後的勿忘我同步資料」。</li>
+        <li>將 Publishing status 從 Testing 發布到 Production。</li>
+        <li>若 Google 要求驗證，依 Verification Center 補充 scope justification 與 demo video。</li>
+      </ol>
+    </section>
+    <section class="panel stack">
+      <h2 class="section-title">資料使用說明</h2>
+      <p class="muted">勿忘我只使用 Google Drive appDataFolder 儲存 App 自己的加密同步檔，不讀取使用者一般 Drive 檔案，不將 Google 使用者資料傳送到開發者伺服器，也不販售或用於廣告。</p>
+      <p class="muted">目前 Google 官方將 drive.appdata 列為 Drive API 的 non-sensitive scope；公開上線仍應提供清楚品牌、隱私政策、資料用途與使用者控制方式。</p>
     </section>
   `;
 }
@@ -1133,6 +1295,107 @@ function checklistItem(item) {
       <span>${escapeHtml(item.text)}</span>
     </div>
   `;
+}
+
+function syncSummaryView(summary) {
+  if (!summary) return "";
+  return `
+    <div class="sync-summary">
+      <strong>上次同步摘要</strong>
+      <span>${summary.hadCloudData ? "已讀取雲端資料" : "雲端尚無既有資料"}</span>
+      <span>本機版本 ${summary.localRevision}，雲端版本 ${summary.cloudRevision}，合併後版本 ${summary.mergedRevision}</span>
+      <span>合併後人物 ${summary.mergedPeopleCount} 位，衝突 ${summary.conflictCount} 筆</span>
+    </div>
+  `;
+}
+
+function localSnapshotsView() {
+  const snapshots = state.localSnapshots ?? [];
+  return `
+    <header class="topbar topbar-centered">
+      <button class="secondary" data-nav="settings">返回</button>
+      <h1 class="section-title">本機資料快照</h1>
+      <span></span>
+    </header>
+    <section class="panel stack">
+      <p class="muted">系統會保留最近 3 份重要修改前的本機快照，可用於誤刪、匯入錯檔或同步衝突後的復原。</p>
+      ${
+        snapshots.length
+          ? snapshots.map(localSnapshotCard).join("")
+          : `<div class="empty">目前尚未建立本機快照。</div>`
+      }
+    </section>
+  `;
+}
+
+function localSnapshotCard(snapshot) {
+  return `
+    <div class="inline-item snapshot-card">
+      <div>
+        <strong>${escapeHtml(snapshot.reason)}</strong>
+        <p class="muted">${formatDateTime(snapshot.createdAt)}，人物 ${snapshot.peopleCount ?? snapshot.vault?.people?.length ?? 0} 位</p>
+      </div>
+      <div class="inline-actions">
+        <button type="button" class="secondary" data-action="download-local-snapshot" data-id="${escapeAttr(snapshot.id)}">下載</button>
+        <button type="button" data-action="restore-local-snapshot" data-id="${escapeAttr(snapshot.id)}">還原</button>
+        <button type="button" class="danger" data-action="delete-local-snapshot" data-id="${escapeAttr(snapshot.id)}">刪除</button>
+      </div>
+    </div>
+  `;
+}
+
+function syncTroubleshootingView() {
+  const gd = state.appState.googleDrive;
+  const authStatus = driveAuthStatus();
+  const issues = syncTroubleshootingItems(gd, authStatus);
+  return `
+    <header class="topbar topbar-centered">
+      <button class="secondary" data-nav="settings">返回</button>
+      <h1 class="section-title">同步疑難排解</h1>
+      <span></span>
+    </header>
+    <section class="panel stack">
+      <p>目前狀態：${syncStatusLabel(gd)}</p>
+      <p class="muted">這裡會把常見同步問題整理成一般使用者看得懂的處理方向。</p>
+      ${issues.map(troubleshootingItem).join("")}
+      <div class="actions">
+        <button type="button" data-action="sync-now">立即同步</button>
+        <button type="button" class="secondary" data-nav="driveDiagnostics">Google Drive 連線診斷</button>
+      </div>
+    </section>
+  `;
+}
+
+function troubleshootingItem(item) {
+  return `
+    <div class="inline-item troubleshoot-item ${item.level}">
+      <strong>${escapeHtml(item.title)}</strong>
+      <span class="muted">${escapeHtml(item.detail)}</span>
+    </div>
+  `;
+}
+
+function syncTroubleshootingItems(gd, authStatus) {
+  const items = [];
+  if (!gd.connected) {
+    items.push({ level: "warn", title: "尚未啟用 Google Drive 同步", detail: "可回到設定頁按「連結 Google Drive」啟用同步。" });
+  }
+  if (gd.connected && !authStatus.hasAccessToken) {
+    items.push({ level: "warn", title: "需要重新確認 Google 授權", detail: "這是正常情況；為避免打擾使用者，App 只會在你按「立即同步」時開啟 Google 授權。" });
+  }
+  if (gd.syncStatus === "needsSync") {
+    items.push({ level: "warn", title: "有本機變更尚未同步", detail: "資料已保存在本機；按「立即同步」後會與 Google Drive 合併並寫回雲端。" });
+  }
+  if (gd.syncStatus === "needsResolution") {
+    items.push({ level: "error", title: "有資料衝突需要處理", detail: "請回設定頁按「處理衝突資料」，逐筆選擇保留本機或雲端內容。" });
+  }
+  if (gd.lastSyncError) {
+    items.push({ level: "error", title: "最近同步失敗", detail: gd.lastSyncError });
+  }
+  if (!items.length) {
+    items.push({ level: "ok", title: "目前沒有明顯同步問題", detail: "若仍覺得資料不一致，可先執行 Google Drive 連線診斷，再手動同步一次。" });
+  }
+  return items;
 }
 
 function dataHealthView() {
@@ -1204,6 +1467,7 @@ function conflictCard(conflict, index) {
 }
 
 function driveIntroView() {
+  const isCreateFromLocal = state.route.mode === "createFromLocal";
   return `
     <header class="topbar">
       <button class="secondary" data-action="cancel-drive-setup">返回</button>
@@ -1211,9 +1475,26 @@ function driveIntroView() {
       <span></span>
     </header>
     <section class="panel stack">
-      <p>連結 Google Drive 後，勿忘我會先在本機建立加密用的資料金鑰，並用你的密碼與救援碼分別保護它。</p>
-      <p class="muted">目前同步模式：${driveProviderLabel()}。未來接上 Google OAuth 後，會沿用同一套加密與同步流程。</p>
+      <p>${isCreateFromLocal ? "將使用目前本機資料建立新的 Google Drive 同步資料。" : "連結 Google Drive 後，勿忘我會先在本機建立加密用的資料金鑰，並用你的密碼與救援碼分別保護它。"}</p>
+      <p class="muted">目前同步模式：${driveProviderLabel()}。資料會先加密後再寫入 Google Drive appDataFolder。</p>
       <button data-nav="setupMasterPassword">開始設定密碼</button>
+    </section>
+  `;
+}
+
+function driveCloudChoiceView() {
+  const dataSummary = vaultDataSummary();
+  return `
+    <header class="topbar topbar-centered">
+      <button class="secondary" data-action="cancel-drive-setup">返回</button>
+      <h1 class="section-title">偵測到雲端資料</h1>
+      <span></span>
+    </header>
+    <section class="panel stack">
+      <p>Google Drive 中已有勿忘我的同步資料。</p>
+      <p class="muted">此裝置目前也有本機資料：人物 ${dataSummary.peopleCount} 位。請選擇要讀取雲端資料，或用目前本機資料建立新的同步資料。</p>
+      <button type="button" data-nav="driveExistingUnlock">讀取既有雲端資料</button>
+      <button type="button" class="secondary" data-action="use-local-drive-setup">使用本機資料建立同步</button>
     </section>
   `;
 }
@@ -1677,6 +1958,7 @@ async function handleAction(event, el) {
   if (action === "start-local") return initializeLocalMode();
   if (action === "apply-update") return applyUpdate();
   if (action === "drive-placeholder") return beginDriveSetup();
+  if (action === "use-local-drive-setup") return useLocalDataForDriveSetup();
   if (action === "cancel-drive-setup") return cancelDriveSetup();
   if (action === "confirm-recovery-saved") return finishRecoveryCode();
   if (action === "sync-now") return syncNow();
@@ -1688,6 +1970,9 @@ async function handleAction(event, el) {
   if (action === "export-data") return exportData();
   if (action === "export-excel") return exportExcel();
   if (action === "choose-import-file") return app.querySelector("[data-import-file]")?.click();
+  if (action === "restore-local-snapshot") return restoreLocalSnapshot(el.dataset.id);
+  if (action === "delete-local-snapshot") return deleteLocalSnapshot(el.dataset.id);
+  if (action === "download-local-snapshot") return downloadLocalSnapshot(el.dataset.id);
   if (action === "open-detail") return navigate(detailRoute(el.dataset.id));
   if (action === "detail-back") return navigateBackFromDetail();
   if (action === "cancel-form") return navigate(state.route.id ? detailRoute(state.route.id) : { name: "home" });
@@ -2019,6 +2304,7 @@ async function resolveSyncConflict(index, source) {
   const conflict = conflicts[index];
   if (!conflict) return;
 
+  await createLocalSnapshot("處理衝突前自動快照");
   const value = source === "remote" ? conflict.remoteValue : conflict.localValue;
   const vault = {
     ...state.vault,
@@ -2039,9 +2325,9 @@ async function resolveSyncConflict(index, source) {
     ...state.appState,
     googleDrive: {
       ...state.appState.googleDrive,
-      syncStatus: conflicts.length ? "needsResolution" : "synced",
+      syncStatus: conflicts.length ? "needsResolution" : syncStatusAfterLocalChange(state.appState.googleDrive),
       pendingConflicts: conflicts,
-      lastSyncAt: new Date().toISOString()
+      lastLocalChangeAt: new Date().toISOString()
     }
   };
   await save();
@@ -2156,9 +2442,55 @@ function formatCustomValue(field, value) {
 
 function syncStatusLabel(gd) {
   if (gd.syncStatus === "needsResolution") return "資料衝突需要處理";
+  if (gd.syncStatus === "needsSync") return "有本機變更尚未同步";
   if (gd.syncStatus === "syncing") return "同步中…";
   if (gd.syncStatus === "error") return "同步失敗";
   return gd.simulated ? `已同步（${driveProviderLabel()}）` : "已同步";
+}
+
+function markLocalVaultChanged() {
+  if (!state.appState?.googleDrive?.connected) return;
+  const gd = state.appState.googleDrive;
+  state.appState = {
+    ...state.appState,
+    googleDrive: {
+      ...gd,
+      syncStatus: syncStatusAfterLocalChange(gd),
+      lastLocalChangeAt: new Date().toISOString()
+    }
+  };
+}
+
+function syncStatusAfterLocalChange(gd) {
+  if (gd.syncStatus === "needsResolution") return "needsResolution";
+  return "needsSync";
+}
+
+function buildSyncSummary({ localBeforeSync, remoteVault, mergedVault, conflicts, syncedAt }) {
+  return {
+    syncedAt,
+    hadCloudData: Boolean(remoteVault),
+    localRevision: localBeforeSync?.syncMeta?.revision ?? 0,
+    cloudRevision: remoteVault?.syncMeta?.revision ?? 0,
+    mergedRevision: mergedVault?.syncMeta?.revision ?? 0,
+    localPeopleCount: localBeforeSync?.people?.length ?? 0,
+    cloudPeopleCount: remoteVault?.people?.length ?? 0,
+    mergedPeopleCount: mergedVault?.people?.length ?? 0,
+    conflictCount: conflicts.length
+  };
+}
+
+function syncAlertMessage(summary, conflictCount) {
+  if (conflictCount) return `已同步，但有 ${conflictCount} 筆資料衝突需要處理`;
+  return `已同步（${driveProviderLabel()}）\n目前共 ${summary.mergedPeopleCount} 位人物`;
+}
+
+function vaultDataSummary() {
+  return {
+    peopleCount: state.vault?.people?.length ?? 0,
+    interestTagCount: state.vault?.interestTags?.length ?? 0,
+    customFieldCount: state.vault?.customFieldDefs?.length ?? 0
+  };
 }
 
 function driveErrorMessage(error, fallback) {

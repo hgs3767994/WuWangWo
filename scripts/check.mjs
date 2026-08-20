@@ -3,6 +3,8 @@ import { access, readFile } from "node:fs/promises";
 const requiredFiles = [
   "README.md",
   "index.html",
+  "privacy.html",
+  "terms.html",
   "manifest.webmanifest",
   "package.json",
   "service-worker.js",
@@ -81,6 +83,17 @@ await check("runtime config loads before app module", () => {
   if (runtimeConfigIndex < 0) throw new Error("index.html must load src/runtime-config.js.");
   if (appModuleIndex < 0) throw new Error("index.html must load src/app.js.");
   if (runtimeConfigIndex > appModuleIndex) throw new Error("runtime-config.js must load before app.js.");
+});
+
+await check("public legal pages exist for OAuth production readiness", async () => {
+  const privacy = await readFile("privacy.html", "utf8");
+  const terms = await readFile("terms.html", "utf8");
+  ["Google Drive", "appDataFolder", "隱私權政策"].forEach((text) => {
+    if (!privacy.includes(text)) throw new Error(`privacy.html must mention ${text}.`);
+  });
+  ["Google Drive", "服務條款"].forEach((text) => {
+    if (!terms.includes(text)) throw new Error(`terms.html must mention ${text}.`);
+  });
 });
 
 await check("GitHub Pages workflow builds deployable dist", () => {

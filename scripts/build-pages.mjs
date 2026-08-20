@@ -6,6 +6,8 @@ const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
 const driveProvider = clientId ? "google" : "mock";
 const entries = [
   "index.html",
+  "privacy.html",
+  "terms.html",
   "manifest.webmanifest",
   "service-worker.js",
   "assets",
