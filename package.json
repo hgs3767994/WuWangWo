@@ -1,0 +1,12 @@
+{
+  "name": "forget-me-not-pwa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev-server.mjs",
+    "build:pages": "node scripts/build-pages.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node scripts/smoke-test.mjs"
+  }
+}
