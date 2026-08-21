@@ -138,11 +138,13 @@ window.FORGET_ME_NOT_CONFIG = {
 
 ```text
 https://www.googleapis.com/auth/drive.appdata
+openid
+email
 ```
 
 請勿在前端放入 Google client secret。
 
-此 scope 在 Google Drive API 文件中屬於 non-sensitive scope，用於檢視與管理 App 自己的設定資料。正式公開給一般 Google 使用者時，仍需在 Google Cloud Console 完成 OAuth branding、隱私權政策、資料用途說明與發布設定。
+`drive.appdata` 用於檢視與管理 App 自己的設定資料；`openid` 與 `email` 用於讀取目前連結的 Google 帳號 Email，並只在 App 內顯示同步帳號。正式公開給一般 Google 使用者時，仍需在 Google Cloud Console 完成 OAuth branding、隱私權政策、資料用途說明與發布設定。
 
 ## 正式 OAuth 上線檢查
 
@@ -153,13 +155,13 @@ Google Cloud Console 建議設定：
 - Privacy policy：GitHub Pages 的 `/privacy.html`
 - Terms of service：GitHub Pages 的 `/terms.html`
 - Authorized JavaScript origins：GitHub Pages origin，例如 `https://hgs3767994.github.io`
-- OAuth scope：`https://www.googleapis.com/auth/drive.appdata`
+- OAuth scope：`https://www.googleapis.com/auth/drive.appdata`、`openid`、`email`
 
 發布順序：
 
 - 先確認 GitHub Pages 正式 App、隱私權政策、服務條款都能公開開啟。
 - 在 OAuth Branding 填入首頁、隱私權政策、服務條款、支援信箱與開發者聯絡信箱。
-- 在 Data Access 只宣告 `drive.appdata`，用途寫明為儲存使用者加密後的勿忘我同步資料。
+- 在 Data Access 宣告 `drive.appdata`、`openid`、`email`；用途寫明為儲存使用者加密後的勿忘我同步資料，並顯示目前連結的 Google 帳號。
 - 將 Publishing status 從 Testing 發布到 Production。
 - 若 Google 要求驗證，依 Verification Center 補 scope justification 與 demo video。
 
@@ -198,7 +200,7 @@ http://localhost:4173
 本次快取版本：
 
 ```text
-forget-me-not-v44
+forget-me-not-v45
 ```
 
 ## 部署提醒

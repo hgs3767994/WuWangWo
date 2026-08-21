@@ -3,12 +3,14 @@ import { APP_CONFIG, isGoogleDriveConfigured } from "./config.js";
 const GIS_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+const USERINFO_API = "https://openidconnect.googleapis.com/v1/userinfo";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata openid email";
 
 let gisLoadPromise = null;
 let tokenClient = null;
 let accessToken = "";
 let tokenExpiresAt = 0;
+let accountEmail = "";
 
 export async function writeGoogleDriveFile(name, content) {
   const existing = await findGoogleDriveFile(name);
@@ -71,7 +73,8 @@ export async function testGoogleDriveConnection() {
 
 export async function connectGoogleDrive(options = {}) {
   await ensureGoogleAccessToken({ interactive: options.interactive !== false });
-  return { connected: true };
+  await refreshGoogleAccountEmail();
+  return { connected: true, accountEmail };
 }
 
 export function disconnectGoogleDrive() {
@@ -80,12 +83,14 @@ export function disconnectGoogleDrive() {
   }
   accessToken = "";
   tokenExpiresAt = 0;
+  accountEmail = "";
 }
 
 export function googleDriveAuthStatus() {
   return {
     hasAccessToken: Boolean(accessToken),
-    expiresAt: tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : ""
+    expiresAt: tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : "",
+    accountEmail
   };
 }
 
@@ -129,6 +134,15 @@ async function googleFetch(url, options = {}) {
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) return response.json();
   return response.text();
+}
+
+async function refreshGoogleAccountEmail() {
+  try {
+    const profile = await googleFetch(USERINFO_API);
+    accountEmail = profile?.email ?? "";
+  } catch {
+    accountEmail = "";
+  }
 }
 
 async function ensureGoogleAccessToken({ interactive = false } = {}) {

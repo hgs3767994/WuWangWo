@@ -221,7 +221,8 @@ async function beginDriveSetup() {
     return;
   }
   try {
-    await connectDrive();
+    const driveConnection = await connectDrive();
+    rememberDriveAccount(driveConnection);
   } catch (error) {
     alert(driveErrorMessage(error, "Google Drive 連線失敗，請稍後再試。"));
     return;
@@ -241,6 +242,7 @@ async function beginDriveSetup() {
           connected: true,
           syncStatus: "synced",
           lastSyncAt: new Date().toISOString(),
+          accountEmail: currentDriveAccountEmail(),
           simulated: isSimulatedDrive()
         }
       };
@@ -260,6 +262,7 @@ async function beginDriveSetup() {
         connected: true,
         syncStatus: "synced",
         lastSyncAt: new Date().toISOString(),
+        accountEmail: currentDriveAccountEmail(),
         simulated: isSimulatedDrive()
       }
     };
@@ -352,6 +355,7 @@ async function setupMasterPassword(event) {
       connected: true,
       syncStatus: "synced",
       lastSyncAt: new Date().toISOString(),
+      accountEmail: currentDriveAccountEmail(),
       simulated: isSimulatedDrive()
     }
   };
@@ -442,6 +446,7 @@ async function unlockExistingDriveVault(event) {
         connected: true,
         syncStatus: "synced",
         lastSyncAt: new Date().toISOString(),
+        accountEmail: currentDriveAccountEmail(),
         simulated: isSimulatedDrive()
       }
     };
@@ -518,6 +523,7 @@ async function mergeExistingDriveVault(event) {
         lastSyncAt: syncedAt,
         lastLocalChangeAt: "",
         lastSyncError: "",
+        accountEmail: currentDriveAccountEmail(),
         lastSyncSummary: buildSyncSummary({ localBeforeSync, remoteVault, mergedVault, conflicts: merged.conflicts, syncedAt }),
         pendingConflicts: merged.conflicts,
         simulated: isSimulatedDrive()
@@ -552,7 +558,8 @@ async function syncNow(options = {}) {
   render();
 
   try {
-    await connectDrive({ interactive: !options.silent });
+    const driveConnection = await connectDrive({ interactive: !options.silent });
+    rememberDriveAccount(driveConnection);
     const remoteEnvelope = await readDriveFile(driveFileName("vault"));
     let conflicts = [];
     const localBeforeSync = structuredClone(state.vault);
@@ -574,6 +581,7 @@ async function syncNow(options = {}) {
         syncStatus: conflicts.length ? "needsResolution" : "synced",
         lastSyncAt: syncedAt,
         lastLocalChangeAt: "",
+        accountEmail: currentDriveAccountEmail(),
         lastSyncSummary: buildSyncSummary({ localBeforeSync, remoteVault, mergedVault: state.vault, conflicts, syncedAt }),
         pendingConflicts: conflicts,
         simulated: isSimulatedDrive(),
@@ -607,7 +615,8 @@ async function logoutGoogleDrive() {
     googleDrive: {
       ...state.appState.googleDrive,
       connected: false,
-      syncStatus: "disabled"
+      syncStatus: "disabled",
+      accountEmail: ""
     }
   };
   await save();
@@ -2590,6 +2599,22 @@ function markDriveSyncIssue(error) {
     }
   };
   void setItem("appState", state.appState);
+}
+
+function rememberDriveAccount(connection = {}) {
+  const accountEmail = connection.accountEmail || driveAuthStatus().accountEmail || "";
+  if (!accountEmail || !state.appState?.googleDrive) return;
+  state.appState = {
+    ...state.appState,
+    googleDrive: {
+      ...state.appState.googleDrive,
+      accountEmail
+    }
+  };
+}
+
+function currentDriveAccountEmail() {
+  return state.appState?.googleDrive?.accountEmail || driveAuthStatus().accountEmail || "";
 }
 
 function isSimulatedDrive() {

@@ -27,7 +27,7 @@ export async function listDriveFiles() {
 }
 
 export async function connectDrive(options = {}) {
-  if (isMockDrive()) return { connected: true };
+  if (isMockDrive()) return { connected: true, accountEmail: "" };
   assertGoogleDriveReady();
   return connectGoogleDrive(options);
 }
@@ -38,7 +38,7 @@ export function disconnectDrive() {
 }
 
 export function driveAuthStatus() {
-  if (isMockDrive()) return { hasAccessToken: false, expiresAt: "" };
+  if (isMockDrive()) return { hasAccessToken: false, expiresAt: "", accountEmail: "" };
   return googleDriveAuthStatus();
 }
 
