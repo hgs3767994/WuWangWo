@@ -18,9 +18,9 @@
         <p>最後更新：2026-08-21</p>
         <p>勿忘我是一個用來記錄人物資料、興趣喜好、自訂欄位與備註的 PWA。資料會優先保存在使用者自己的裝置中；若使用者啟用 Google Drive 同步，資料會在本機加密後儲存在使用者自己的 Google Drive appDataFolder。</p>
         <h2 class="section-title">我們存取的 Google 資料</h2>
-        <p>勿忘我只要求 Google Drive appDataFolder 權限，用於建立、讀取、更新與刪除勿忘我自己的同步檔案。App 不會要求讀取使用者一般 Google Drive 檔案的權限。</p>
+        <p>勿忘我要求 Google Drive appDataFolder 權限，用於建立、讀取、更新與刪除勿忘我自己的同步檔案。App 也會要求 Google 帳號 Email 權限，用於在設定頁顯示目前連結的 Google 帳號。App 不會要求讀取使用者一般 Google Drive 檔案的權限。</p>
         <h2 class="section-title">資料如何使用</h2>
-        <p>Google Drive 權限只用於提供跨裝置同步、資料備份、資料還原與同步診斷。同步資料會先在使用者裝置上加密，才寫入 Google Drive。</p>
+        <p>Google Drive 權限只用於提供跨裝置同步、資料備份、資料還原與同步診斷。Google 帳號 Email 只用於本機顯示目前同步帳號。同步資料會先在使用者裝置上加密，才寫入 Google Drive。</p>
         <h2 class="section-title">資料儲存與分享</h2>
         <p>勿忘我目前沒有後端伺服器，不會把使用者資料傳送到開發者伺服器。使用者資料保存在瀏覽器本機 IndexedDB，以及使用者自行授權的 Google Drive appDataFolder。資料不會出售、出租或提供給廣告平台。</p>
         <h2 class="section-title">使用者控制</h2>
