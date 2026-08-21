@@ -121,7 +121,7 @@ driveProvider: mock
 - `src/drive-google.js`
 - `src/drive-mock.js`
 
-切換真實 Google Drive 時，請在 `src/runtime-config.js` 設定，或直接在 App 的「Google Drive 連線診斷」頁貼上 Client ID：
+切換真實 Google Drive 時，請在 `src/runtime-config.js` 設定 Client ID：
 
 ```js
 window.FORGET_ME_NOT_CONFIG = {
@@ -161,15 +161,7 @@ Google Cloud Console 建議設定：
 - 將 Publishing status 從 Testing 發布到 Production。
 - 若 Google 要求驗證，依 Verification Center 補 scope justification 與 demo video。
 
-切換到 Google Drive 模式並填入 Client ID 後，可到 App：
-
-```text
-設定 → Google Drive 同步 → Google Drive 連線診斷
-```
-
-診斷會建立暫時檔案、讀回驗證後刪除，不會修改正式資料檔。
-
-目前真實 Google Drive 診斷成功後，代表以下流程已打通：
+正式版畫面已移除開發用的 Google Drive 連線診斷、本機 OAuth 測試區與 OAuth 上線檢查入口。開發階段若需要驗證 Google Drive 串接，請使用程式內部測試流程或暫時恢復開發工具頁；驗證成功代表以下流程已打通：
 
 - Google OAuth 授權
 - `appDataFolder` 寫入
@@ -178,11 +170,9 @@ Google Cloud Console 建議設定：
 
 一般使用時，人物資料仍會先穩定保存在本機；若 Google 授權暫時失效，畫面會提醒重新授權，不會因此中斷本機資料儲存。
 
-正式使用時，App 會在設定頁顯示同步狀態與上次同步摘要，包含本機版本、雲端版本、合併後版本、人物數與衝突數。若有本機變更尚未同步，狀態會明確顯示，需由使用者手動按「立即同步」才會開啟 Google 授權。
+正式使用時，App 會在設定頁顯示同步狀態與上次同步摘要，包含本機版本、雲端版本、合併後版本、人物數與衝突數。若有本機變更尚未同步，狀態會明確顯示，需由使用者手動按「立即同步」才會開啟 Google 授權。正式版仍保留「同步疑難排解」，提供一般使用者處理同步問題的方向。
 
-開發測試時，也可以直接在「Google Drive 連線診斷」頁貼上 OAuth Client ID，使用「套用 Google 模式並重新載入」。這會把設定存在目前瀏覽器的 localStorage，不會寫入專案檔案。
-
-診斷頁也會顯示目前 `origin`，請將該值加入 Google Cloud Console：
+開發或部署時，請將 App 來源加入 Google Cloud Console：
 
 ```text
 APIs & Services → Credentials → OAuth 2.0 Client IDs → Authorized JavaScript origins
@@ -206,7 +196,7 @@ http://localhost:4173
 本次快取版本：
 
 ```text
-forget-me-not-v41
+forget-me-not-v42
 ```
 
 ## 部署提醒

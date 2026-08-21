@@ -576,38 +576,6 @@ button:focus-visible,
   margin-top: 8px;
 }
 
-.diagnostic-success {
-  border-color: #86efac;
-  background: #f0fdf4;
-}
-
-.diagnostic-error {
-  border-color: #fecaca;
-  background: #fef2f2;
-}
-
-.checklist-item {
-  display: grid;
-  grid-template-columns: 24px 1fr;
-  gap: 8px;
-  align-items: start;
-  padding: 10px;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: var(--panel);
-  font-size: 13px;
-}
-
-.checklist-item.ok span:first-child {
-  color: var(--success);
-  font-weight: 700;
-}
-
-.checklist-item.warn span:first-child {
-  color: var(--warning);
-  font-weight: 700;
-}
-
 code {
   padding: 2px 4px;
   border-radius: 4px;

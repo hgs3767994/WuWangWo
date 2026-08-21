@@ -1,5 +1,5 @@
 import { getItem, removeItem, setItem } from "./db.js";
-import { connectDrive, disconnectDrive, driveAuthStatus, driveReadiness, listDriveFiles, readDriveFile, testDriveConnection, writeDriveFile } from "./drive.js";
+import { connectDrive, disconnectDrive, driveAuthStatus, driveReadiness, listDriveFiles, readDriveFile, writeDriveFile } from "./drive.js";
 import { APP_CONFIG, driveFileName, driveProviderLabel } from "./config.js";
 import { mergeVaults } from "./sync.js";
 import { buildVaultXlsx } from "./xlsx.js";
@@ -454,56 +454,6 @@ async function syncNow(options = {}) {
   }
 }
 
-async function runDriveDiagnostics() {
-  state.route = { ...state.route, running: true, result: null };
-  render();
-  try {
-    const result = await testDriveConnection();
-    state.route = {
-      ...state.route,
-      running: false,
-      result: {
-        ok: result.ok,
-        fileName: result.fileName,
-        message: result.ok ? "已成功完成授權、寫入、讀取與刪除測試。" : "測試檔讀回內容不一致，請稍後再試。"
-      }
-    };
-  } catch (error) {
-    state.route = {
-      ...state.route,
-      running: false,
-      result: {
-        ok: false,
-        message: driveErrorMessage(error, "Google Drive 連線診斷失敗，請稍後再試。")
-      }
-    };
-  }
-  render();
-}
-
-function applyLocalGoogleConfig() {
-  const clientId = state.route.oauthClientId?.trim() ?? "";
-  if (!clientId.endsWith(".apps.googleusercontent.com")) {
-    alert("OAuth Client ID 格式看起來不正確，應以 .apps.googleusercontent.com 結尾。");
-    return;
-  }
-  localStorage.setItem(
-    "forget-me-not-runtime-config",
-    JSON.stringify({
-      driveProvider: "google",
-      googleDrive: {
-        clientId
-      }
-    })
-  );
-  window.location.reload();
-}
-
-function clearLocalGoogleConfig() {
-  localStorage.removeItem("forget-me-not-runtime-config");
-  window.location.reload();
-}
-
 async function logoutGoogleDrive() {
   if (!confirm("確定要登出 Google Drive 嗎？\n此裝置將停止與 Google Drive 同步，但不會刪除本機資料或雲端資料。")) return;
   disconnectDrive();
@@ -942,9 +892,6 @@ function view() {
   if (state.route.name === "dataHealth") return dataHealthView();
   if (state.route.name === "localSnapshots") return localSnapshotsView();
   if (state.route.name === "syncTroubleshooting") return syncTroubleshootingView();
-  if (state.route.name === "driveDeveloperGuide") return driveDeveloperGuideView();
-  if (state.route.name === "oauthProductionGuide") return oauthProductionGuideView();
-  if (state.route.name === "driveDiagnostics") return driveDiagnosticsView();
   if (state.route.name === "deleted") return deletedView();
   if (state.route.name === "driveIntro") return driveIntroView();
   if (state.route.name === "driveCloudChoice") return driveCloudChoiceView();
@@ -1126,7 +1073,6 @@ function settingsView() {
       ${gd.lastSyncError ? `<p class="danger-text">${escapeHtml(gd.lastSyncError)}</p>` : ""}
       ${syncSummaryView(gd.lastSyncSummary)}
       ${pendingConflicts.length ? `<button data-nav="syncConflicts">處理衝突資料</button>` : ""}
-      <button class="secondary" data-nav="driveDiagnostics">Google Drive 連線診斷</button>
       <button class="secondary" data-nav="syncTroubleshooting">同步疑難排解</button>
       ${gd.connected ? `<button class="secondary" data-action="sync-now" ${gd.syncStatus === "syncing" ? "disabled" : ""}>立即同步</button><button class="secondary" data-action="drive-logout">登出 Google Drive</button>` : `<button data-action="drive-placeholder">連結 Google Drive</button>`}
     </section>
@@ -1154,146 +1100,12 @@ function settingsView() {
       <h2 class="section-title">關於</h2>
       <p>版本：${escapeHtml(APP_CONFIG.appVersion)}</p>
       <p class="muted">快取版本：${escapeHtml(APP_CONFIG.cacheName)}</p>
-      <button class="secondary" data-nav="driveDeveloperGuide">Google Drive 開發設定說明</button>
-      <button class="secondary" data-nav="oauthProductionGuide">正式 OAuth 上線檢查</button>
       <div class="legal-links">
         <a href="./privacy.html">隱私權政策</a>
         <a href="./terms.html">服務條款</a>
       </div>
     </section>
     ${bottomNav("settings")}
-  `;
-}
-
-function driveDeveloperGuideView() {
-  return `
-    <header class="topbar topbar-centered">
-      <button class="secondary" data-nav="settings">返回</button>
-      <h1 class="section-title">Google Drive 開發設定</h1>
-      <span></span>
-    </header>
-    <section class="panel stack">
-      <h2 class="section-title">目前狀態</h2>
-      <p>同步模式：${driveProviderLabel()}</p>
-      <p class="muted">目前 App 預設使用本機模擬同步；正式串接 Google Drive 前，現有資料加密、同步合併與衝突處理流程都可以先繼續測試。</p>
-    </section>
-    <section class="panel stack">
-      <h2 class="section-title">正式串接前需要準備</h2>
-      <ol class="guide-list">
-        <li>建立 Google Cloud 專案。</li>
-        <li>啟用 Google Drive API。</li>
-        <li>建立 OAuth Client ID，類型選擇 Web application。</li>
-        <li>把本機測試網址與未來 GitHub Pages 網址加入 Authorized JavaScript origins。</li>
-        <li>在 src/runtime-config.js 填入 OAuth Client ID。</li>
-        <li>在 src/runtime-config.js 將同步模式從 mock 切換為 google。</li>
-      </ol>
-    </section>
-    <section class="panel stack">
-      <h2 class="section-title">目前設定值</h2>
-      <p>driveProvider：${escapeHtml(APP_CONFIG.driveProvider)}</p>
-      <p>appFolderName：${escapeHtml(APP_CONFIG.googleDrive.appFolderName)}</p>
-      <p>keyPackage 檔名：${escapeHtml(driveFileName("keyPackage"))}</p>
-      <p>vault 檔名：${escapeHtml(driveFileName("vault"))}</p>
-      <p class="muted">Client ID 不在畫面中顯示，避免誤貼或截圖外流。OAuth Client ID 是前端公開設定，不應加入 client secret。</p>
-    </section>
-    <section class="panel stack">
-      <h2 class="section-title">GitHub Pages 提醒</h2>
-      <p class="muted">未來部署後，Google OAuth 的授權來源需要加入正式網址，例如 https://你的帳號.github.io。若使用專案頁，也要確認 PWA 路徑與 Service Worker 範圍。</p>
-    </section>
-  `;
-}
-
-function oauthProductionGuideView() {
-  const environment = oauthEnvironmentInfo();
-  const appUrl = environment.serviceWorkerScopeHint;
-  const privacyUrl = new URL("./privacy.html", appUrl).href;
-  const termsUrl = new URL("./terms.html", appUrl).href;
-  return `
-    <header class="topbar topbar-centered">
-      <button class="secondary" data-nav="settings">返回</button>
-      <h1 class="section-title">正式 OAuth 上線檢查</h1>
-      <span></span>
-    </header>
-    <section class="panel stack">
-      <h2 class="section-title">Google Console 建議填寫</h2>
-      <div class="checklist-item ok"><span>✓</span><span>App 名稱：勿忘我</span></div>
-      <div class="checklist-item ok"><span>✓</span><span>首頁網址：${escapeHtml(appUrl)}</span></div>
-      <div class="checklist-item ok"><span>✓</span><span>隱私權政策：${escapeHtml(privacyUrl)}</span></div>
-      <div class="checklist-item ok"><span>✓</span><span>服務條款：${escapeHtml(termsUrl)}</span></div>
-      <div class="checklist-item ok"><span>✓</span><span>Authorized JavaScript origin：${escapeHtml(environment.origin)}</span></div>
-      <div class="checklist-item ok"><span>✓</span><span>OAuth scope：https://www.googleapis.com/auth/drive.appdata</span></div>
-    </section>
-    <section class="panel stack">
-      <h2 class="section-title">發布順序</h2>
-      <ol class="guide-list">
-        <li>確認 GitHub Pages 正式網址可開啟 App、隱私權政策、服務條款。</li>
-        <li>在 Google Cloud Console 的 OAuth Branding 填入首頁、隱私權政策、服務條款、支援信箱與開發者聯絡信箱。</li>
-        <li>確認 Data Access 只宣告 drive.appdata，並說明用途是「儲存使用者加密後的勿忘我同步資料」。</li>
-        <li>將 Publishing status 從 Testing 發布到 Production。</li>
-        <li>若 Google 要求驗證，依 Verification Center 補充 scope justification 與 demo video。</li>
-      </ol>
-    </section>
-    <section class="panel stack">
-      <h2 class="section-title">資料使用說明</h2>
-      <p class="muted">勿忘我只使用 Google Drive appDataFolder 儲存 App 自己的加密同步檔，不讀取使用者一般 Drive 檔案，不將 Google 使用者資料傳送到開發者伺服器，也不販售或用於廣告。</p>
-      <p class="muted">目前 Google 官方將 drive.appdata 列為 Drive API 的 non-sensitive scope；公開上線仍應提供清楚品牌、隱私政策、資料用途與使用者控制方式。</p>
-    </section>
-  `;
-}
-
-function driveDiagnosticsView() {
-  const result = state.route.result;
-  const running = Boolean(state.route.running);
-  const environment = oauthEnvironmentInfo();
-  return `
-    <header class="topbar topbar-centered">
-      <button class="secondary" data-nav="settings">返回</button>
-      <h1 class="section-title">Google Drive 連線診斷</h1>
-      <span></span>
-    </header>
-    <section class="panel stack">
-      <h2 class="section-title">目前狀態</h2>
-      <p>同步模式：${driveProviderLabel()}</p>
-      <p>Client ID：${escapeHtml(maskClientId(APP_CONFIG.googleDrive.clientId))}</p>
-      <p>目前來源：<code>${escapeHtml(environment.origin)}</code></p>
-      <p class="muted">Google Cloud Console 的 Authorized JavaScript origins 需要加入目前來源。</p>
-      <p class="muted">此測試會建立一個暫時診斷檔，讀回確認後立刻刪除；不會修改正式資料檔。</p>
-      <button type="button" data-action="run-drive-diagnostics" ${running ? "disabled" : ""}>${running ? "測試中…" : "開始連線診斷"}</button>
-    </section>
-    <section class="panel stack">
-      <h2 class="section-title">本機 OAuth 測試設定</h2>
-      <p class="muted">這裡只會把 Client ID 存在目前瀏覽器，用於本機測試；不會寫入專案檔案。</p>
-      <div class="field">
-        <label>OAuth Client ID</label>
-        <input data-route-field="oauthClientId" placeholder="xxxxx.apps.googleusercontent.com" value="${escapeAttr(state.route.oauthClientId ?? APP_CONFIG.googleDrive.clientId ?? "")}" />
-      </div>
-      <div class="actions">
-        <button type="button" data-action="apply-local-google-config">套用 Google 模式並重新載入</button>
-        <button type="button" class="secondary" data-action="clear-local-google-config">清除本機 OAuth 設定</button>
-      </div>
-    </section>
-    <section class="panel stack">
-      <h2 class="section-title">OAuth 設定檢查清單</h2>
-      ${oauthChecklist(environment).map(checklistItem).join("")}
-    </section>
-    ${
-      result
-        ? `<section class="panel stack ${result.ok ? "diagnostic-success" : "diagnostic-error"}">
-            <h2 class="section-title">${result.ok ? "診斷通過" : "診斷失敗"}</h2>
-            <p>${escapeHtml(result.message)}</p>
-            ${result.fileName ? `<p class="muted">測試檔：${escapeHtml(result.fileName)}</p>` : ""}
-          </section>`
-        : ""
-    }
-  `;
-}
-
-function checklistItem(item) {
-  return `
-    <div class="checklist-item ${item.ok ? "ok" : "warn"}">
-      <span>${item.ok ? "✓" : "!"}</span>
-      <span>${escapeHtml(item.text)}</span>
-    </div>
   `;
 }
 
@@ -1360,7 +1172,6 @@ function syncTroubleshootingView() {
       ${issues.map(troubleshootingItem).join("")}
       <div class="actions">
         <button type="button" data-action="sync-now">立即同步</button>
-        <button type="button" class="secondary" data-nav="driveDiagnostics">Google Drive 連線診斷</button>
       </div>
     </section>
   `;
@@ -1393,7 +1204,7 @@ function syncTroubleshootingItems(gd, authStatus) {
     items.push({ level: "error", title: "最近同步失敗", detail: gd.lastSyncError });
   }
   if (!items.length) {
-    items.push({ level: "ok", title: "目前沒有明顯同步問題", detail: "若仍覺得資料不一致，可先執行 Google Drive 連線診斷，再手動同步一次。" });
+    items.push({ level: "ok", title: "目前沒有明顯同步問題", detail: "若仍覺得資料不一致，可回到設定頁手動執行「立即同步」一次。" });
   }
   return items;
 }
@@ -1962,9 +1773,6 @@ async function handleAction(event, el) {
   if (action === "cancel-drive-setup") return cancelDriveSetup();
   if (action === "confirm-recovery-saved") return finishRecoveryCode();
   if (action === "sync-now") return syncNow();
-  if (action === "run-drive-diagnostics") return runDriveDiagnostics();
-  if (action === "apply-local-google-config") return applyLocalGoogleConfig();
-  if (action === "clear-local-google-config") return clearLocalGoogleConfig();
   if (action === "resolve-sync-conflict") return resolveSyncConflict(Number(el.dataset.index), el.dataset.source);
   if (action === "drive-logout") return logoutGoogleDrive();
   if (action === "export-data") return exportData();
@@ -2518,59 +2326,6 @@ function markDriveSyncIssue(error) {
     }
   };
   void setItem("appState", state.appState);
-}
-
-function oauthEnvironmentInfo() {
-  const { origin, protocol, hostname, pathname } = window.location;
-  const isLocalhost = ["localhost", "127.0.0.1", "[::1]"].includes(hostname);
-  const isHttps = protocol === "https:";
-  const isGithubPages = hostname.endsWith(".github.io");
-  return {
-    origin,
-    protocol,
-    hostname,
-    pathname,
-    isLocalhost,
-    isHttps,
-    isGithubPages,
-    serviceWorkerScopeHint: new URL("./", window.location.href).href
-  };
-}
-
-function oauthChecklist(environment) {
-  return [
-    {
-      ok: APP_CONFIG.driveProvider === "google",
-      text: APP_CONFIG.driveProvider === "google" ? "同步模式已切換為 google。" : "目前仍是本機模擬模式；正式測試 OAuth 前需在 runtime-config.js 將 driveProvider 改為 google。"
-    },
-    {
-      ok: Boolean(APP_CONFIG.googleDrive.clientId),
-      text: APP_CONFIG.googleDrive.clientId ? "已設定 OAuth Client ID。" : "尚未設定 OAuth Client ID。"
-    },
-    {
-      ok: environment.isHttps || environment.isLocalhost,
-      text: environment.isHttps || environment.isLocalhost ? "目前網址符合 OAuth 測試基本要求。" : "正式 OAuth 需要 HTTPS；localhost 可作為本機測試例外。"
-    },
-    {
-      ok: true,
-      text: `Authorized JavaScript origins 請加入：${environment.origin}`
-    },
-    {
-      ok: true,
-      text: `Service Worker 目前作用範圍約為：${environment.serviceWorkerScopeHint}`
-    },
-    {
-      ok: !environment.isGithubPages || environment.pathname !== "/",
-      text: environment.isGithubPages ? "GitHub Pages 專案頁請確認 manifest start_url 與 Service Worker 路徑使用相對路徑。" : "若未來部署到 GitHub Pages，請把正式 origin 加入 Google Cloud Console。"
-    }
-  ];
-}
-
-function maskClientId(clientId = "") {
-  if (!clientId) return "尚未設定";
-  const [prefix, ...rest] = clientId.split(".");
-  const maskedPrefix = prefix.length > 10 ? `${prefix.slice(0, 6)}…${prefix.slice(-4)}` : "已設定";
-  return `${maskedPrefix}.${rest.join(".")}`;
 }
 
 function isSimulatedDrive() {
