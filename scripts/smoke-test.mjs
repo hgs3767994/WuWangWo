@@ -64,7 +64,7 @@ function testSyncMerge() {
   assert(result.vault.people[0].phones.length === 2, "phones should be merged");
   assert(result.vault.interestTags.length === 1, "same-name interest tags should merge");
   assert(result.vault.people[0].interestTagIds.length === 1, "person interest ids should be redirected");
-  assert(result.conflicts.length === 2, "nationalId and birthDate should be conflicts");
+  assert(result.conflicts.length === 1 && result.conflicts[0].field === "birthDate", "birthDate should be the remaining user-facing conflict");
   assert(result.vault.syncMeta.revision === 6, "revision should increment from max revision");
 }
 

@@ -55,8 +55,12 @@ export function createPerson(deviceId, input) {
     phones: input.phones ?? [],
     addresses: input.addresses ?? [],
     interestTagIds: input.interestTagIds ?? [],
+    favoriteItems: input.favoriteItems ?? [],
+    familyMembers: input.familyMembers ?? [],
+    lifeEvents: input.lifeEvents ?? [],
     customValues: input.customValues ?? [],
     note: input.note?.trim() || "",
+    archivedAt: input.archivedAt ?? "",
     createdAt: now,
     updatedAt: now,
     updatedByDeviceId: deviceId

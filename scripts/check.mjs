@@ -88,7 +88,7 @@ await check("runtime config loads before app module", () => {
 await check("public legal pages exist for OAuth production readiness", async () => {
   const privacy = await readFile("privacy.html", "utf8");
   const terms = await readFile("terms.html", "utf8");
-  ["Google Drive", "appDataFolder", "隱私權政策"].forEach((text) => {
+  ["Google Drive", "appDataFolder", "Email", "隱私權政策"].forEach((text) => {
     if (!privacy.includes(text)) throw new Error(`privacy.html must mention ${text}.`);
   });
   ["Google Drive", "服務條款"].forEach((text) => {

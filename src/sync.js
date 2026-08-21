@@ -112,13 +112,16 @@ function mergePerson(localPerson, remotePerson, conflicts) {
     phones: mergeMultiValueItems(localPerson.phones, remotePerson.phones),
     addresses: mergeMultiValueItems(localPerson.addresses, remotePerson.addresses),
     interestTagIds: [...new Set([...(localPerson.interestTagIds ?? []), ...(remotePerson.interestTagIds ?? [])])],
+    favoriteItems: mergeMultiValueItems(localPerson.favoriteItems, remotePerson.favoriteItems),
+    familyMembers: mergeById(localPerson.familyMembers ?? [], remotePerson.familyMembers ?? []),
+    lifeEvents: mergeById(localPerson.lifeEvents ?? [], remotePerson.lifeEvents ?? []),
     customValues: mergeCustomValues(localPerson.customValues, remotePerson.customValues),
     note: mergeNote(localPerson, remotePerson),
     updatedAt: newer(localPerson, remotePerson).updatedAt,
     updatedByDeviceId: newer(localPerson, remotePerson).updatedByDeviceId
   };
 
-  ["nationalId", "birthDate"].forEach((field) => {
+  ["birthDate"].forEach((field) => {
     const localValue = localPerson[field] ?? "";
     const remoteValue = remotePerson[field] ?? "";
     if (localValue && remoteValue && localValue !== remoteValue) {

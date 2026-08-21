@@ -24,15 +24,15 @@ function buildSheets(vault) {
     {
       name: "人物",
       rows: [
-        ["人物ID", "姓名", "身分證字號", "生日", "主要電話", "主要地址", "興趣喜好", "其它備註", "建立時間", "更新時間"],
+        ["人物ID", "姓名", "生日", "主要電話", "主要地址", "興趣喜好", "是否封存", "其它備註", "建立時間", "更新時間"],
         ...people.map((person) => [
           person.id,
           person.name,
-          person.nationalId,
           person.birthDate,
           defaultValue(person.phones),
           defaultValue(person.addresses),
           (person.interestTagIds ?? []).map(tagName).join("、"),
+          person.archivedAt ? "是" : "",
           person.note,
           person.createdAt,
           person.updatedAt
@@ -84,14 +84,57 @@ function buildSheets(vault) {
       ]
     },
     {
+      name: "嗜好品",
+      rows: [
+        ["人物ID", "姓名", "嗜好品", "建立時間", "更新時間"],
+        ...people.flatMap((person) => (person.favoriteItems ?? []).map((item) => [
+          person.id,
+          person.name,
+          item.value,
+          item.createdAt,
+          item.updatedAt
+        ]))
+      ]
+    },
+    {
+      name: "家族成員",
+      rows: [
+        ["人物ID", "姓名", "稱謂", "成員姓名", "連結人物ID", "建立時間", "更新時間"],
+        ...people.flatMap((person) => (person.familyMembers ?? []).map((member) => [
+          person.id,
+          person.name,
+          member.relationship,
+          member.name,
+          member.personId,
+          member.createdAt,
+          member.updatedAt
+        ]))
+      ]
+    },
+    {
+      name: "重大事件",
+      rows: [
+        ["人物ID", "姓名", "日期", "內容", "建立時間", "更新時間"],
+        ...people.flatMap((person) => (person.lifeEvents ?? []).map((event) => [
+          person.id,
+          person.name,
+          event.date,
+          event.text,
+          event.createdAt,
+          event.updatedAt
+        ]))
+      ]
+    },
+    {
       name: "自訂欄位",
       rows: [
-        ["欄位ID", "欄位名稱", "欄位類型", "使用範圍", "指定人物ID", "指定人物姓名", "建立時間", "更新時間"],
+        ["欄位ID", "欄位名稱", "欄位類型", "套用範圍", "選項", "指定人物ID", "指定人物姓名", "建立時間", "更新時間"],
         ...customFields.map((field) => [
           field.id,
           field.name,
           field.type,
           field.scope === "global" ? "所有人物" : "僅此人物",
+          (field.options ?? []).join("、"),
           field.personId ?? "",
           field.personId ? personName(field.personId) : "",
           field.createdAt,
@@ -108,7 +151,7 @@ function buildSheets(vault) {
           person.name,
           value.fieldId,
           fieldName(value.fieldId),
-          value.value,
+          formatCellValue(value.value),
           value.updatedAt
         ]))
       ]
@@ -119,6 +162,11 @@ function buildSheets(vault) {
 function defaultValue(items = []) {
   const item = [...items].sort((a, b) => Number(b.isDefault) - Number(a.isDefault))[0];
   return item ? `${item.label} ${item.value}` : "";
+}
+
+function formatCellValue(value) {
+  if (Array.isArray(value)) return value.join("、");
+  return value ?? "";
 }
 
 function worksheetXml(rows) {

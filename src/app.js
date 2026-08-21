@@ -26,6 +26,8 @@ import {
 } from "./model.js";
 
 const app = document.querySelector("#app");
+const FAMILY_RELATIONSHIP_ORDER = ["父", "母", "配偶", "子", "女", "兄", "姐", "弟", "妹"];
+const FAMILY_RELATIONSHIP_OPTIONS = [...FAMILY_RELATIONSHIP_ORDER, "其它"];
 let state = {
   appState: null,
   dekBytes: null,
@@ -34,6 +36,7 @@ let state = {
   route: { name: "loading" },
   updateAvailable: false,
   waitingServiceWorker: null,
+  serviceWorkerRegistration: null,
   installPromptEvent: null,
   installDismissed: localStorage.getItem("forget-me-not-install-dismissed") === "true",
   isInstalled: isPwaInstalled()
@@ -105,6 +108,7 @@ async function checkTrustedSessionStillValid(appState, trustedSession) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./service-worker.js").then((registration) => {
+      state.serviceWorkerRegistration = registration;
       registration.addEventListener("updatefound", () => {
         const worker = registration.installing;
         if (!worker) return;
@@ -1034,6 +1038,52 @@ function applyUpdate() {
   window.location.reload();
 }
 
+async function checkVersionUpdate() {
+  const registration = state.serviceWorkerRegistration ?? await navigator.serviceWorker?.getRegistration?.();
+  if (!registration) {
+    alert("已是最新版本");
+    return;
+  }
+  try {
+    const updatePromise = waitForServiceWorkerUpdate(registration);
+    await registration.update();
+    await updatePromise;
+    const hasUpdate = Boolean(registration.waiting || state.waitingServiceWorker || state.updateAvailable);
+    if (!hasUpdate) {
+      alert("已是最新版本");
+      return;
+    }
+    if (confirm("發現新版本，是否更新？")) applyUpdate();
+  } catch {
+    alert("暫時無法檢查更新，請稍後再試");
+  }
+}
+
+function waitForServiceWorkerUpdate(registration) {
+  if (registration.waiting || state.waitingServiceWorker || state.updateAvailable) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(resolve, 2500);
+    registration.addEventListener(
+      "updatefound",
+      () => {
+        const installing = registration.installing;
+        if (!installing) {
+          window.clearTimeout(timeout);
+          resolve();
+          return;
+        }
+        installing.addEventListener("statechange", () => {
+          if (["installed", "activated", "redundant"].includes(installing.state)) {
+            window.clearTimeout(timeout);
+            resolve();
+          }
+        });
+      },
+      { once: true }
+    );
+  });
+}
+
 function view() {
   if (state.route.name === "welcome") return welcomeView();
   if (!state.vault) return `<div class="empty">載入中…</div>`;
@@ -1045,6 +1095,7 @@ function view() {
   if (state.route.name === "syncConflicts") return syncConflictsView();
   if (state.route.name === "dataHealth") return dataHealthView();
   if (state.route.name === "localSnapshots") return localSnapshotsView();
+  if (state.route.name === "archived") return archivedPeopleView();
   if (state.route.name === "syncTroubleshooting") return syncTroubleshootingView();
   if (state.route.name === "installGuide") return installGuideView();
   if (state.route.name === "deleted") return deletedView();
@@ -1078,18 +1129,21 @@ function welcomeView() {
 }
 
 function homeView() {
-  const people = sortPeople(state.vault.people);
+  const people = visiblePeople(state.vault.people);
   return `
-    <header class="home-header">
+    <header class="home-header app-header">
+      <div></div>
       <h1 class="title">勿忘我</h1>
-      <div class="home-actions">
-        <button data-nav="new">＋ 新增人物</button>
-        <button class="secondary" data-nav="search">搜尋</button>
+      <div class="icon-actions" aria-label="首頁操作">
+        <button type="button" class="icon-button" data-nav="search" aria-label="搜尋">${iconSvg("search")}</button>
+        <button type="button" class="icon-button" data-nav="settings" aria-label="設定">${iconSvg("settings")}</button>
       </div>
     </header>
+    <div class="home-actions">
+      <button data-nav="new">＋ 新增人物</button>
+    </div>
     ${installPromptCard("home")}
     ${people.length ? people.map(personCard).join("") : `<div class="empty">還沒有任何人物，先新增一位吧。</div>`}
-    ${bottomNav("home")}
   `;
 }
 
@@ -1130,7 +1184,7 @@ function searchView() {
 }
 
 function personFormView(person = null) {
-  const draft = person ? structuredClone(person) : createPerson(state.appState.deviceId, { name: "" });
+  const draft = person ? structuredClone(person) : createPerson(state.appState.deviceId, { name: state.route.prefillName ?? "" });
   state.route.draft ??= normalizeDraft(draft);
   const d = state.route.draft;
   const title = person ? "編輯人物" : "新增人物";
@@ -1142,11 +1196,13 @@ function personFormView(person = null) {
     </header>
     <form class="stack" data-form="person">
       ${inputField("姓名 *", "name", d.name)}
-      ${inputField("身分證字號", "nationalId", d.nationalId)}
       ${inputField("生日", "birthDate", d.birthDate, "date")}
       ${listEditor("電話", "phones", d.phones, ["手機", "家裡", "公司", "其它"], "電話號碼")}
       ${listEditor("地址", "addresses", d.addresses, ["住家", "公司", "其它"], "地址")}
       ${interestEditor(d.interestTagIds)}
+      ${favoriteItemsEditor(d.favoriteItems)}
+      ${familyMembersEditor(d.familyMembers, d.id)}
+      ${lifeEventsEditor(d.lifeEvents)}
       ${customFieldEditor(d)}
       <section class="panel">
         <div class="field">
@@ -1163,8 +1219,10 @@ function personFormView(person = null) {
 function detailView(person) {
   if (!person) return notFoundView();
   const tags = person.interestTagIds.map((id) => state.vault.interestTags.find((tag) => tag.id === id)).filter(Boolean);
+  const favoriteItems = person.favoriteItems ?? [];
+  const familyMembers = sortFamilyMembers(person.familyMembers ?? []);
+  const lifeEvents = sortLifeEvents(person.lifeEvents ?? []);
   const identityLines = [
-    person.nationalId ? detailLine("身分證字號", person.nationalId, `<button class="secondary" data-copy="${escapeAttr(person.nationalId)}">複製</button>`) : "",
     person.birthDate ? detailLine("生日", person.birthDate) : ""
   ]
     .filter(Boolean)
@@ -1172,7 +1230,7 @@ function detailView(person) {
   const customLines = customDefsForPerson(person.id)
     .map((field) => {
       const value = person.customValues.find((item) => item.fieldId === field.id)?.value;
-      if (value === undefined || value === "") return "";
+      if (isEmptyCustomValue(value)) return "";
       return detailLine(field.name, formatCustomValue(field, value), "", "custom-detail-line");
     })
     .filter(Boolean)
@@ -1182,6 +1240,9 @@ function detailView(person) {
       person.phones.length ||
       person.addresses.length ||
       tags.length ||
+      favoriteItems.length ||
+      familyMembers.length ||
+      lifeEvents.length ||
       customLines ||
       person.note
   );
@@ -1191,16 +1252,21 @@ function detailView(person) {
       <h1 class="section-title">${escapeHtml(person.name)}</h1>
       <span></span>
     </header>
+    ${person.archivedAt ? `<div class="inline-item archived-banner"><strong>已封存</strong><span class="muted">此人物不會顯示於首頁或搜尋結果。</span></div>` : ""}
     ${identityLines ? `<section class="panel">${identityLines}</section>` : ""}
     ${person.phones.length ? detailGroup("電話", sortDefaultFirst(person.phones).map((phone) => detailLine(`${phone.label} ${phone.value}`, "", `<a class="button-link" href="tel:${escapeAttr(phone.value)}">撥打</a><button class="secondary" data-copy="${escapeAttr(phone.value)}">複製</button>`)).join("")) : ""}
     ${person.addresses.length ? detailGroup("地址", sortDefaultFirst(person.addresses).map((address) => detailLine(`${address.label} ${address.value}`, "", `<button class="secondary" data-copy="${escapeAttr(address.value)}">複製</button>`)).join("")) : ""}
     ${tags.length ? detailGroup("興趣喜好", `<div class="chip-list">${tags.map((tag) => `<span class="chip selected">${tagLabel(tag)}</span>`).join("")}</div>`) : ""}
+    ${favoriteItems.length ? detailGroup("嗜好品", `<div class="chip-list">${favoriteItems.map((item) => `<span class="chip selected">${escapeHtml(item.value)}</span>`).join("")}</div>`) : ""}
+    ${familyMembers.length ? detailGroup("家族成員", familyMembers.map(familyMemberLine).join("")) : ""}
+    ${lifeEvents.length ? detailGroup("重大事件", lifeEvents.map(lifeEventLine).join("")) : ""}
     ${customLines ? detailGroup("自訂欄位", customLines) : ""}
     ${person.note ? detailGroup("其它備註", `<p>${escapeHtml(person.note).replaceAll("\n", "<br>")}</p>`) : ""}
     ${hasDetailContent ? "" : `<section class="panel blank-detail-card"></section>`}
     <div class="actions detail-actions">
       <button data-action="edit-person" data-id="${person.id}">編輯人物</button>
       <button class="danger" data-action="delete-person" data-id="${person.id}">刪除人物</button>
+      <button class="secondary" data-action="archive-person" data-id="${person.id}" ${person.archivedAt ? "disabled" : ""}>封存</button>
     </div>
   `;
 }
@@ -1252,6 +1318,7 @@ function settingsView() {
       <button class="secondary" data-action="export-excel">匯出 Excel（XLSX）</button>
       <button class="secondary" data-action="choose-import-file">匯入資料</button>
       <button class="secondary" data-nav="dataHealth">資料完整性檢查</button>
+      <button class="secondary" data-nav="archived">查看封存人物</button>
       <input type="file" accept="application/json,.json" data-import-file hidden />
       <p class="muted">JSON 備份檔可用於匯入復原；Excel 檔適合人工檢視。匯出的資料不包含密碼、資料金鑰或救援碼；請自行妥善保存，避免他人取得。</p>
     </section>
@@ -1259,6 +1326,7 @@ function settingsView() {
       <h2 class="section-title">關於</h2>
       <p>版本：${escapeHtml(APP_CONFIG.appVersion)}</p>
       <p class="muted">快取版本：${escapeHtml(APP_CONFIG.cacheName)}</p>
+      <button type="button" class="secondary" data-action="check-version-update">檢查版本更新</button>
       <div class="legal-links">
         <a href="./privacy.html">隱私權政策</a>
         <a href="./terms.html">服務條款</a>
@@ -1388,6 +1456,34 @@ function localSnapshotsView() {
           ? snapshots.map(localSnapshotCard).join("")
           : `<div class="empty">目前尚未建立本機快照。</div>`
       }
+    </section>
+  `;
+}
+
+function archivedPeopleView() {
+  const archived = sortPeople((state.vault.people ?? []).filter((person) => person.archivedAt));
+  return `
+    <header class="topbar topbar-centered">
+      <button class="secondary" data-nav="settings">返回</button>
+      <h1 class="section-title">封存人物</h1>
+      <span></span>
+    </header>
+    ${
+      archived.length
+        ? archived.map(archivedPersonCard).join("")
+        : `<div class="empty">目前沒有封存人物。</div>`
+    }
+  `;
+}
+
+function archivedPersonCard(person) {
+  return `
+    <section class="panel archived-person-card">
+      <strong>${escapeHtml(person.name)}</strong>
+      <div class="inline-actions">
+        <button type="button" class="secondary" data-action="restore-archived-person" data-id="${person.id}">還原</button>
+        <button type="button" class="danger" data-action="delete-archived-person" data-id="${person.id}">永久刪除</button>
+      </div>
     </section>
   `;
 }
@@ -1760,6 +1856,33 @@ function personCard(person) {
   `;
 }
 
+function familyMemberLine(member) {
+  const linked = member.personId ? getPerson(member.personId) : null;
+  const canOpen = linked && !linked.archivedAt;
+  const name = member.name || linked?.name || "";
+  const action = canOpen
+    ? `<button type="button" class="ghost link-button" data-action="open-detail" data-id="${escapeAttr(linked.id)}">${escapeHtml(name)}</button>`
+    : name
+      ? linked?.archivedAt
+        ? `<span class="muted">${escapeHtml(name)}</span>`
+        : `<button type="button" class="ghost link-button" data-action="new-person-prefill" data-name="${escapeAttr(name)}">${escapeHtml(name)}</button>`
+      : "";
+  return `<div class="detail-line"><span>${escapeHtml(member.relationship)}</span><span>${action}</span></div>`;
+}
+
+function lifeEventLine(event) {
+  const date = event.date ? formatCustomValue({ type: "date" }, event.date) : "未填日期";
+  return detailLine(date, event.text);
+}
+
+function iconSvg(name) {
+  const paths = {
+    search: `<circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path>`,
+    settings: `<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06-2 3.46-.08-.02a1.65 1.65 0 0 0-1.82.33 1.65 1.65 0 0 0-.5 1.72h-4a1.65 1.65 0 0 0-.5-1.72 1.65 1.65 0 0 0-1.82-.33l-.08.02-2-3.46.06-.06A1.65 1.65 0 0 0 4.6 15 1.65 1.65 0 0 0 3 13.5v-3A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06 2-3.46.08.02A1.65 1.65 0 0 0 8.1 3.35 1.65 1.65 0 0 0 8.6 1.63h4a1.65 1.65 0 0 0 .5 1.72 1.65 1.65 0 0 0 1.82.33l.08-.02 2 3.46-.06.06A1.65 1.65 0 0 0 19.4 9 1.65 1.65 0 0 0 21 10.5v3A1.65 1.65 0 0 0 19.4 15z"></path>`
+  };
+  return `<svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[name] ?? ""}</svg>`;
+}
+
 function inputField(label, field, value, type = "text") {
   return `<section class="panel"><h2 class="section-title">${label}</h2><input type="${type}" data-field="${field}" value="${escapeAttr(value)}" /></section>`;
 }
@@ -1799,7 +1922,7 @@ function interestEditor(selectedIds) {
       <div class="chip-list">${state.vault.interestTags.map((tag) => interestOption(tag, selectedIds.includes(tag.id), managing)).join("")}</div>
       ${managing ? interestManageForm() : ""}
       <div class="actions">
-        <button type="button" class="secondary" data-action="toggle-interest-manage">新增/移除興趣喜好</button>
+        <button type="button" class="secondary" data-action="toggle-interest-manage">${managing ? "完成編輯" : "新增/移除興趣喜好"}</button>
         <button type="button" class="secondary" data-action="restore-default-interests">恢復預設興趣喜好</button>
       </div>
     </section>
@@ -1827,6 +1950,92 @@ function interestManageForm() {
         <button type="button" class="secondary" data-action="cancel-interest-manage">取消</button>
       </div>
     </div>
+  `;
+}
+
+function favoriteItemsEditor(rows) {
+  return `
+    <section class="panel">
+      <h2 class="section-title">嗜好品</h2>
+      <div class="stack">
+        ${rows.length ? rows.map((row, index) => `
+          <div class="inline-item">
+            <input data-favorite-item="${index}" placeholder="例如：咖啡、紅酒、雪茄" value="${escapeAttr(row.value)}" />
+            <div class="actions">
+              <button type="button" class="danger" data-action="remove-favorite-item" data-index="${index}">刪除</button>
+            </div>
+          </div>
+        `).join("") : `<p class="muted">尚未新增嗜好品。</p>`}
+      </div>
+      <div class="actions">
+        <button type="button" class="secondary" data-action="add-favorite-item">＋ 新增嗜好品</button>
+      </div>
+    </section>
+  `;
+}
+
+function familyMembersEditor(rows, currentPersonId) {
+  const suggestions = visiblePeople(state.vault.people).filter((person) => person.id !== currentPersonId);
+  const listId = `family-name-options-${currentPersonId}`;
+  return `
+    <section class="panel">
+      <h2 class="section-title">家族成員</h2>
+      <datalist id="${listId}">
+        ${suggestions.map((person) => `<option value="${escapeAttr(person.name)}" data-person-id="${escapeAttr(person.id)}"></option>`).join("")}
+      </datalist>
+      <div class="stack">
+        ${rows.length ? rows.map((row, index) => familyMemberEditorRow(row, index, listId)).join("") : `<p class="muted">尚未新增家族成員。</p>`}
+      </div>
+      <div class="actions">
+        <button type="button" class="secondary" data-action="add-family-member">＋ 新增家族成員</button>
+      </div>
+    </section>
+  `;
+}
+
+function familyMemberEditorRow(row, index, listId) {
+  const preset = FAMILY_RELATIONSHIP_ORDER.includes(row.relationship) ? row.relationship : "其它";
+  return `
+    <div class="inline-item">
+      <div class="row">
+        <select data-family-member="${index}" data-prop="relationshipPreset">
+          ${FAMILY_RELATIONSHIP_OPTIONS.map((label) => `<option value="${label}" ${preset === label ? "selected" : ""}>${label}</option>`).join("")}
+        </select>
+        <input data-family-member="${index}" data-prop="name" list="${listId}" placeholder="姓名" value="${escapeAttr(row.name)}" />
+      </div>
+      ${
+        preset === "其它"
+          ? `<div class="field"><label>自訂稱謂</label><input data-family-member="${index}" data-prop="customRelationship" placeholder="例如：表哥" value="${escapeAttr(customRelationshipValue(row))}" /></div>`
+          : ""
+      }
+      <div class="actions">
+        <button type="button" class="danger" data-action="remove-family-member" data-index="${index}">刪除</button>
+      </div>
+    </div>
+  `;
+}
+
+function lifeEventsEditor(rows) {
+  return `
+    <section class="panel">
+      <h2 class="section-title">重大事件</h2>
+      <div class="stack">
+        ${rows.length ? rows.map((row, index) => `
+          <div class="inline-item">
+            <div class="row">
+              <input type="date" data-life-event="${index}" data-prop="date" value="${escapeAttr(row.date)}" />
+              <input data-life-event="${index}" data-prop="text" placeholder="事件內容" value="${escapeAttr(row.text)}" />
+            </div>
+            <div class="actions">
+              <button type="button" class="danger" data-action="remove-life-event" data-index="${index}">刪除</button>
+            </div>
+          </div>
+        `).join("") : `<p class="muted">尚未新增重大事件。</p>`}
+      </div>
+      <div class="actions">
+        <button type="button" class="secondary" data-action="add-life-event">＋ 新增重大事件</button>
+      </div>
+    </section>
   `;
 }
 
@@ -1862,7 +2071,8 @@ function customFieldEditor(person) {
 }
 
 function customFieldAddForm() {
-  const draft = state.route.customFieldDraft ?? { name: "", type: "text", scope: "person" };
+  const draft = state.route.customFieldDraft ?? { name: "", type: "text", scope: "person", options: [], newOption: "" };
+  const needsOptions = isChoiceField(draft);
   return `
     <div class="inline-item manage-form">
       <div class="field">
@@ -1875,15 +2085,29 @@ function customFieldAddForm() {
           <option value="text" ${draft.type === "text" ? "selected" : ""}>文字</option>
           <option value="number" ${draft.type === "number" ? "selected" : ""}>數字</option>
           <option value="date" ${draft.type === "date" ? "selected" : ""}>日期</option>
+          <option value="single" ${draft.type === "single" ? "selected" : ""}>單選</option>
+          <option value="multi" ${draft.type === "multi" ? "selected" : ""}>多選</option>
         </select>
       </div>
       <div class="field">
-        <label>使用範圍</label>
+        <label>套用範圍</label>
         <select data-custom-draft="scope">
           <option value="global" ${draft.scope === "global" ? "selected" : ""}>所有人物</option>
           <option value="person" ${draft.scope === "person" ? "selected" : ""}>僅此人物</option>
         </select>
       </div>
+      ${
+        needsOptions
+          ? `<div class="field">
+              <label>選項</label>
+              <div class="chip-list">${(draft.options ?? []).map((option, index) => `<span class="tag-option"><span class="chip selected">${escapeHtml(option)}</span><button type="button" class="danger mini" data-action="remove-custom-field-draft-option" data-index="${index}">移除</button></span>`).join("")}</div>
+              <div class="row manage-form">
+                <input data-custom-draft="newOption" placeholder="新增選項" value="${escapeAttr(draft.newOption ?? "")}" />
+                <button type="button" class="secondary" data-action="add-custom-field-draft-option">新增</button>
+              </div>
+            </div>`
+          : ""
+      }
       <div class="actions">
         <button type="button" data-action="confirm-add-custom-field">確認</button>
         <button type="button" class="secondary" data-action="cancel-custom-field-add">取消</button>
@@ -1894,6 +2118,17 @@ function customFieldAddForm() {
 
 function customFieldInput(field, person, editing) {
   const current = person.customValues.find((item) => item.fieldId === field.id)?.value ?? "";
+  if (isChoiceField(field)) {
+    return `
+      <div class="inline-item custom-field-card">
+        <div class="field">
+          <label>${escapeHtml(field.name)}</label>
+          <div class="chip-list">${(field.options ?? []).map((option) => choiceChip(field, current, option)).join("")}</div>
+        </div>
+        ${editing ? customFieldActions(field) : ""}
+      </div>
+    `;
+  }
   const type = field.type === "number" ? "number" : field.type === "date" ? "date" : "text";
   return `
     <div class="inline-item custom-field-card">
@@ -1909,12 +2144,45 @@ function customFieldInput(field, person, editing) {
 function customFieldActions(field) {
   const canEditInline = state.route.editingCustomFieldId === field.id;
   return `
-    <div class="inline-actions">
+    <div class="stack">
+      <div class="inline-actions">
       ${
         canEditInline
           ? `<input data-route-field="editingCustomFieldName" value="${escapeAttr(state.route.editingCustomFieldName ?? field.name)}" /><button type="button" data-action="confirm-rename-custom-field" data-id="${field.id}">確認改名</button><button type="button" class="secondary" data-action="cancel-rename-custom-field">取消</button>`
           : `<button type="button" class="secondary" data-action="start-rename-custom-field" data-id="${field.id}">變更欄位名稱</button><button type="button" class="danger" data-action="delete-custom-field" data-id="${field.id}">刪除</button>`
       }
+      </div>
+      ${isChoiceField(field) ? customFieldOptionEditor(field) : ""}
+    </div>
+  `;
+}
+
+function choiceChip(field, current, option) {
+  const selected = field.type === "multi" ? (Array.isArray(current) && current.includes(option)) : current === option;
+  return `<button type="button" class="chip ${selected ? "selected" : ""}" data-action="toggle-custom-choice" data-field-id="${field.id}" data-option="${escapeAttr(option)}">${selected ? "✓ " : ""}${escapeHtml(option)}</button>`;
+}
+
+function customFieldOptionEditor(field) {
+  const newValue = state.route.newCustomOptionNames?.[field.id] ?? "";
+  return `
+    <div class="inline-item">
+      <strong>選項設定</strong>
+      <div class="stack">
+        ${(field.options ?? []).map((option) => {
+          const draftName = state.route.editingCustomOptionNames?.[field.id]?.[option] ?? option;
+          return `
+            <div class="row">
+              <input data-custom-option-name="${field.id}" data-option="${escapeAttr(option)}" value="${escapeAttr(draftName)}" />
+              <button type="button" class="secondary" data-action="rename-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">改名</button>
+              <button type="button" class="danger" data-action="delete-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">刪除</button>
+            </div>
+          `;
+        }).join("")}
+      </div>
+      <div class="row">
+        <input data-custom-option-new="${field.id}" placeholder="新增選項" value="${escapeAttr(newValue)}" />
+        <button type="button" class="secondary" data-action="add-custom-option" data-field-id="${field.id}">新增選項</button>
+      </div>
     </div>
   `;
 }
@@ -1964,8 +2232,24 @@ function bind() {
   });
   app.querySelectorAll("[data-custom-draft]").forEach((el) => {
     el.addEventListener("input", () => {
-      state.route.customFieldDraft ??= { name: "", type: "text", scope: "person" };
+      state.route.customFieldDraft ??= { name: "", type: "text", scope: "person", options: [], newOption: "" };
       state.route.customFieldDraft[el.dataset.customDraft] = el.value;
+    });
+    el.addEventListener("change", () => {
+      if (["type", "scope"].includes(el.dataset.customDraft)) render();
+    });
+  });
+  app.querySelectorAll("[data-custom-option-name]").forEach((el) => {
+    el.addEventListener("input", () => {
+      state.route.editingCustomOptionNames ??= {};
+      state.route.editingCustomOptionNames[el.dataset.customOptionName] ??= {};
+      state.route.editingCustomOptionNames[el.dataset.customOptionName][el.dataset.option] = el.value;
+    });
+  });
+  app.querySelectorAll("[data-custom-option-new]").forEach((el) => {
+    el.addEventListener("input", () => {
+      state.route.newCustomOptionNames ??= {};
+      state.route.newCustomOptionNames[el.dataset.customOptionNew] = el.value;
     });
   });
   app.querySelectorAll("[data-password-draft]").forEach((el) => {
@@ -1983,6 +2267,21 @@ function bind() {
   app.querySelectorAll("[data-list]").forEach((el) => {
     el.addEventListener("input", () => {
       const row = state.route.draft[el.dataset.list][Number(el.dataset.index)];
+      row[el.dataset.prop] = el.value;
+    });
+  });
+  app.querySelectorAll("[data-favorite-item]").forEach((el) => {
+    el.addEventListener("input", () => {
+      state.route.draft.favoriteItems[Number(el.dataset.favoriteItem)].value = el.value;
+    });
+  });
+  app.querySelectorAll("[data-family-member]").forEach((el) => {
+    el.addEventListener("input", () => updateFamilyMemberDraft(el));
+    el.addEventListener("change", () => updateFamilyMemberDraft(el));
+  });
+  app.querySelectorAll("[data-life-event]").forEach((el) => {
+    el.addEventListener("input", () => {
+      const row = state.route.draft.lifeEvents[Number(el.dataset.lifeEvent)];
       row[el.dataset.prop] = el.value;
     });
   });
@@ -2038,6 +2337,7 @@ async function handleAction(event, el) {
   const action = el.dataset.action;
   if (action === "start-local") return initializeLocalMode();
   if (action === "apply-update") return applyUpdate();
+  if (action === "check-version-update") return checkVersionUpdate();
   if (action === "install-app") return installApp();
   if (action === "open-install-guide") return navigate({ name: "installGuide" });
   if (action === "dismiss-install-tip") return dismissInstallTip();
@@ -2059,11 +2359,21 @@ async function handleAction(event, el) {
   if (action === "cancel-form") return navigate(state.route.id ? detailRoute(state.route.id) : { name: "home" });
   if (action === "edit-person") return navigate({ name: "edit", id: el.dataset.id, returnTo: state.route.returnTo });
   if (action === "delete-person") return deletePerson(el.dataset.id);
+  if (action === "archive-person") return archivePerson(el.dataset.id);
+  if (action === "restore-archived-person") return restoreArchivedPerson(el.dataset.id);
+  if (action === "delete-archived-person") return deleteArchivedPerson(el.dataset.id);
   if (action === "restore-person") return restorePerson(el.dataset.id);
   if (action === "purge-person") return purgePerson(el.dataset.id);
   if (action === "add-list-item") return addListItem(el.dataset.listKey);
   if (action === "remove-list-item") return removeListItem(el.dataset.listKey, Number(el.dataset.index));
   if (action === "set-default") return setDefault(el.dataset.listKey, Number(el.dataset.index));
+  if (action === "add-favorite-item") return addFavoriteItem();
+  if (action === "remove-favorite-item") return removeFavoriteItem(Number(el.dataset.index));
+  if (action === "add-family-member") return addFamilyMember();
+  if (action === "remove-family-member") return removeFamilyMember(Number(el.dataset.index));
+  if (action === "add-life-event") return addLifeEvent();
+  if (action === "remove-life-event") return removeLifeEvent(Number(el.dataset.index));
+  if (action === "new-person-prefill") return navigate({ name: "new", prefillName: el.dataset.name });
   if (action === "toggle-interest") return toggleInterest(el.dataset.id);
   if (action === "search-tag") return toggleSearchTag(el.dataset.id);
   if (action === "toggle-interest-manage") return toggleInterestManage();
@@ -2073,12 +2383,18 @@ async function handleAction(event, el) {
   if (action === "restore-default-interests") return restoreDefaultInterests();
   if (action === "toggle-custom-field-add") return toggleCustomFieldAdd();
   if (action === "toggle-custom-field-edit") return toggleCustomFieldEdit();
+  if (action === "add-custom-field-draft-option") return addCustomFieldDraftOption();
+  if (action === "remove-custom-field-draft-option") return removeCustomFieldDraftOption(Number(el.dataset.index));
   if (action === "confirm-add-custom-field") return addCustomField();
   if (action === "cancel-custom-field-add") return cancelCustomFieldAdd();
   if (action === "start-rename-custom-field") return startRenameCustomField(el.dataset.id);
   if (action === "confirm-rename-custom-field") return confirmRenameCustomField(el.dataset.id);
   if (action === "cancel-rename-custom-field") return cancelRenameCustomField();
   if (action === "delete-custom-field") return deleteCustomFieldById(el.dataset.id);
+  if (action === "toggle-custom-choice") return toggleCustomChoice(el.dataset.fieldId, el.dataset.option);
+  if (action === "add-custom-option") return addCustomOption(el.dataset.fieldId);
+  if (action === "rename-custom-option") return renameCustomOption(el.dataset.fieldId, el.dataset.option);
+  if (action === "delete-custom-option") return deleteCustomOption(el.dataset.fieldId, el.dataset.option);
   if (action === "apply-search") return render();
   if (action === "clear-search") return navigate({ name: "search", params: { text: "", address: "", tagIds: [] } });
 }
@@ -2099,6 +2415,10 @@ async function savePersonForm(event) {
     note: draft.note.trim(),
     phones: cleanList(draft.phones),
     addresses: cleanList(draft.addresses),
+    favoriteItems: cleanFavoriteItems(draft.favoriteItems),
+    familyMembers: cleanFamilyMembers(draft.familyMembers, draft.id),
+    lifeEvents: cleanLifeEvents(draft.lifeEvents),
+    customValues: cleanCustomValues(draft.customValues),
     updatedAt: now,
     updatedByDeviceId: state.appState.deviceId
   };
@@ -2132,6 +2452,74 @@ function removeListItem(key, index) {
 function setDefault(key, index) {
   state.route.draft[key] = state.route.draft[key].map((item, i) => ({ ...item, isDefault: i === index }));
   render();
+}
+
+function addFavoriteItem() {
+  state.route.draft.favoriteItems.push(newTimestampedRow("favorite"));
+  render();
+}
+
+function removeFavoriteItem(index) {
+  state.route.draft.favoriteItems.splice(index, 1);
+  render();
+}
+
+function addFamilyMember() {
+  state.route.draft.familyMembers.push({
+    ...newTimestampedRow("family"),
+    relationship: "父",
+    customRelationship: "",
+    name: "",
+    personId: ""
+  });
+  render();
+}
+
+function removeFamilyMember(index) {
+  state.route.draft.familyMembers.splice(index, 1);
+  render();
+}
+
+function addLifeEvent() {
+  state.route.draft.lifeEvents.push({
+    ...newTimestampedRow("event"),
+    date: "",
+    text: ""
+  });
+  render();
+}
+
+function removeLifeEvent(index) {
+  state.route.draft.lifeEvents.splice(index, 1);
+  render();
+}
+
+function newTimestampedRow(prefix) {
+  const now = new Date().toISOString();
+  return {
+    id: `${prefix}-${crypto.randomUUID()}`,
+    value: "",
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function updateFamilyMemberDraft(el) {
+  const row = state.route.draft.familyMembers[Number(el.dataset.familyMember)];
+  if (!row) return;
+  const prop = el.dataset.prop;
+  if (prop === "relationshipPreset") {
+    row.relationship = el.value === "其它" ? "" : el.value;
+    row.customRelationship = "";
+    render();
+    return;
+  }
+  row[prop] = el.value;
+  if (prop === "customRelationship") row.relationship = el.value;
+  if (prop === "name") {
+    const matched = findUniqueVisiblePersonByName(el.value, state.route.draft.id);
+    row.personId = matched?.id ?? "";
+  }
 }
 
 function toggleInterest(id) {
@@ -2227,7 +2615,7 @@ async function restoreDefaultInterests() {
 
 function toggleCustomFieldAdd() {
   state.route.customFieldAdd = !state.route.customFieldAdd;
-  state.route.customFieldDraft ??= { name: "", type: "text", scope: "person" };
+  state.route.customFieldDraft ??= { name: "", type: "text", scope: "person", options: [], newOption: "" };
   render();
 }
 
@@ -2240,18 +2628,27 @@ function toggleCustomFieldEdit() {
 
 function cancelCustomFieldAdd() {
   state.route.customFieldAdd = false;
-  state.route.customFieldDraft = { name: "", type: "text", scope: "person" };
+  state.route.customFieldDraft = { name: "", type: "text", scope: "person", options: [], newOption: "" };
   render();
 }
 
 async function addCustomField() {
-  const draft = state.route.customFieldDraft ?? { name: "", type: "text", scope: "person" };
+  const draft = state.route.customFieldDraft ?? { name: "", type: "text", scope: "person", options: [], newOption: "" };
   const cleanName = draft.name.trim();
   if (!cleanName) {
     alert("欄位名稱不可空白");
     return;
   }
   const type = draft.type;
+  const options = cleanCustomOptions(draft.options ?? []);
+  if (type === "single" && options.length < 2) {
+    alert("單選欄位至少需要 2 個選項");
+    return;
+  }
+  if (type === "multi" && options.length < 1) {
+    alert("多選欄位至少需要 1 個選項");
+    return;
+  }
   const scope = draft.scope;
   const personId = scope === "person" ? state.route.draft.id : undefined;
   if (state.vault.customFieldDefs.some((field) => field.name === cleanName && field.scope === scope && field.personId === personId)) {
@@ -2263,15 +2660,34 @@ async function addCustomField() {
     id: `custom-${crypto.randomUUID()}`,
     name: cleanName,
     type,
+    options: isChoiceField({ type }) ? options : [],
     scope,
     personId,
     createdAt: now,
     updatedAt: now,
     updatedByDeviceId: state.appState.deviceId
   };
-  state.route.customFieldDraft = { name: "", type: "text", scope: "person" };
+  state.route.customFieldDraft = { name: "", type: "text", scope: "person", options: [], newOption: "" };
   state.route.customFieldAdd = false;
   await commitVault({ ...state.vault, customFieldDefs: [...state.vault.customFieldDefs, field] });
+}
+
+function addCustomFieldDraftOption() {
+  state.route.customFieldDraft ??= { name: "", type: "text", scope: "person", options: [], newOption: "" };
+  const cleanName = state.route.customFieldDraft.newOption?.trim() ?? "";
+  if (!cleanName) {
+    alert("選項名稱不可空白");
+    return;
+  }
+  const options = cleanCustomOptions([...(state.route.customFieldDraft.options ?? []), cleanName]);
+  state.route.customFieldDraft = { ...state.route.customFieldDraft, options, newOption: "" };
+  render();
+}
+
+function removeCustomFieldDraftOption(index) {
+  state.route.customFieldDraft ??= { name: "", type: "text", scope: "person", options: [], newOption: "" };
+  state.route.customFieldDraft.options = (state.route.customFieldDraft.options ?? []).filter((_, i) => i !== index);
+  render();
 }
 
 function startRenameCustomField(id) {
@@ -2341,6 +2757,95 @@ async function deleteCustomField(field) {
   await commitVault(vault);
 }
 
+function toggleCustomChoice(fieldId, option) {
+  const field = state.vault.customFieldDefs.find((item) => item.id === fieldId);
+  if (!field || !state.route.draft) return;
+  const current = getCustomValue(state.route.draft, fieldId);
+  if (field.type === "single") {
+    const next = current === option ? "" : option;
+    setCustomValue(state.route.draft, fieldId, next);
+  } else if (field.type === "multi") {
+    const values = Array.isArray(current) ? current : [];
+    const next = values.includes(option) ? values.filter((item) => item !== option) : [...values, option];
+    setCustomValue(state.route.draft, fieldId, next);
+  }
+  render();
+}
+
+async function addCustomOption(fieldId) {
+  const cleanName = state.route.newCustomOptionNames?.[fieldId]?.trim() ?? "";
+  const field = state.vault.customFieldDefs.find((item) => item.id === fieldId);
+  if (!field || !isChoiceField(field)) return;
+  if (!cleanName) {
+    alert("選項名稱不可空白");
+    return;
+  }
+  const options = cleanCustomOptions([...(field.options ?? []), cleanName]);
+  if (options.length === (field.options ?? []).length) {
+    alert("同名選項已存在");
+    return;
+  }
+  state.route.newCustomOptionNames = { ...(state.route.newCustomOptionNames ?? {}), [fieldId]: "" };
+  await updateCustomFieldOptions(fieldId, options);
+}
+
+async function renameCustomOption(fieldId, oldName) {
+  const field = state.vault.customFieldDefs.find((item) => item.id === fieldId);
+  if (!field || !isChoiceField(field)) return;
+  const cleanName = state.route.editingCustomOptionNames?.[fieldId]?.[oldName]?.trim() ?? oldName;
+  if (!cleanName) {
+    alert("選項名稱不可空白");
+    return;
+  }
+  if (cleanName !== oldName && (field.options ?? []).includes(cleanName)) {
+    alert("同名選項已存在");
+    return;
+  }
+  const options = (field.options ?? []).map((option) => (option === oldName ? cleanName : option));
+  const people = state.vault.people.map((person) => ({
+    ...person,
+    customValues: renameCustomOptionInValues(person.customValues, fieldId, oldName, cleanName)
+  }));
+  state.route.editingCustomOptionNames = { ...(state.route.editingCustomOptionNames ?? {}), [fieldId]: {} };
+  await commitVault({
+    ...state.vault,
+    customFieldDefs: state.vault.customFieldDefs.map((item) => (item.id === fieldId ? { ...item, options, updatedAt: new Date().toISOString(), updatedByDeviceId: state.appState.deviceId } : item)),
+    people
+  });
+}
+
+async function deleteCustomOption(fieldId, optionName) {
+  const field = state.vault.customFieldDefs.find((item) => item.id === fieldId);
+  if (!field || !isChoiceField(field)) return;
+  if (!confirm(`確定要刪除選項「${optionName}」嗎？\n已使用此選項的人物資料會同步移除此值。`)) return;
+  const options = (field.options ?? []).filter((option) => option !== optionName);
+  if (field.type === "single" && options.length < 2) {
+    alert("單選欄位至少需要保留 2 個選項");
+    return;
+  }
+  if (field.type === "multi" && options.length < 1) {
+    alert("多選欄位至少需要保留 1 個選項");
+    return;
+  }
+  const people = state.vault.people.map((person) => ({
+    ...person,
+    customValues: removeCustomOptionFromValues(person.customValues, fieldId, optionName)
+  }));
+  if (state.route.draft) state.route.draft.customValues = removeCustomOptionFromValues(state.route.draft.customValues, fieldId, optionName);
+  await commitVault({
+    ...state.vault,
+    customFieldDefs: state.vault.customFieldDefs.map((item) => (item.id === fieldId ? { ...item, options, updatedAt: new Date().toISOString(), updatedByDeviceId: state.appState.deviceId } : item)),
+    people
+  });
+}
+
+async function updateCustomFieldOptions(fieldId, options) {
+  await commitVault({
+    ...state.vault,
+    customFieldDefs: state.vault.customFieldDefs.map((item) => (item.id === fieldId ? { ...item, options, updatedAt: new Date().toISOString(), updatedByDeviceId: state.appState.deviceId } : item))
+  });
+}
+
 async function deletePerson(id) {
   const person = getPerson(id);
   if (!person) return;
@@ -2358,6 +2863,64 @@ async function deletePerson(id) {
     tombstones: [...state.vault.tombstones, { id, type: "person", deletedAt: now.toISOString(), expiresAt }]
   };
   state.route = { name: "home" };
+  await commitVault(vault);
+}
+
+async function archivePerson(id) {
+  const person = getPerson(id);
+  if (!person || person.archivedAt) return;
+  if (!confirm(`確定要封存「${person.name}」嗎？\n封存後不會顯示於首頁與搜尋結果。`)) return;
+  const now = new Date().toISOString();
+  const vault = {
+    ...state.vault,
+    people: state.vault.people.map((item) =>
+      item.id === id
+        ? { ...item, archivedAt: now, updatedAt: now, updatedByDeviceId: state.appState.deviceId }
+        : item
+    )
+  };
+  state.route = { name: "home" };
+  await commitVault(vault);
+}
+
+async function restoreArchivedPerson(id) {
+  const person = getPerson(id);
+  if (!person || !person.archivedAt) return;
+  if (!confirm(`確定要還原「${person.name}」嗎？`)) return;
+  const now = new Date().toISOString();
+  const vault = {
+    ...state.vault,
+    people: state.vault.people.map((item) =>
+      item.id === id
+        ? { ...item, archivedAt: "", updatedAt: now, updatedByDeviceId: state.appState.deviceId }
+        : item
+    )
+  };
+  await commitVault(vault);
+}
+
+async function deleteArchivedPerson(id) {
+  const person = getPerson(id);
+  if (!person || !person.archivedAt) return;
+  if (!confirm("確定要永久刪除這位封存人物嗎？刪除後會移到最近刪除，可在保留期限內恢復。")) return;
+  await deletePersonToRecentlyDeleted(person, { returnRoute: { name: "archived" }, confirmFirst: false });
+}
+
+async function deletePersonToRecentlyDeleted(person, { returnRoute = { name: "home" }, confirmFirst = true } = {}) {
+  if (confirmFirst && !confirm(`確定要刪除「${person.name}」嗎？\n刪除後 5 天內可從最近刪除還原。`)) return;
+  const now = new Date();
+  const restoreUntil = new Date(now.getTime() + 5 * 86400000).toISOString();
+  const expiresAt = new Date(now.getTime() + 30 * 86400000).toISOString();
+  const vault = {
+    ...state.vault,
+    people: state.vault.people.filter((item) => item.id !== person.id),
+    deletedItems: [
+      ...state.vault.deletedItems,
+      { id: person.id, type: "person", deletedAt: now.toISOString(), deletedByDeviceId: state.appState.deviceId, restoreUntil, snapshot: person }
+    ],
+    tombstones: [...state.vault.tombstones, { id: person.id, type: "person", deletedAt: now.toISOString(), expiresAt }]
+  };
+  state.route = returnRoute;
   await commitVault(vault);
 }
 
@@ -2419,8 +2982,8 @@ function buildDataHealthReport() {
   const issues = [];
   const tagIds = new Set(state.vault.interestTags.map((tag) => tag.id));
   const fieldIds = new Set(state.vault.customFieldDefs.map((field) => field.id));
-  const personNames = countBy(state.vault.people, (person) => person.name.trim());
-  const nationalIds = countBy(state.vault.people, (person) => person.nationalId.trim());
+  const people = visiblePeople(state.vault.people);
+  const personNames = countBy(people, (person) => person.name.trim());
   const tagNames = countBy(state.vault.interestTags, (tag) => tag.name.trim());
   const globalFieldNames = countBy(
     state.vault.customFieldDefs.filter((field) => field.scope === "global"),
@@ -2433,17 +2996,7 @@ function buildDataHealthReport() {
       issues.push({
         title: "姓名重複",
         detail: `「${name}」出現 ${count} 次，請確認是否為不同人物或重複建立。`,
-        personIds: state.vault.people.filter((person) => person.name.trim() === name).map((person) => person.id)
-      });
-    });
-
-  Object.entries(nationalIds)
-    .filter(([, count]) => count > 1)
-    .forEach(([nationalId, count]) => {
-      issues.push({
-        title: "身分證字號重複",
-        detail: `「${nationalId}」出現 ${count} 次，請確認是否有重複人物資料。`,
-        personIds: state.vault.people.filter((person) => person.nationalId.trim() === nationalId).map((person) => person.id)
+        personIds: people.filter((person) => person.name.trim() === name).map((person) => person.id)
       });
     });
 
@@ -2459,7 +3012,7 @@ function buildDataHealthReport() {
       issues.push({ title: "全域自訂欄位名稱重複", detail: `「${name}」出現 ${count} 次，可能會讓使用者混淆。` });
     });
 
-  state.vault.people.forEach((person) => {
+  people.forEach((person) => {
     (person.interestTagIds ?? [])
       .filter((id) => !tagIds.has(id))
       .forEach((id) => {
@@ -2489,7 +3042,7 @@ function searchPeople(params) {
   const text = params.text.trim().toLowerCase();
   const address = params.address.trim().toLowerCase();
   const tagIds = params.tagIds;
-  const matched = state.vault.people.filter((person) => {
+  const matched = visiblePeople(state.vault.people).filter((person) => {
     const textMatch =
       !text ||
       [person.name, person.note, ...person.customValues.map((value) => String(value.value))]
@@ -2517,6 +3070,7 @@ function customDefsForPerson(personId) {
 }
 
 function formatCustomValue(field, value) {
+  if (Array.isArray(value)) return value.join("、");
   if (field.type === "date" && value) return String(value).replaceAll("-", "/");
   return String(value);
 }
@@ -2651,7 +3205,6 @@ function fileDateTime(value) {
 
 function fieldLabel(field) {
   const labels = {
-    nationalId: "身分證字號",
     birthDate: "生日"
   };
   return labels[field] ?? field;
@@ -2702,7 +3255,11 @@ function normalizeDraft(draft) {
     phones: draft.phones?.length ? draft.phones : [],
     addresses: draft.addresses?.length ? draft.addresses : [],
     interestTagIds: draft.interestTagIds ?? [],
+    favoriteItems: draft.favoriteItems ?? [],
+    familyMembers: draft.familyMembers ?? [],
+    lifeEvents: draft.lifeEvents ?? [],
     customValues: draft.customValues ?? [],
+    archivedAt: draft.archivedAt ?? "",
     note: draft.note ?? ""
   };
 }
@@ -2725,6 +3282,144 @@ function ensureSingleDefault(rows) {
 
 function sortDefaultFirst(rows) {
   return [...rows].sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
+function cleanFavoriteItems(rows = []) {
+  const now = new Date().toISOString();
+  return rows
+    .map((row) => ({ ...row, value: row.value?.trim() ?? "" }))
+    .filter((row) => row.value)
+    .map((row) => ({ ...row, updatedAt: now }));
+}
+
+function cleanFamilyMembers(rows = [], currentPersonId = "") {
+  const now = new Date().toISOString();
+  return rows
+    .map((row) => {
+      const relationship = (row.relationship || row.customRelationship || "").trim();
+      const name = (row.name ?? "").trim();
+      const linked = row.personId ? visiblePeople(state.vault.people).find((person) => person.id === row.personId && person.id !== currentPersonId) : null;
+      const autoLinked = linked ? linked : findUniqueVisiblePersonByName(name, currentPersonId);
+      return {
+        ...row,
+        relationship,
+        customRelationship: row.customRelationship?.trim() ?? "",
+        name,
+        personId: autoLinked?.id ?? "",
+        updatedAt: now
+      };
+    })
+    .filter((row) => row.relationship && row.name)
+    .sort(compareFamilyMembers);
+}
+
+function cleanLifeEvents(rows = []) {
+  const now = new Date().toISOString();
+  return sortLifeEvents(
+    rows
+      .map((row) => ({ ...row, date: row.date ?? "", text: row.text?.trim() ?? "", updatedAt: now }))
+      .filter((row) => row.text)
+  );
+}
+
+function cleanCustomValues(values = []) {
+  return values
+    .map((item) => ({ ...item, value: Array.isArray(item.value) ? item.value.filter(Boolean) : item.value }))
+    .filter((item) => !isEmptyCustomValue(item.value));
+}
+
+function isEmptyCustomValue(value) {
+  return value === undefined || value === "" || (Array.isArray(value) && value.length === 0);
+}
+
+function getCustomValue(person, fieldId) {
+  return person.customValues.find((item) => item.fieldId === fieldId)?.value ?? "";
+}
+
+function setCustomValue(person, fieldId, value) {
+  const customValues = person.customValues.filter((item) => item.fieldId !== fieldId);
+  if (isEmptyCustomValue(value)) {
+    person.customValues = customValues;
+    return;
+  }
+  person.customValues = [
+    ...customValues,
+    { fieldId, value, updatedAt: new Date().toISOString(), updatedByDeviceId: state.appState.deviceId }
+  ];
+}
+
+function cleanCustomOptions(options = []) {
+  const seen = new Set();
+  return options
+    .map((option) => String(option ?? "").trim())
+    .filter((option) => {
+      if (!option || seen.has(option)) return false;
+      seen.add(option);
+      return true;
+    });
+}
+
+function isChoiceField(field) {
+  return field?.type === "single" || field?.type === "multi";
+}
+
+function renameCustomOptionInValues(values = [], fieldId, oldName, newName) {
+  return values.map((item) => {
+    if (item.fieldId !== fieldId) return item;
+    if (Array.isArray(item.value)) {
+      return { ...item, value: item.value.map((value) => (value === oldName ? newName : value)) };
+    }
+    return item.value === oldName ? { ...item, value: newName } : item;
+  });
+}
+
+function removeCustomOptionFromValues(values = [], fieldId, optionName) {
+  return values
+    .map((item) => {
+      if (item.fieldId !== fieldId) return item;
+      if (Array.isArray(item.value)) return { ...item, value: item.value.filter((value) => value !== optionName) };
+      return item.value === optionName ? { ...item, value: "" } : item;
+    })
+    .filter((item) => !isEmptyCustomValue(item.value));
+}
+
+function sortFamilyMembers(rows = []) {
+  return [...rows].sort(compareFamilyMembers);
+}
+
+function compareFamilyMembers(a, b) {
+  const aIndex = FAMILY_RELATIONSHIP_ORDER.indexOf(a.relationship);
+  const bIndex = FAMILY_RELATIONSHIP_ORDER.indexOf(b.relationship);
+  const aRank = aIndex >= 0 ? aIndex : FAMILY_RELATIONSHIP_ORDER.length;
+  const bRank = bIndex >= 0 ? bIndex : FAMILY_RELATIONSHIP_ORDER.length;
+  if (aRank !== bRank) return aRank - bRank;
+  return new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime();
+}
+
+function sortLifeEvents(rows = []) {
+  return [...rows].sort((a, b) => {
+    if (a.date && b.date && a.date !== b.date) return b.date.localeCompare(a.date);
+    if (a.date && !b.date) return -1;
+    if (!a.date && b.date) return 1;
+    return new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime();
+  });
+}
+
+function visiblePeople(people = []) {
+  return sortPeople(people.filter((person) => !person.archivedAt));
+}
+
+function findUniqueVisiblePersonByName(name, excludeId = "") {
+  const cleanName = name.trim();
+  if (!cleanName) return null;
+  const matches = visiblePeople(state.vault.people).filter((person) => person.id !== excludeId && person.name.trim() === cleanName);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function customRelationshipValue(row) {
+  if (row.customRelationship) return row.customRelationship;
+  if (row.relationship && !FAMILY_RELATIONSHIP_ORDER.includes(row.relationship)) return row.relationship;
+  return "";
 }
 
 function escapeHtml(value) {
