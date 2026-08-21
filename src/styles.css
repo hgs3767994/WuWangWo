@@ -197,6 +197,32 @@ textarea {
   flex-wrap: wrap;
 }
 
+.install-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+  border-color: rgba(91, 158, 166, 0.42);
+  background: linear-gradient(135deg, var(--panel), var(--accent-soft));
+}
+
+.install-card .section-title {
+  margin-bottom: 4px;
+}
+
+.install-card p {
+  margin: 0;
+}
+
+.install-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .title {
   margin: 0;
   font-size: 28px;
@@ -510,6 +536,11 @@ button:focus-visible,
   border-color: #fed7aa;
 }
 
+.storage-warning {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
 .data-summary {
   display: flex;
   gap: 8px;
@@ -606,6 +637,18 @@ code {
 @media (max-width: 520px) {
   .app {
     padding-inline: 12px;
+  }
+
+  .install-card {
+    grid-template-columns: 1fr;
+  }
+
+  .install-actions {
+    justify-content: stretch;
+  }
+
+  .install-actions button {
+    flex: 1 1 auto;
   }
 
   .topbar {

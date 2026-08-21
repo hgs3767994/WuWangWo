@@ -1,10 +1,16 @@
 {
   "name": "勿忘我",
   "short_name": "勿忘我",
+  "description": "記錄人物資料、興趣喜好與重要備註的 personal CRM PWA。",
+  "id": "./",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
+  "lang": "zh-Hant",
+  "dir": "ltr",
   "background_color": "#F4F6F5",
   "theme_color": "#24443D",
+  "categories": ["productivity", "lifestyle", "utilities"],
   "icons": [
     {
       "src": "./assets/icon.svg",

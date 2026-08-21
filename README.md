@@ -4,6 +4,8 @@
 
 目前專案以純前端靜態檔案運作，資料先保存在瀏覽器本機 IndexedDB；若啟用 Google Drive，同步會使用真實 OAuth 與 `appDataFolder` 儲存加密資料。
 
+正式版包含 PWA 安裝體驗：支援安裝提示、安裝教學、App 模式偵測與更新提示。
+
 ## 本機開發
 
 ```bash
@@ -196,7 +198,7 @@ http://localhost:4173
 本次快取版本：
 
 ```text
-forget-me-not-v42
+forget-me-not-v44
 ```
 
 ## 部署提醒

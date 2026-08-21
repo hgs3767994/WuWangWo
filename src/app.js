@@ -33,7 +33,10 @@ let state = {
   localSnapshots: [],
   route: { name: "loading" },
   updateAvailable: false,
-  waitingServiceWorker: null
+  waitingServiceWorker: null,
+  installPromptEvent: null,
+  installDismissed: localStorage.getItem("forget-me-not-install-dismissed") === "true",
+  isInstalled: isPwaInstalled()
 };
 
 async function boot() {
@@ -60,6 +63,7 @@ async function boot() {
         };
         render();
         registerServiceWorker();
+        registerInstallExperience();
         return;
       }
       try {
@@ -69,6 +73,7 @@ async function boot() {
         state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock" } };
         render();
         registerServiceWorker();
+        registerInstallExperience();
         return;
       }
     }
@@ -78,6 +83,7 @@ async function boot() {
   }
   render();
   registerServiceWorker();
+  registerInstallExperience();
 }
 
 async function checkTrustedSessionStillValid(appState, trustedSession) {
@@ -117,6 +123,76 @@ function registerServiceWorker() {
       window.location.reload();
     });
   }
+}
+
+function registerInstallExperience() {
+  if (state.installExperienceRegistered) return;
+  state.installExperienceRegistered = true;
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    state.installPromptEvent = event;
+    state.isInstalled = isPwaInstalled();
+    render();
+  });
+  window.addEventListener("appinstalled", () => {
+    state.installPromptEvent = null;
+    state.isInstalled = true;
+    state.installDismissed = true;
+    localStorage.setItem("forget-me-not-install-dismissed", "true");
+    render();
+  });
+  window.matchMedia?.("(display-mode: standalone)")?.addEventListener?.("change", () => {
+    state.isInstalled = isPwaInstalled();
+    render();
+  });
+}
+
+function isPwaInstalled() {
+  return Boolean(
+    window.matchMedia?.("(display-mode: standalone)")?.matches ||
+      window.navigator.standalone
+  );
+}
+
+function shouldShowInstallPromptCard() {
+  if (isPwaInstalled()) return false;
+  if (state.installDismissed) return false;
+  return Boolean(state.installPromptEvent || isLikelyIosSafari());
+}
+
+function isLikelyIosSafari() {
+  const ua = navigator.userAgent.toLowerCase();
+  const isIos = /iphone|ipad|ipod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isSafari = /safari/.test(ua) && !/crios|fxios|edgios/.test(ua);
+  return isIos && isSafari;
+}
+
+async function installApp() {
+  if (!state.installPromptEvent) {
+    navigate({ name: "installGuide" });
+    return;
+  }
+  const promptEvent = state.installPromptEvent;
+  state.installPromptEvent = null;
+  try {
+    await promptEvent.prompt();
+    const choice = await promptEvent.userChoice;
+    if (choice?.outcome === "accepted") {
+      state.isInstalled = true;
+      state.installDismissed = true;
+      localStorage.setItem("forget-me-not-install-dismissed", "true");
+    }
+  } catch {
+    navigate({ name: "installGuide" });
+    return;
+  }
+  render();
+}
+
+function dismissInstallTip() {
+  state.installDismissed = true;
+  localStorage.setItem("forget-me-not-install-dismissed", "true");
+  render();
 }
 
 async function initializeLocalMode() {
@@ -388,6 +464,75 @@ async function unlockExistingDriveVault(event) {
     render();
   } catch {
     alert("密碼不正確，請再試一次");
+  }
+}
+
+async function mergeExistingDriveVault(event) {
+  event.preventDefault();
+  const password = state.route.securityDraft?.password ?? "";
+  const keyPackage = await readDriveFile(driveFileName("keyPackage"));
+  const vaultEnvelope = await readDriveFile(driveFileName("vault"));
+  if (!keyPackage || !vaultEnvelope) {
+    alert("尚未找到既有同步資料");
+    return;
+  }
+  let dekBytes;
+  let remoteVault;
+  try {
+    dekBytes = await unwrapDek(keyPackage.masterPasswordWrapper, password, keyPackage.crypto.iterations);
+    remoteVault = normalizeVault(pruneDeleted(await decryptVaultEnvelope(vaultEnvelope, dekBytes)));
+  } catch {
+    alert("密碼不正確，請再試一次");
+    return;
+  }
+
+  try {
+    const localBeforeSync = structuredClone(state.vault);
+    const merged = mergeVaults(state.vault, remoteVault, state.appState.deviceId);
+    const mergedVault = {
+      ...merged.vault,
+      vaultId: remoteVault.vaultId
+    };
+    const syncedAt = new Date().toISOString();
+
+    state.dekBytes = dekBytes;
+    state.vault = mergedVault;
+    await setItem("keyPackage", keyPackage);
+    await setItem(
+      "trustedSession",
+      await createTrustedSessionWithDek({
+        vaultId: keyPackage.vaultId,
+        deviceId: state.appState.deviceId,
+        sessionEpoch: keyPackage.securityMeta.sessionEpoch,
+        dekBytes
+      })
+    );
+    state.appState = {
+      ...state.appState,
+      mode: "driveSync",
+      currentVaultId: remoteVault.vaultId,
+      googleDrive: {
+        ...state.appState.googleDrive,
+        connected: true,
+        syncStatus: merged.conflicts.length ? "needsResolution" : "synced",
+        lastSyncAt: syncedAt,
+        lastLocalChangeAt: "",
+        lastSyncError: "",
+        lastSyncSummary: buildSyncSummary({ localBeforeSync, remoteVault, mergedVault, conflicts: merged.conflicts, syncedAt }),
+        pendingConflicts: merged.conflicts,
+        simulated: isSimulatedDrive()
+      }
+    };
+    await save();
+    await uploadKeyPackageToDrive();
+    await uploadCurrentVaultToDrive();
+    state.route = merged.conflicts.length ? { name: "syncConflicts" } : { name: "home" };
+    alert(syncAlertMessage(state.appState.googleDrive.lastSyncSummary, merged.conflicts.length));
+    render();
+  } catch (error) {
+    markDriveSyncIssue(error);
+    alert(driveErrorMessage(error, "資料已在本機合併，但 Google Drive 寫回失敗，請稍後再按「立即同步」。"));
+    render();
   }
 }
 
@@ -892,9 +1037,11 @@ function view() {
   if (state.route.name === "dataHealth") return dataHealthView();
   if (state.route.name === "localSnapshots") return localSnapshotsView();
   if (state.route.name === "syncTroubleshooting") return syncTroubleshootingView();
+  if (state.route.name === "installGuide") return installGuideView();
   if (state.route.name === "deleted") return deletedView();
   if (state.route.name === "driveIntro") return driveIntroView();
   if (state.route.name === "driveCloudChoice") return driveCloudChoiceView();
+  if (state.route.name === "driveMergeUnlock") return driveMergeUnlockView();
   if (state.route.name === "driveExistingUnlock") return driveExistingUnlockView();
   if (state.route.name === "setupMasterPassword") return setupMasterPasswordView();
   if (state.route.name === "showRecoveryCode") return showRecoveryCodeView();
@@ -914,9 +1061,9 @@ function welcomeView() {
         <p class="subtitle">把重要的人與細節先安心記下來。</p>
       </div>
       <div class="panel stack">
-        <button data-action="start-local">立即開始使用</button>
-        <button class="secondary" data-action="drive-placeholder">連結 Google Drive 同步</button>
+        <button data-action="start-local">開始使用</button>
       </div>
+      ${installPromptCard("welcome")}
     </section>
   `;
 }
@@ -931,6 +1078,7 @@ function homeView() {
         <button class="secondary" data-nav="search">搜尋</button>
       </div>
     </header>
+    ${installPromptCard("home")}
     ${people.length ? people.map(personCard).join("") : `<div class="empty">還沒有任何人物，先新增一位吧。</div>`}
     ${bottomNav("home")}
   `;
@@ -1065,8 +1213,8 @@ function settingsView() {
       <h2 class="section-title">Google Drive 同步</h2>
       <p>狀態：${syncStatusText}</p>
       <p class="muted">同步模式：${driveProviderLabel()}</p>
-      ${authStatus.hasAccessToken ? `<p class="muted">Google 授權：已取得暫時授權</p>` : ""}
-      ${authStatus.expiresAt ? `<p class="muted">授權到期：約 ${formatDateTime(authStatus.expiresAt)}</p>` : ""}
+      ${gd.connected ? `<p>目前同步帳號：${escapeHtml(driveAccountLabel(gd))}</p>` : ""}
+      ${authStatus.hasAccessToken ? `<p class="muted">Google 連線狀態：本次可立即同步</p>` : ""}
       ${gd.connected && !authStatus.hasAccessToken ? `<p class="muted">提醒：若剛重新開啟瀏覽器，首次同步時可能需要重新向 Google 確認授權。</p>` : ""}
       ${gd.lastLocalChangeAt ? `<p class="muted">本機最近變更：${formatDateTime(gd.lastLocalChangeAt)}</p>` : ""}
       ${gd.lastSyncAt ? `<p class="muted">上次同步：${formatDateTime(gd.lastSyncAt)}</p>` : ""}
@@ -1076,9 +1224,11 @@ function settingsView() {
       <button class="secondary" data-nav="syncTroubleshooting">同步疑難排解</button>
       ${gd.connected ? `<button class="secondary" data-action="sync-now" ${gd.syncStatus === "syncing" ? "disabled" : ""}>立即同步</button><button class="secondary" data-action="drive-logout">登出 Google Drive</button>` : `<button data-action="drive-placeholder">連結 Google Drive</button>`}
     </section>
+    ${installSettingsSection()}
     ${gd.connected ? `<section class="panel stack"><h2 class="section-title">安全性</h2><button class="secondary" data-nav="changePassword">更改密碼</button><button class="secondary" data-nav="forgotPassword">忘記密碼</button><button class="secondary" data-nav="regenerateRecovery">重新產生救援碼</button><button class="danger" data-nav="logoutAllDevices">登出所有裝置</button></section>` : ""}
     <section class="panel stack">
       <h2 class="section-title">資料管理</h2>
+      ${storageWarningView()}
       <div class="data-summary">
         <span>人物 ${dataSummary.peopleCount} 位</span>
         <span>興趣喜好 ${dataSummary.interestTagCount} 個</span>
@@ -1106,6 +1256,99 @@ function settingsView() {
       </div>
     </section>
     ${bottomNav("settings")}
+  `;
+}
+
+function driveAccountLabel(gd) {
+  if (gd.accountEmail) return maskEmail(gd.accountEmail);
+  return "已連結 Google Drive（未讀取 Email）";
+}
+
+function maskEmail(email) {
+  const [name, domain] = String(email).split("@");
+  if (!name || !domain) return email;
+  const visible = name.length <= 2 ? name[0] : name.slice(0, 2);
+  return `${visible}*****@${domain}`;
+}
+
+function storageWarningView() {
+  return `
+    <div class="inline-item storage-warning">
+      <strong>瀏覽器資料提醒</strong>
+      <span class="muted">清除瀏覽器網站資料會移除本機資料；若未啟用 Google Drive 同步，資料可能無法復原。</span>
+    </div>
+  `;
+}
+
+function installPromptCard(location) {
+  if (!shouldShowInstallPromptCard()) return "";
+  const canPrompt = Boolean(state.installPromptEvent);
+  return `
+    <section class="install-card panel">
+      <div>
+        <h2 class="section-title">安裝勿忘我</h2>
+        <p class="muted">加到手機主畫面後，可以像 App 一樣快速開啟；已快取的畫面也能離線啟動。</p>
+      </div>
+      <div class="install-actions">
+        <button type="button" data-action="${canPrompt ? "install-app" : "open-install-guide"}">${canPrompt ? "安裝到裝置" : "查看安裝方式"}</button>
+        <button type="button" class="secondary" data-action="dismiss-install-tip">稍後再說</button>
+      </div>
+    </section>
+  `;
+}
+
+function installSettingsSection() {
+  const installed = isPwaInstalled();
+  const canPrompt = Boolean(state.installPromptEvent);
+  return `
+    <section class="panel stack">
+      <h2 class="section-title">安裝到裝置</h2>
+      <p>狀態：${installed ? "已使用 App 模式開啟" : "尚未以 App 模式開啟"}</p>
+      <p class="muted">${installed ? "目前已像 App 一樣獨立開啟，不需要重複安裝。" : "建議安裝到手機主畫面，日後可以直接從主畫面開啟勿忘我。"}</p>
+      ${installed ? "" : `<button type="button" data-action="${canPrompt ? "install-app" : "open-install-guide"}">${canPrompt ? "安裝到裝置" : "查看安裝方式"}</button>`}
+    </section>
+  `;
+}
+
+function installGuideView() {
+  const canPrompt = Boolean(state.installPromptEvent);
+  return `
+    <header class="topbar topbar-centered">
+      <button class="secondary" data-nav="settings">返回</button>
+      <h1 class="section-title">安裝到裝置</h1>
+      <span></span>
+    </header>
+    <section class="panel stack">
+      <h2 class="section-title">建議安裝原因</h2>
+      <p class="muted">安裝後可從手機主畫面或桌面直接開啟，畫面會更像獨立 App；已快取的 App 外殼也能離線啟動。</p>
+      ${canPrompt ? `<button type="button" data-action="install-app">安裝到裝置</button>` : ""}
+    </section>
+    <section class="panel stack">
+      <h2 class="section-title">Android Chrome / Edge</h2>
+      <ol class="guide-list">
+        <li>開啟勿忘我網址。</li>
+        <li>點右上角「⋮」。</li>
+        <li>選擇「安裝應用程式」或「加入主畫面」。</li>
+        <li>確認後即可從主畫面開啟。</li>
+      </ol>
+    </section>
+    <section class="panel stack">
+      <h2 class="section-title">iPhone / iPad Safari</h2>
+      <ol class="guide-list">
+        <li>請使用 Safari 開啟勿忘我網址。</li>
+        <li>點下方或上方的「分享」按鈕。</li>
+        <li>選擇「加入主畫面」。</li>
+        <li>點「新增」。</li>
+      </ol>
+    </section>
+    <section class="panel stack">
+      <h2 class="section-title">電腦版 Chrome / Edge</h2>
+      <ol class="guide-list">
+        <li>開啟勿忘我網址。</li>
+        <li>若網址列右側出現安裝圖示，可直接點擊。</li>
+        <li>也可從瀏覽器選單選擇「安裝勿忘我」。</li>
+      </ol>
+    </section>
   `;
 }
 
@@ -1303,10 +1546,27 @@ function driveCloudChoiceView() {
     </header>
     <section class="panel stack">
       <p>Google Drive 中已有勿忘我的同步資料。</p>
-      <p class="muted">此裝置目前也有本機資料：人物 ${dataSummary.peopleCount} 位。請選擇要讀取雲端資料，或用目前本機資料建立新的同步資料。</p>
-      <button type="button" data-nav="driveExistingUnlock">讀取既有雲端資料</button>
-      <button type="button" class="secondary" data-action="use-local-drive-setup">使用本機資料建立同步</button>
+      <p class="muted">此裝置目前有本機資料：人物 ${dataSummary.peopleCount} 位。按下資料同步後，系統會先解開雲端資料，再依既有合併規則整合本機與雲端內容。</p>
+      <button type="button" data-nav="driveMergeUnlock">資料同步</button>
     </section>
+  `;
+}
+
+function driveMergeUnlockView() {
+  return `
+    <header class="topbar topbar-centered">
+      <button class="secondary" data-nav="driveCloudChoice">返回</button>
+      <h1 class="section-title">資料同步</h1>
+      <span></span>
+    </header>
+    <form class="panel stack" data-form="drive-merge-unlock">
+      <p class="muted">請輸入雲端同步資料的密碼。通過後會合併本機與 Google Drive 資料，不會直接用其中一邊覆蓋另一邊。</p>
+      <div class="field">
+        <label>密碼</label>
+        <input type="password" data-security-draft="password" autocomplete="current-password" />
+      </div>
+      <button type="submit">開始同步</button>
+    </form>
   `;
 }
 
@@ -1753,6 +2013,7 @@ function bindSecurityForms() {
   const handlers = {
     unlock: unlockWithMasterPassword,
     "drive-existing-unlock": unlockExistingDriveVault,
+    "drive-merge-unlock": mergeExistingDriveVault,
     "change-password": changeMasterPassword,
     "forgot-password": resetForgottenPassword,
     "regenerate-recovery": regenerateRecoveryCode,
@@ -1768,6 +2029,9 @@ async function handleAction(event, el) {
   const action = el.dataset.action;
   if (action === "start-local") return initializeLocalMode();
   if (action === "apply-update") return applyUpdate();
+  if (action === "install-app") return installApp();
+  if (action === "open-install-guide") return navigate({ name: "installGuide" });
+  if (action === "dismiss-install-tip") return dismissInstallTip();
   if (action === "drive-placeholder") return beginDriveSetup();
   if (action === "use-local-drive-setup") return useLocalDataForDriveSetup();
   if (action === "cancel-drive-setup") return cancelDriveSetup();
