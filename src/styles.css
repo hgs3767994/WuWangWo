@@ -330,8 +330,13 @@ textarea {
 }
 
 .topbar-centered .detail-page-title {
-  max-width: calc(100% - 210px);
+  max-width: calc(100% - 190px);
   font-size: 24px;
+}
+
+.detail-edit-button {
+  position: absolute;
+  right: 0;
 }
 
 .home-header {

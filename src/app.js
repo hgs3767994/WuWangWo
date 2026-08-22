@@ -1286,7 +1286,7 @@ function detailView(person) {
     <header class="topbar topbar-centered">
       <button class="secondary" data-action="detail-back">返回</button>
       <h1 class="section-title detail-page-title">${escapeHtml(person.name)}</h1>
-      <button class="secondary" data-action="edit-person" data-id="${person.id}">編輯人物</button>
+      <button class="detail-edit-button" data-action="edit-person" data-id="${person.id}">編輯人物</button>
     </header>
     ${person.archivedAt ? `<div class="inline-item archived-banner"><strong>已封存</strong><span class="muted">此人物不會顯示於首頁或搜尋結果。</span></div>` : ""}
     ${detailSections ? `<section class="panel section detail-panel">${detailSections}</section>` : ""}
