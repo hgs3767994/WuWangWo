@@ -1135,8 +1135,8 @@ function homeView() {
       <div></div>
       <h1 class="title">勿忘我</h1>
       <div class="icon-actions" aria-label="首頁操作">
-        <button type="button" class="icon-button" data-nav="search" aria-label="搜尋">${iconSvg("search")}</button>
-        <button type="button" class="icon-button" data-nav="settings" aria-label="設定">${iconSvg("settings")}</button>
+        <button type="button" class="icon-button" data-nav="search" aria-label="搜尋"><img class="button-icon" src="./pics/magnifier.png" alt="" /></button>
+        <button type="button" class="icon-button" data-nav="settings" aria-label="設定"><img class="button-icon" src="./pics/gear.png" alt="" /></button>
       </div>
     </header>
     <div class="home-actions">
@@ -1266,7 +1266,7 @@ function detailView(person) {
     <div class="actions detail-actions">
       <button data-action="edit-person" data-id="${person.id}">編輯人物</button>
       <button class="danger" data-action="delete-person" data-id="${person.id}">刪除人物</button>
-      <button class="secondary" data-action="archive-person" data-id="${person.id}" ${person.archivedAt ? "disabled" : ""}>封存</button>
+      <button class="warning" data-action="archive-person" data-id="${person.id}" ${person.archivedAt ? "disabled" : ""}>封存</button>
     </div>
   `;
 }
@@ -1314,11 +1314,11 @@ function settingsView() {
       ${dataManagement.lastImportAt ? `<p class="muted">最近匯入：${formatDateTime(dataManagement.lastImportAt)}</p>` : ""}
       <button class="secondary" data-nav="localSnapshots">本機資料快照</button>
       <button class="secondary" data-nav="deleted">最近刪除</button>
+      <button class="secondary" data-nav="archived">查看封存人物</button>
       <button class="secondary" data-action="export-data">匯出備份檔（JSON）</button>
       <button class="secondary" data-action="export-excel">匯出 Excel（XLSX）</button>
       <button class="secondary" data-action="choose-import-file">匯入資料</button>
       <button class="secondary" data-nav="dataHealth">資料完整性檢查</button>
-      <button class="secondary" data-nav="archived">查看封存人物</button>
       <input type="file" accept="application/json,.json" data-import-file hidden />
       <p class="muted">JSON 備份檔可用於匯入復原；Excel 檔適合人工檢視。匯出的資料不包含密碼、資料金鑰或救援碼；請自行妥善保存，避免他人取得。</p>
     </section>
@@ -1435,7 +1435,6 @@ function syncSummaryView(summary) {
     <div class="sync-summary">
       <strong>上次同步摘要</strong>
       <span>${summary.hadCloudData ? "已讀取雲端資料" : "雲端尚無既有資料"}</span>
-      <span>本機版本 ${summary.localRevision}，雲端版本 ${summary.cloudRevision}，合併後版本 ${summary.mergedRevision}</span>
       <span>合併後人物 ${summary.mergedPeopleCount} 位，衝突 ${summary.conflictCount} 筆</span>
     </div>
   `;
@@ -1516,7 +1515,6 @@ function syncTroubleshootingView() {
     </header>
     <section class="panel stack">
       <p>目前狀態：${syncStatusLabel(gd)}</p>
-      <p class="muted">這裡會把常見同步問題整理成一般使用者看得懂的處理方向。</p>
       ${issues.map(troubleshootingItem).join("")}
       <div class="actions">
         <button type="button" data-action="sync-now">立即同步</button>
@@ -1875,14 +1873,6 @@ function lifeEventLine(event) {
   return detailLine(date, event.text);
 }
 
-function iconSvg(name) {
-  const paths = {
-    search: `<circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path>`,
-    settings: `<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06-2 3.46-.08-.02a1.65 1.65 0 0 0-1.82.33 1.65 1.65 0 0 0-.5 1.72h-4a1.65 1.65 0 0 0-.5-1.72 1.65 1.65 0 0 0-1.82-.33l-.08.02-2-3.46.06-.06A1.65 1.65 0 0 0 4.6 15 1.65 1.65 0 0 0 3 13.5v-3A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06 2-3.46.08.02A1.65 1.65 0 0 0 8.1 3.35 1.65 1.65 0 0 0 8.6 1.63h4a1.65 1.65 0 0 0 .5 1.72 1.65 1.65 0 0 0 1.82.33l.08-.02 2 3.46-.06.06A1.65 1.65 0 0 0 19.4 9 1.65 1.65 0 0 0 21 10.5v3A1.65 1.65 0 0 0 19.4 15z"></path>`
-  };
-  return `<svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[name] ?? ""}</svg>`;
-}
-
 function inputField(label, field, value, type = "text") {
   return `<section class="panel"><h2 class="section-title">${label}</h2><input type="${type}" data-field="${field}" value="${escapeAttr(value)}" /></section>`;
 }
@@ -1954,6 +1944,7 @@ function interestManageForm() {
 }
 
 function favoriteItemsEditor(rows) {
+  const deleting = Boolean(state.route.favoriteItemDeleteMode);
   return `
     <section class="panel">
       <h2 class="section-title">嗜好品</h2>
@@ -1961,20 +1952,20 @@ function favoriteItemsEditor(rows) {
         ${rows.length ? rows.map((row, index) => `
           <div class="inline-item">
             <input data-favorite-item="${index}" placeholder="例如：咖啡、紅酒、雪茄" value="${escapeAttr(row.value)}" />
-            <div class="actions">
-              <button type="button" class="danger" data-action="remove-favorite-item" data-index="${index}">刪除</button>
-            </div>
+            ${deleting ? `<div class="actions"><button type="button" class="danger" data-action="remove-favorite-item" data-index="${index}">刪除</button></div>` : ""}
           </div>
         `).join("") : `<p class="muted">尚未新增嗜好品。</p>`}
       </div>
       <div class="actions">
         <button type="button" class="secondary" data-action="add-favorite-item">＋ 新增嗜好品</button>
+        <button type="button" class="secondary" data-action="toggle-favorite-item-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
       </div>
     </section>
   `;
 }
 
 function familyMembersEditor(rows, currentPersonId) {
+  const deleting = Boolean(state.route.familyMemberDeleteMode);
   const suggestions = visiblePeople(state.vault.people).filter((person) => person.id !== currentPersonId);
   const listId = `family-name-options-${currentPersonId}`;
   return `
@@ -1984,16 +1975,17 @@ function familyMembersEditor(rows, currentPersonId) {
         ${suggestions.map((person) => `<option value="${escapeAttr(person.name)}" data-person-id="${escapeAttr(person.id)}"></option>`).join("")}
       </datalist>
       <div class="stack">
-        ${rows.length ? rows.map((row, index) => familyMemberEditorRow(row, index, listId)).join("") : `<p class="muted">尚未新增家族成員。</p>`}
+        ${rows.length ? rows.map((row, index) => familyMemberEditorRow(row, index, listId, deleting)).join("") : `<p class="muted">尚未新增家族成員。</p>`}
       </div>
       <div class="actions">
         <button type="button" class="secondary" data-action="add-family-member">＋ 新增家族成員</button>
+        <button type="button" class="secondary" data-action="toggle-family-member-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
       </div>
     </section>
   `;
 }
 
-function familyMemberEditorRow(row, index, listId) {
+function familyMemberEditorRow(row, index, listId, deleting) {
   const preset = FAMILY_RELATIONSHIP_ORDER.includes(row.relationship) ? row.relationship : "其它";
   return `
     <div class="inline-item">
@@ -2008,14 +2000,13 @@ function familyMemberEditorRow(row, index, listId) {
           ? `<div class="field"><label>自訂稱謂</label><input data-family-member="${index}" data-prop="customRelationship" placeholder="例如：表哥" value="${escapeAttr(customRelationshipValue(row))}" /></div>`
           : ""
       }
-      <div class="actions">
-        <button type="button" class="danger" data-action="remove-family-member" data-index="${index}">刪除</button>
-      </div>
+      ${deleting ? `<div class="actions"><button type="button" class="danger" data-action="remove-family-member" data-index="${index}">刪除</button></div>` : ""}
     </div>
   `;
 }
 
 function lifeEventsEditor(rows) {
+  const deleting = Boolean(state.route.lifeEventDeleteMode);
   return `
     <section class="panel">
       <h2 class="section-title">重大事件</h2>
@@ -2026,14 +2017,13 @@ function lifeEventsEditor(rows) {
               <input type="date" data-life-event="${index}" data-prop="date" value="${escapeAttr(row.date)}" />
               <input data-life-event="${index}" data-prop="text" placeholder="事件內容" value="${escapeAttr(row.text)}" />
             </div>
-            <div class="actions">
-              <button type="button" class="danger" data-action="remove-life-event" data-index="${index}">刪除</button>
-            </div>
+            ${deleting ? `<div class="actions"><button type="button" class="danger" data-action="remove-life-event" data-index="${index}">刪除</button></div>` : ""}
           </div>
         `).join("") : `<p class="muted">尚未新增重大事件。</p>`}
       </div>
       <div class="actions">
         <button type="button" class="secondary" data-action="add-life-event">＋ 新增重大事件</button>
+        <button type="button" class="secondary" data-action="toggle-life-event-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
       </div>
     </section>
   `;
@@ -2369,10 +2359,13 @@ async function handleAction(event, el) {
   if (action === "set-default") return setDefault(el.dataset.listKey, Number(el.dataset.index));
   if (action === "add-favorite-item") return addFavoriteItem();
   if (action === "remove-favorite-item") return removeFavoriteItem(Number(el.dataset.index));
+  if (action === "toggle-favorite-item-delete-mode") return toggleRouteFlag("favoriteItemDeleteMode");
   if (action === "add-family-member") return addFamilyMember();
   if (action === "remove-family-member") return removeFamilyMember(Number(el.dataset.index));
+  if (action === "toggle-family-member-delete-mode") return toggleRouteFlag("familyMemberDeleteMode");
   if (action === "add-life-event") return addLifeEvent();
   if (action === "remove-life-event") return removeLifeEvent(Number(el.dataset.index));
+  if (action === "toggle-life-event-delete-mode") return toggleRouteFlag("lifeEventDeleteMode");
   if (action === "new-person-prefill") return navigate({ name: "new", prefillName: el.dataset.name });
   if (action === "toggle-interest") return toggleInterest(el.dataset.id);
   if (action === "search-tag") return toggleSearchTag(el.dataset.id);
@@ -2397,6 +2390,11 @@ async function handleAction(event, el) {
   if (action === "delete-custom-option") return deleteCustomOption(el.dataset.fieldId, el.dataset.option);
   if (action === "apply-search") return render();
   if (action === "clear-search") return navigate({ name: "search", params: { text: "", address: "", tagIds: [] } });
+}
+
+function toggleRouteFlag(key) {
+  state.route[key] = !state.route[key];
+  render();
 }
 
 async function savePersonForm(event) {

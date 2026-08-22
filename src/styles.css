@@ -95,6 +95,21 @@ button.danger:active {
   background: var(--danger-active);
 }
 
+button.warning {
+  background: var(--warning);
+  color: var(--text-primary);
+}
+
+button.warning:hover {
+  background: #d97706;
+  color: var(--text-on-primary);
+}
+
+button.warning:active {
+  background: #b45309;
+  color: var(--text-on-primary);
+}
+
 button.ghost {
   background: transparent;
   border-color: transparent;
@@ -221,6 +236,7 @@ textarea {
 .button-icon {
   width: 18px;
   height: 18px;
+  object-fit: contain;
 }
 
 .home-actions {
