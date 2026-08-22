@@ -28,6 +28,12 @@ import {
 const app = document.querySelector("#app");
 const FAMILY_RELATIONSHIP_ORDER = ["父", "母", "配偶", "子", "女", "兄", "姐", "弟", "妹"];
 const FAMILY_RELATIONSHIP_OPTIONS = [...FAMILY_RELATIONSHIP_ORDER, "其它"];
+const THEME_OPTIONS = [
+  { id: "comfortable-green", name: "舒適綠", colors: ["#24443D", "#5B9EA6", "#F4F6F5"] },
+  { id: "business-blue", name: "商務藍", colors: ["#1E293B", "#2563EB", "#F8FAFC"] },
+  { id: "gentle-pink", name: "溫柔粉", colors: ["#8B5E83", "#D88FA3", "#FFF7F8"] },
+  { id: "warm-amber", name: "暖琥珀", colors: ["#292D32", "#C58B3A", "#FFFFFF"] }
+];
 let state = {
   appState: null,
   dekBytes: null,
@@ -207,6 +213,9 @@ async function initializeLocalMode() {
     mode: "localOnly",
     deviceId,
     currentVaultId: vault.vaultId,
+    ui: {
+      themeId: currentThemeId()
+    },
     googleDrive: {
       connected: false,
       syncStatus: "disabled"
@@ -295,6 +304,9 @@ async function beginDriveSetup() {
       mode: "localOnly",
       deviceId,
       currentVaultId: vault.vaultId,
+      ui: {
+        themeId: currentThemeId()
+      },
       googleDrive: {
         connected: false,
         syncStatus: "disabled"
@@ -1016,8 +1028,20 @@ function navigateBackFromDetail() {
 }
 
 function render() {
-  app.innerHTML = `<main class="app">${view()}</main>${updatePromptView()}`;
+  applyTheme(currentThemeId());
+  app.innerHTML = `<main class="app route-${escapeAttr(state.route.name)}">${view()}</main>${updatePromptView()}`;
   bind();
+}
+
+function currentThemeId() {
+  const themeId = state.appState?.ui?.themeId ?? "comfortable-green";
+  return THEME_OPTIONS.some((theme) => theme.id === themeId) ? themeId : "comfortable-green";
+}
+
+function applyTheme(themeId) {
+  document.body.dataset.theme = themeId;
+  const theme = THEME_OPTIONS.find((item) => item.id === themeId) ?? THEME_OPTIONS[0];
+  document.querySelector("meta[name='theme-color']")?.setAttribute("content", theme.colors[0]);
 }
 
 function updatePromptView() {
@@ -1297,6 +1321,7 @@ function settingsView() {
       ${gd.connected ? `<button class="secondary" data-action="sync-now" ${gd.syncStatus === "syncing" ? "disabled" : ""}>立即同步</button><button class="secondary" data-action="drive-logout">登出 Google Drive</button>` : `<button data-action="drive-placeholder">連結 Google Drive</button>`}
     </section>
     ${installSettingsSection()}
+    ${themeSettingsSection()}
     ${gd.connected ? `<section class="panel stack"><h2 class="section-title">安全性</h2><button class="secondary" data-nav="changePassword">更改密碼</button><button class="secondary" data-nav="forgotPassword">忘記密碼</button><button class="secondary" data-nav="regenerateRecovery">重新產生救援碼</button><button class="danger" data-nav="logoutAllDevices">登出所有裝置</button></section>` : ""}
     <section class="panel stack">
       <h2 class="section-title">資料管理</h2>
@@ -1397,6 +1422,26 @@ function installSettingsSection() {
       <p>狀態：${installed ? "已使用 App 模式開啟" : "尚未以 App 模式開啟"}</p>
       <p class="muted">${installed ? "目前已像 App 一樣獨立開啟，不需要重複安裝。" : "建議安裝到手機主畫面，日後可以直接從主畫面開啟勿忘我。"}</p>
       ${installed ? "" : `<button type="button" data-action="${canPrompt ? "install-app" : "open-install-guide"}">${canPrompt ? "安裝到裝置" : "查看安裝方式"}</button>`}
+    </section>
+  `;
+}
+
+function themeSettingsSection() {
+  const selected = currentThemeId();
+  return `
+    <section class="panel stack">
+      <h2 class="section-title">主題色系</h2>
+      <p class="muted">此設定只保存在本機裝置，不會同步到 Google Drive。</p>
+      <div class="theme-options">
+        ${THEME_OPTIONS.map((theme) => `
+          <button type="button" class="theme-option ${theme.id === selected ? "selected" : ""}" data-action="set-theme" data-theme-id="${theme.id}" aria-pressed="${theme.id === selected}">
+            <span class="theme-swatches" aria-hidden="true">
+              ${theme.colors.map((color) => `<span style="background:${color}"></span>`).join("")}
+            </span>
+            <span>${theme.name}</span>
+          </button>
+        `).join("")}
+      </div>
     </section>
   `;
 }
@@ -2342,6 +2387,7 @@ async function handleAction(event, el) {
   if (action === "start-local") return initializeLocalMode();
   if (action === "apply-update") return applyUpdate();
   if (action === "check-version-update") return checkVersionUpdate();
+  if (action === "set-theme") return setTheme(el.dataset.themeId);
   if (action === "install-app") return installApp();
   if (action === "open-install-guide") return navigate({ name: "installGuide" });
   if (action === "dismiss-install-tip") return dismissInstallTip();
@@ -2408,6 +2454,19 @@ async function handleAction(event, el) {
 
 function toggleRouteFlag(key) {
   state.route[key] = !state.route[key];
+  render();
+}
+
+async function setTheme(themeId) {
+  if (!THEME_OPTIONS.some((theme) => theme.id === themeId) || !state.appState) return;
+  state.appState = {
+    ...state.appState,
+    ui: {
+      ...(state.appState.ui ?? {}),
+      themeId
+    }
+  };
+  await setItem("appState", state.appState);
   render();
 }
 
