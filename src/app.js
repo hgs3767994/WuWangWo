@@ -33,7 +33,7 @@ const THEME_OPTIONS = [
   { id: "business-blue", name: "商務藍", colors: ["#1E293B", "#2563EB", "#F8FAFC"] },
   { id: "gentle-pink", name: "溫柔粉", colors: ["#8B5E83", "#D88FA3", "#FFF7F8"] },
   { id: "warm-amber", name: "暖琥珀", colors: ["#292D32", "#C58B3A", "#FFFFFF"] },
-  { id: "warm-amber", name: "回憶灰", colors: ["#667887", "#A77A52", "#F3EEE4"] }
+  { id: "memory-paper", name: "回憶灰", colors: ["#667887", "#A77A52", "#F3EEE4"] }
 ];
 let state = {
   appState: null,

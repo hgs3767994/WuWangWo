@@ -202,7 +202,7 @@ http://localhost:4173
 本次快取版本：
 
 ```text
-forget-me-not-v52
+forget-me-not-v51
 ```
 
 ## 部署提醒
