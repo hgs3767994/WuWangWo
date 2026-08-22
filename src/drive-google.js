@@ -72,7 +72,7 @@ export async function testGoogleDriveConnection() {
 }
 
 export async function connectGoogleDrive(options = {}) {
-  await ensureGoogleAccessToken({ interactive: options.interactive !== false });
+  await connectGoogleAccessToken({ interactive: options.interactive !== false });
   await refreshGoogleAccountEmail();
   return { connected: true, accountEmail };
 }
@@ -145,7 +145,18 @@ async function refreshGoogleAccountEmail() {
   }
 }
 
-async function ensureGoogleAccessToken({ interactive = false } = {}) {
+async function connectGoogleAccessToken({ interactive = true } = {}) {
+  if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
+  if (!interactive) return ensureGoogleAccessToken({ interactive: false });
+  try {
+    return await ensureGoogleAccessToken({ interactive: true, prompt: "" });
+  } catch (error) {
+    if (!isGoogleInteractionRequired(error)) throw error;
+    return ensureGoogleAccessToken({ interactive: true, prompt: "consent" });
+  }
+}
+
+async function ensureGoogleAccessToken({ interactive = false, prompt = "" } = {}) {
   if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
   if (!isGoogleDriveConfigured()) throw new Error(googleDriveReadiness().message);
   if (!interactive) throw new Error("google-drive-auth-required");
@@ -169,8 +180,13 @@ async function ensureGoogleAccessToken({ interactive = false } = {}) {
       tokenExpiresAt = Date.now() + Number(response.expires_in ?? 3600) * 1000;
       resolve(accessToken);
     };
-    tokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
+    tokenClient.requestAccessToken({ prompt });
   });
+}
+
+function isGoogleInteractionRequired(error) {
+  const message = error?.message ?? "";
+  return ["google-drive-auth-required", "interaction_required", "login_required", "consent_required"].some((text) => message.includes(text));
 }
 
 function loadGoogleIdentityServices() {

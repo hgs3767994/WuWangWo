@@ -329,6 +329,11 @@ textarea {
   white-space: nowrap;
 }
 
+.topbar-centered .detail-page-title {
+  max-width: calc(100% - 210px);
+  font-size: 24px;
+}
+
 .home-header {
   display: grid;
   justify-items: center;
@@ -409,6 +414,11 @@ textarea {
   font-size: 32px;
   font-weight: 800;
   letter-spacing: 0;
+}
+
+.home-header .title,
+.welcome .title {
+  font-size: 38px;
 }
 
 .subtitle {
@@ -517,6 +527,20 @@ button:focus-visible,
   margin-bottom: 6px;
   color: var(--text-secondary);
   font-size: 13px;
+}
+
+.security-form {
+  gap: 8px;
+}
+
+.security-field {
+  margin: 4px 0;
+}
+
+.security-field label {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .row {
@@ -718,6 +742,10 @@ button:focus-visible,
 }
 
 .detail-actions {
+  justify-content: center;
+}
+
+.search-actions {
   justify-content: center;
 }
 

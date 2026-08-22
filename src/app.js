@@ -1195,8 +1195,8 @@ function searchView() {
         <label>依興趣喜好搜尋</label>
         <div class="chip-list">${state.vault.interestTags.map((tag) => interestChip(tag, params.tagIds.includes(tag.id), "search-tag")).join("")}</div>
       </div>
-      <div class="actions">
-        <button data-action="apply-search" class="secondary">套用搜尋</button>
+      <div class="actions search-actions">
+        <button data-action="apply-search">套用搜尋</button>
         <button data-action="clear-search" class="secondary">清除搜尋</button>
       </div>
     </section>
@@ -1285,14 +1285,13 @@ function detailView(person) {
   return `
     <header class="topbar topbar-centered">
       <button class="secondary" data-action="detail-back">返回</button>
-      <h1 class="section-title">${escapeHtml(person.name)}</h1>
-      <span></span>
+      <h1 class="section-title detail-page-title">${escapeHtml(person.name)}</h1>
+      <button class="secondary" data-action="edit-person" data-id="${person.id}">編輯人物</button>
     </header>
     ${person.archivedAt ? `<div class="inline-item archived-banner"><strong>已封存</strong><span class="muted">此人物不會顯示於首頁或搜尋結果。</span></div>` : ""}
     ${detailSections ? `<section class="panel section detail-panel">${detailSections}</section>` : ""}
     ${hasDetailContent ? "" : `<section class="panel blank-detail-card"></section>`}
     <div class="actions detail-actions">
-      <button data-action="edit-person" data-id="${person.id}">編輯人物</button>
       <button class="danger" data-action="delete-person" data-id="${person.id}">刪除人物</button>
       <button class="warning" data-action="archive-person" data-id="${person.id}" ${person.archivedAt ? "disabled" : ""}>封存</button>
     </div>
@@ -1865,12 +1864,12 @@ function securityFormView({ title, form, fields, submit, intro = "", danger = fa
       <h1 class="section-title">${title}</h1>
       <span></span>
     </header>
-    <form class="panel stack" data-form="${form}">
+    <form class="panel stack security-form" data-form="${form}">
       ${intro ? `<p class="muted">${intro}</p>` : ""}
       ${fields
         .map(
           ([name, label, autocomplete]) => `
-            <div class="field">
+            <div class="field security-field">
               <label>${label}</label>
               <input type="${name === "recoveryCode" ? "text" : "password"}" data-security-draft="${name}" autocomplete="${autocomplete}" />
             </div>
