@@ -29,8 +29,10 @@
   --focus: #5b9ea6;
   --disabled: #edf2f7;
   --disabled-text: #94a3b8;
-  --shadow: 0 4px 12px rgba(16, 24, 40, 0.08);
-  --shadow-strong: 0 10px 24px rgba(16, 24, 40, 0.12);
+  --radius: 12px;
+  --radius-sm: 10px;
+  --shadow: 0 6px 18px rgba(16, 24, 40, 0.09);
+  --shadow-strong: 0 12px 28px rgba(16, 24, 40, 0.13);
   font-family: "Microsoft JhengHei", "Noto Sans TC", system-ui, sans-serif;
 }
 
@@ -54,8 +56,9 @@ select {
 
 button {
   border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  min-height: 40px;
+  padding: 8px 14px;
   background: var(--primary);
   color: var(--text-on-primary);
   cursor: pointer;
@@ -128,10 +131,11 @@ textarea,
 select {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--panel);
   color: var(--text-primary);
-  padding: 9px 11px;
+  min-height: 46px;
+  padding: 10px 12px;
   font-size: 14px;
 }
 
@@ -218,8 +222,8 @@ textarea {
 
 .icon-button {
   display: inline-flex;
-  width: 34px;
-  height: 34px;
+  width: 42px;
+  height: 42px;
   align-items: center;
   justify-content: center;
   padding: 0;
@@ -234,8 +238,8 @@ textarea {
 }
 
 .button-icon {
-  width: 18px;
-  height: 18px;
+  width: 28px;
+  height: 28px;
   object-fit: contain;
 }
 
@@ -274,7 +278,8 @@ textarea {
 
 .title {
   margin: 0;
-  font-size: 28px;
+  font-size: 32px;
+  font-weight: 800;
   letter-spacing: 0;
 }
 
@@ -284,22 +289,22 @@ textarea {
 }
 
 .section {
-  margin: 18px 0;
+  margin: 16px 0;
 }
 
 .section-title {
-  margin: 0 0 10px;
-  font-size: 18px;
+  margin: 0 0 12px;
+  font-size: 20px;
   font-weight: 700;
 }
 
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 16px;
   box-shadow: var(--shadow);
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .person-card {
@@ -311,8 +316,8 @@ textarea {
   margin: 10px 0;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 14px;
+  border-radius: var(--radius);
+  padding: 15px;
   color: var(--text-primary);
   text-align: left;
   box-shadow: var(--shadow);
@@ -331,7 +336,7 @@ button:focus-visible,
 }
 
 .person-card .name {
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 700;
 }
 
@@ -466,7 +471,7 @@ button:focus-visible,
   justify-content: center;
   min-height: 42px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 8px 12px;
   background: var(--primary);
   color: var(--text-on-primary);
@@ -496,7 +501,7 @@ button:focus-visible,
   gap: 8px;
   padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--secondary);
 }
 
@@ -515,13 +520,44 @@ button:focus-visible,
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
-  padding: 8px 0;
+  padding: 9px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .detail-line:last-child {
   border-bottom: 0;
+}
+
+.detail-panel {
+  padding-block: 4px;
+}
+
+.detail-section {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.detail-section:first-child {
+  padding-top: 10px;
+}
+
+.detail-section:last-child {
+  border-bottom: 0;
+  padding-bottom: 10px;
+}
+
+.detail-section .section-title {
+  margin-bottom: 8px;
+  color: var(--text-primary);
+  font-size: 18px;
+}
+
+.detail-value {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.7;
 }
 
 .custom-detail-line > span:first-child {
@@ -629,7 +665,7 @@ button:focus-visible,
 .data-summary span {
   padding: 6px 10px;
   border: 1px solid var(--line-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface-section);
   color: var(--text-secondary);
   font-size: 13px;
@@ -641,7 +677,7 @@ button:focus-visible,
   gap: 4px;
   padding: 10px;
   border: 1px solid var(--line-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface-section);
   color: var(--text-secondary);
   font-size: 13px;
@@ -649,6 +685,33 @@ button:focus-visible,
 
 .sync-summary strong {
   color: var(--text-primary);
+}
+
+.status-summary {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-section);
+}
+
+.status-row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  font-size: 14px;
+}
+
+.status-row span {
+  color: var(--text-tertiary);
+}
+
+.status-row strong {
+  color: var(--text-primary);
+  font-weight: 700;
+  word-break: break-word;
 }
 
 .snapshot-card {

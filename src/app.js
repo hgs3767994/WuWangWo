@@ -1227,14 +1227,25 @@ function detailView(person) {
   ]
     .filter(Boolean)
     .join("");
-  const customLines = customDefsForPerson(person.id)
+  const customSections = customDefsForPerson(person.id)
     .map((field) => {
       const value = person.customValues.find((item) => item.fieldId === field.id)?.value;
       if (isEmptyCustomValue(value)) return "";
-      return detailLine(field.name, formatCustomValue(field, value), "", "custom-detail-line");
+      return detailGroup(field.name, `<p class="detail-value">${escapeHtml(formatCustomValue(field, value))}</p>`, "custom-detail-section");
     })
     .filter(Boolean)
     .join("");
+  const detailSections = [
+    identityLines ? detailGroup("基本資料", identityLines) : "",
+    person.phones.length ? detailGroup("電話", sortDefaultFirst(person.phones).map((phone) => detailLine(`${phone.label} ${phone.value}`, "", `<a class="button-link" href="tel:${escapeAttr(phone.value)}">撥打</a><button class="secondary" data-copy="${escapeAttr(phone.value)}">複製</button>`)).join("")) : "",
+    person.addresses.length ? detailGroup("地址", sortDefaultFirst(person.addresses).map((address) => detailLine(`${address.label} ${address.value}`, "", `<button class="secondary" data-copy="${escapeAttr(address.value)}">複製</button>`)).join("")) : "",
+    tags.length ? detailGroup("興趣喜好", `<div class="chip-list">${tags.map((tag) => `<span class="chip selected">${tagLabel(tag)}</span>`).join("")}</div>`) : "",
+    favoriteItems.length ? detailGroup("嗜好品", `<div class="chip-list">${favoriteItems.map((item) => `<span class="chip selected">${escapeHtml(item.value)}</span>`).join("")}</div>`) : "",
+    familyMembers.length ? detailGroup("家族成員", familyMembers.map(familyMemberLine).join("")) : "",
+    lifeEvents.length ? detailGroup("重大事件", lifeEvents.map(lifeEventLine).join("")) : "",
+    customSections,
+    person.note ? detailGroup("其它備註", `<p class="detail-value">${escapeHtml(person.note).replaceAll("\n", "<br>")}</p>`) : ""
+  ].filter(Boolean).join("");
   const hasDetailContent = Boolean(
     identityLines ||
       person.phones.length ||
@@ -1243,7 +1254,7 @@ function detailView(person) {
       favoriteItems.length ||
       familyMembers.length ||
       lifeEvents.length ||
-      customLines ||
+      customSections ||
       person.note
   );
   return `
@@ -1253,15 +1264,7 @@ function detailView(person) {
       <span></span>
     </header>
     ${person.archivedAt ? `<div class="inline-item archived-banner"><strong>已封存</strong><span class="muted">此人物不會顯示於首頁或搜尋結果。</span></div>` : ""}
-    ${identityLines ? `<section class="panel">${identityLines}</section>` : ""}
-    ${person.phones.length ? detailGroup("電話", sortDefaultFirst(person.phones).map((phone) => detailLine(`${phone.label} ${phone.value}`, "", `<a class="button-link" href="tel:${escapeAttr(phone.value)}">撥打</a><button class="secondary" data-copy="${escapeAttr(phone.value)}">複製</button>`)).join("")) : ""}
-    ${person.addresses.length ? detailGroup("地址", sortDefaultFirst(person.addresses).map((address) => detailLine(`${address.label} ${address.value}`, "", `<button class="secondary" data-copy="${escapeAttr(address.value)}">複製</button>`)).join("")) : ""}
-    ${tags.length ? detailGroup("興趣喜好", `<div class="chip-list">${tags.map((tag) => `<span class="chip selected">${tagLabel(tag)}</span>`).join("")}</div>`) : ""}
-    ${favoriteItems.length ? detailGroup("嗜好品", `<div class="chip-list">${favoriteItems.map((item) => `<span class="chip selected">${escapeHtml(item.value)}</span>`).join("")}</div>`) : ""}
-    ${familyMembers.length ? detailGroup("家族成員", familyMembers.map(familyMemberLine).join("")) : ""}
-    ${lifeEvents.length ? detailGroup("重大事件", lifeEvents.map(lifeEventLine).join("")) : ""}
-    ${customLines ? detailGroup("自訂欄位", customLines) : ""}
-    ${person.note ? detailGroup("其它備註", `<p>${escapeHtml(person.note).replaceAll("\n", "<br>")}</p>`) : ""}
+    ${detailSections ? `<section class="panel section detail-panel">${detailSections}</section>` : ""}
     ${hasDetailContent ? "" : `<section class="panel blank-detail-card"></section>`}
     <div class="actions detail-actions">
       <button data-action="edit-person" data-id="${person.id}">編輯人物</button>
@@ -1286,13 +1289,7 @@ function settingsView() {
     </header>
     <section class="panel stack">
       <h2 class="section-title">Google Drive 同步</h2>
-      <p>狀態：${syncStatusText}</p>
-      <p class="muted">同步模式：${driveProviderLabel()}</p>
-      ${gd.connected ? `<p>目前同步帳號：${escapeHtml(driveAccountLabel(gd))}</p>` : ""}
-      ${authStatus.hasAccessToken ? `<p class="muted">Google 連線狀態：本次可立即同步</p>` : ""}
-      ${gd.connected && !authStatus.hasAccessToken ? `<p class="muted">提醒：若剛重新開啟瀏覽器，首次同步時可能需要重新向 Google 確認授權。</p>` : ""}
-      ${gd.lastLocalChangeAt ? `<p class="muted">本機最近變更：${formatDateTime(gd.lastLocalChangeAt)}</p>` : ""}
-      ${gd.lastSyncAt ? `<p class="muted">上次同步：${formatDateTime(gd.lastSyncAt)}</p>` : ""}
+      ${driveSyncOverview(gd, authStatus, syncStatusText)}
       ${gd.lastSyncError ? `<p class="danger-text">${escapeHtml(gd.lastSyncError)}</p>` : ""}
       ${syncSummaryView(gd.lastSyncSummary)}
       ${pendingConflicts.length ? `<button data-nav="syncConflicts">處理衝突資料</button>` : ""}
@@ -1333,6 +1330,23 @@ function settingsView() {
       </div>
     </section>
     ${bottomNav("settings")}
+  `;
+}
+
+function driveSyncOverview(gd, authStatus, syncStatusText) {
+  const rows = [
+    ["狀態", syncStatusText],
+    ["同步模式", driveProviderLabel()],
+    gd.connected ? ["目前同步帳號", driveAccountLabel(gd)] : null,
+    authStatus.hasAccessToken ? ["Google 連線狀態", "本次可立即同步"] : null,
+    gd.connected && !authStatus.hasAccessToken ? ["Google 連線狀態", "首次同步時可能需要重新確認授權"] : null,
+    gd.lastLocalChangeAt ? ["本機最近變更", formatDateTime(gd.lastLocalChangeAt)] : null,
+    gd.lastSyncAt ? ["上次同步", formatDateTime(gd.lastSyncAt)] : null
+  ].filter(Boolean);
+  return `
+    <div class="status-summary">
+      ${rows.map(([label, value]) => `<div class="status-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}
+    </div>
   `;
 }
 
@@ -2177,9 +2191,9 @@ function customFieldOptionEditor(field) {
   `;
 }
 
-function detailGroup(title, content) {
+function detailGroup(title, content, className = "") {
   if (!content) return "";
-  return `<section class="panel section"><h2 class="section-title">${title}</h2>${content}</section>`;
+  return `<section class="detail-section ${className}"><h2 class="section-title">${escapeHtml(title)}</h2>${content}</section>`;
 }
 
 function detailLine(label, value = "", action = "", className = "") {
