@@ -45,6 +45,7 @@ let state = {
   waitingServiceWorker: null,
   serviceWorkerRegistration: null,
   historyNavigationRegistered: false,
+  ignoreNextPopstate: false,
   installPromptEvent: null,
   installDismissed: localStorage.getItem("forget-me-not-install-dismissed") === "true",
   isInstalled: isPwaInstalled()
@@ -167,9 +168,20 @@ function registerHistoryNavigation() {
   state.historyNavigationRegistered = true;
   replaceHistoryRoute(state.route);
   window.addEventListener("popstate", (event) => {
+    if (state.ignoreNextPopstate) {
+      state.ignoreNextPopstate = false;
+      return;
+    }
     if (!event.state?.appRoute) return;
-    state.route = restoreHistoryRoute(event.state.route);
+    const nextRoute = restoreHistoryRoute(event.state.route);
+    if (!confirmBeforeLeavingCurrentRoute(nextRoute, { viaHistory: true })) return;
+    state.route = nextRoute;
     render({ restoreScroll: true });
+  });
+  window.addEventListener("beforeunload", (event) => {
+    if (!hasPendingRouteWork()) return;
+    event.preventDefault();
+    event.returnValue = "";
   });
 }
 
@@ -394,12 +406,21 @@ async function setupMasterPassword(event) {
   await save();
   await uploadKeyPackageToDrive();
   await uploadCurrentVaultToDrive();
-  state.route = { name: "showRecoveryCode", recoveryCode: result.recoveryCode };
-  render();
+  showRecoveryCodeRoute(result.recoveryCode, { returnTo: { name: "home" } });
 }
 
 function finishRecoveryCode() {
-  navigate({ name: "home" }, { replace: true });
+  navigate(state.route.returnTo ?? { name: "home" }, { replace: true, force: true });
+}
+
+function showRecoveryCodeRoute(recoveryCode, options = {}) {
+  state.route = {
+    name: "showRecoveryCode",
+    recoveryCode,
+    oldInvalid: Boolean(options.oldInvalid),
+    returnTo: options.returnTo ?? { name: "home" }
+  };
+  render();
 }
 
 async function getKeyPackage() {
@@ -495,9 +516,8 @@ async function unlockExistingDriveVault(event) {
       })
     );
     await save();
-    state.route = { name: "home" };
+    navigate({ name: "home" }, { replace: true, force: true });
     void resumeDriveSyncInBackground();
-    render();
   } catch {
     alert("密碼不正確，請再試一次");
   }
@@ -563,9 +583,8 @@ async function mergeExistingDriveVault(event) {
     await save();
     await uploadKeyPackageToDrive();
     await uploadCurrentVaultToDrive();
-    state.route = merged.conflicts.length ? { name: "syncConflicts" } : { name: "home" };
     alert(syncAlertMessage(state.appState.googleDrive.lastSyncSummary, merged.conflicts.length));
-    render();
+    navigate(merged.conflicts.length ? { name: "syncConflicts" } : { name: "home" }, { replace: true, force: true });
   } catch (error) {
     markDriveSyncIssue(error);
     alert(driveErrorMessage(error, "資料已在本機合併，但 Google Drive 寫回失敗，請稍後再按「立即同步」。"));
@@ -843,9 +862,8 @@ async function unlockWithMasterPassword(event) {
       currentVaultId: keyPackage.vaultId
     };
     await save();
-    state.route = { name: "home" };
+    navigate({ name: "home" }, { replace: true, force: true });
     void resumeDriveSyncInBackground();
-    render();
   } catch {
     alert("密碼不正確，請再試一次");
   }
@@ -885,7 +903,7 @@ async function changeMasterPassword(event) {
       })
     );
     alert("密碼已更新");
-    navigate({ name: "settings" });
+    navigate({ name: "settings" }, { replace: true, force: true });
   } catch {
     alert("目前密碼不正確，請再試一次");
   }
@@ -900,8 +918,7 @@ async function resetForgottenPassword(event) {
     const { keyPackage, dekBytes } = await unwrapCurrentDek(recoveryCode, "recoveryCodeWrapper");
     const updated = await replaceMasterPasswordAndRecovery(keyPackage, dekBytes, draft.newPassword, true);
     await uploadKeyPackageToDrive();
-    state.route = { name: "showRecoveryCode", recoveryCode: updated.recoveryCode, oldInvalid: true };
-    render();
+    showRecoveryCodeRoute(updated.recoveryCode, { oldInvalid: true, returnTo: { name: "settings" } });
   } catch {
     alert("救援碼不正確，請確認後再試一次");
   }
@@ -914,8 +931,7 @@ async function regenerateRecoveryCode(event) {
     const { keyPackage, dekBytes } = await unwrapCurrentDek(draft.currentPassword);
     const updated = await replaceRecoveryCode(keyPackage, dekBytes);
     await uploadKeyPackageToDrive();
-    state.route = { name: "showRecoveryCode", recoveryCode: updated.recoveryCode, oldInvalid: true };
-    render();
+    showRecoveryCodeRoute(updated.recoveryCode, { oldInvalid: true, returnTo: { name: "settings" } });
   } catch {
     alert("目前密碼不正確，請再試一次");
   }
@@ -939,8 +955,7 @@ async function logoutAllDevices(event) {
     await setItem("keyPackage", updatedKeyPackage);
     await uploadKeyPackageToDrive();
     await removeItem("trustedSession");
-    state.route = { name: "unlock", message: "已從所有裝置登出，請重新輸入密碼", showForgotPassword: true };
-    render();
+    navigate({ name: "unlock", message: "已從所有裝置登出，請重新輸入密碼", showForgotPassword: true }, { replace: true, force: true });
   } catch {
     alert("目前密碼不正確，請再試一次");
   }
@@ -1016,7 +1031,91 @@ async function replaceRecoveryCode(keyPackage, dekBytes) {
   return { keyPackage: updatedKeyPackage, recoveryCode };
 }
 
+function confirmBeforeLeavingCurrentRoute(targetRoute = {}, options = {}) {
+  if (options.force) return true;
+  if (isSameRoute(state.route, targetRoute)) return true;
+  if (state.route.name === "showRecoveryCode") {
+    const leave = confirm("離開此畫面後將不再顯示此救援碼，確定已妥善保存嗎？");
+    if (!leave && options.viaHistory) cancelHistoryBack();
+    if (leave && options.viaHistory) {
+      const fallbackRoute = state.route.returnTo ?? { name: "home" };
+      state.route = prepareRouteForNavigation(fallbackRoute);
+      render({ restoreScroll: true });
+      writeHistoryRoute(state.route, { replace: true, force: true });
+      return false;
+    }
+    return leave;
+  }
+  if (isPersonFormDirty()) {
+    const leave = confirm("尚未儲存變更，確定要離開嗎？");
+    if (!leave && options.viaHistory) cancelHistoryBack();
+    return leave;
+  }
+  if (hasPendingSecurityOperation()) {
+    const leave = confirm("尚未完成操作，確定要離開嗎？");
+    if (!leave && options.viaHistory) cancelHistoryBack();
+    return leave;
+  }
+  return true;
+}
+
+function cancelHistoryBack() {
+  state.ignoreNextPopstate = true;
+  history.forward();
+}
+
+function hasPendingRouteWork() {
+  return state.route.name === "showRecoveryCode" || isPersonFormDirty() || hasPendingSecurityOperation();
+}
+
+function isSameRoute(current = {}, next = {}) {
+  return current.name === next.name && current.id === next.id;
+}
+
+function isPersonFormDirty() {
+  if (!["new", "edit"].includes(state.route.name)) return false;
+  if (!state.route.draft || !state.route.draftBaseline) return false;
+  return personDraftSignature(state.route.draft) !== state.route.draftBaseline;
+}
+
+function personDraftSignature(draft) {
+  const normalized = normalizeDraft(structuredClone(draft));
+  return JSON.stringify({
+    id: normalized.id,
+    name: normalized.name ?? "",
+    birthDate: normalized.birthDate ?? "",
+    phones: normalized.phones ?? [],
+    addresses: normalized.addresses ?? [],
+    interestTagIds: normalized.interestTagIds ?? [],
+    favoriteItems: normalized.favoriteItems ?? [],
+    familyMembers: normalized.familyMembers ?? [],
+    lifeEvents: normalized.lifeEvents ?? [],
+    customValues: normalized.customValues ?? [],
+    archivedAt: normalized.archivedAt ?? "",
+    note: normalized.note ?? ""
+  });
+}
+
+function hasPendingSecurityOperation() {
+  if (state.route.name === "setupMasterPassword") return hasAnyDraftValue(state.route.passwordDraft);
+  const guardedRoutes = new Set([
+    "driveMergeUnlock",
+    "driveExistingUnlock",
+    "changePassword",
+    "forgotPassword",
+    "regenerateRecovery",
+    "logoutAllDevices"
+  ]);
+  if (!guardedRoutes.has(state.route.name)) return false;
+  return hasAnyDraftValue(state.route.securityDraft);
+}
+
+function hasAnyDraftValue(draft = {}) {
+  return Object.values(draft).some((value) => String(value ?? "").trim());
+}
+
 function navigate(route, options = {}) {
+  if (!confirmBeforeLeavingCurrentRoute(route, options)) return;
   syncCurrentHistoryScroll();
   state.route = prepareRouteForNavigation(route);
   render({ restoreScroll: true });
@@ -1046,6 +1145,7 @@ function navigateBackFromDetail() {
 }
 
 function navigateBack(fallbackRoute) {
+  if (!confirmBeforeLeavingCurrentRoute(fallbackRoute, { viaBack: true })) return;
   syncCurrentHistoryScroll();
   if (history.state?.appRoute && history.length > 1) {
     history.back();
@@ -1296,7 +1396,10 @@ function searchView() {
 
 function personFormView(person = null) {
   const draft = person ? structuredClone(person) : createPerson(state.appState.deviceId, { name: state.route.prefillName ?? "" });
-  state.route.draft ??= normalizeDraft(draft);
+  if (!state.route.draft) {
+    state.route.draft = normalizeDraft(draft);
+    state.route.draftBaseline = personDraftSignature(state.route.draft);
+  }
   const d = state.route.draft;
   const title = person ? "編輯人物" : "新增人物";
   return `
@@ -2590,6 +2693,7 @@ async function savePersonForm(event) {
   else vault.people.push(person);
   state.route = { name: "detail", id: person.id, returnTo: state.route.returnTo };
   await commitVault(vault);
+  writeHistoryRoute(state.route, { replace: true, force: true });
 }
 
 function addListItem(key) {
