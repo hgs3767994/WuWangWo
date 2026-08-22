@@ -1,8 +1,8 @@
 const userConfig = globalThis.window?.FORGET_ME_NOT_CONFIG ?? {};
 
 export const APP_CONFIG = {
-  appVersion: "1.0.55",
-  cacheName: "forget-me-not-v57",
+  appVersion: "0.1.0",
+  cacheName: "forget-me-not-v59",
   driveProvider: "mock",
   googleDrive: {
     clientId: "",

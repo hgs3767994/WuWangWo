@@ -331,7 +331,7 @@ textarea {
 
 .topbar-centered .detail-page-title {
   max-width: calc(100% - 190px);
-  font-size: 24px;
+  font-size: 28px;
 }
 
 .detail-edit-button {
@@ -752,6 +752,12 @@ button:focus-visible,
 
 .search-actions {
   justify-content: center;
+}
+
+.search-panel .field label {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .archived-banner {

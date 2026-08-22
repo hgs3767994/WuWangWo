@@ -44,6 +44,7 @@ let state = {
   updateAvailable: false,
   waitingServiceWorker: null,
   serviceWorkerRegistration: null,
+  historyNavigationRegistered: false,
   installPromptEvent: null,
   installDismissed: localStorage.getItem("forget-me-not-install-dismissed") === "true",
   isInstalled: isPwaInstalled()
@@ -72,6 +73,7 @@ async function boot() {
           route: { name: "unlock", message: sessionCheck.message, showForgotPassword: true }
         };
         render();
+        registerHistoryNavigation();
         registerServiceWorker();
         registerInstallExperience();
         return;
@@ -82,6 +84,7 @@ async function boot() {
         await removeItem("trustedSession");
         state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock" } };
         render();
+        registerHistoryNavigation();
         registerServiceWorker();
         registerInstallExperience();
         return;
@@ -92,6 +95,7 @@ async function boot() {
     void resumeDriveSyncInBackground();
   }
   render();
+  registerHistoryNavigation();
   registerServiceWorker();
   registerInstallExperience();
 }
@@ -155,6 +159,17 @@ function registerInstallExperience() {
   window.matchMedia?.("(display-mode: standalone)")?.addEventListener?.("change", () => {
     state.isInstalled = isPwaInstalled();
     render();
+  });
+}
+
+function registerHistoryNavigation() {
+  if (state.historyNavigationRegistered) return;
+  state.historyNavigationRegistered = true;
+  replaceHistoryRoute(state.route);
+  window.addEventListener("popstate", (event) => {
+    if (!event.state?.appRoute) return;
+    state.route = restoreHistoryRoute(event.state.route);
+    render({ restoreScroll: true });
   });
 }
 
@@ -384,8 +399,7 @@ async function setupMasterPassword(event) {
 }
 
 function finishRecoveryCode() {
-  state.route = { name: "home" };
-  render();
+  navigate({ name: "home" }, { replace: true });
 }
 
 async function getKeyPackage() {
@@ -1002,16 +1016,19 @@ async function replaceRecoveryCode(keyPackage, dekBytes) {
   return { keyPackage: updatedKeyPackage, recoveryCode };
 }
 
-function navigate(route) {
-  state.route = route;
-  render();
+function navigate(route, options = {}) {
+  syncCurrentHistoryScroll();
+  state.route = prepareRouteForNavigation(route);
+  render({ restoreScroll: true });
+  writeHistoryRoute(state.route, options);
 }
 
 function currentRouteSnapshot() {
   return structuredClone({
     name: state.route.name,
     params: state.route.params,
-    id: state.route.id
+    id: state.route.id,
+    scrollY: window.scrollY
   });
 }
 
@@ -1025,13 +1042,73 @@ function detailRoute(id) {
 }
 
 function navigateBackFromDetail() {
-  navigate(state.route.returnTo ?? { name: "home" });
+  navigateBack(state.route.returnTo ?? { name: "home" });
 }
 
-function render() {
+function navigateBack(fallbackRoute) {
+  syncCurrentHistoryScroll();
+  if (history.state?.appRoute && history.length > 1) {
+    history.back();
+    return;
+  }
+  navigate(fallbackRoute, { replace: true });
+}
+
+function prepareRouteForNavigation(route) {
+  return {
+    ...route,
+    scrollY: Number.isFinite(route.scrollY) ? route.scrollY : 0
+  };
+}
+
+function syncCurrentHistoryScroll() {
+  if (!state.historyNavigationRegistered || !history.state?.appRoute) return;
+  replaceHistoryRoute({ ...state.route, scrollY: window.scrollY });
+}
+
+function writeHistoryRoute(route, options = {}) {
+  if (!state.historyNavigationRegistered || route.name === "showRecoveryCode") return;
+  const payload = { appRoute: true, route: historyRouteSnapshot(route) };
+  if (options.replace) history.replaceState(payload, "");
+  else history.pushState(payload, "");
+}
+
+function replaceHistoryRoute(route) {
+  if (route.name === "showRecoveryCode") return;
+  history.replaceState({ appRoute: true, route: historyRouteSnapshot(route) }, "");
+}
+
+function historyRouteSnapshot(route = {}) {
+  return {
+    name: route.name,
+    id: route.id,
+    params: route.params ? structuredClone(route.params) : undefined,
+    mode: route.mode,
+    prefillName: route.prefillName,
+    message: route.message,
+    showForgotPassword: route.showForgotPassword,
+    scrollY: Number.isFinite(route.scrollY) ? route.scrollY : 0,
+    returnTo: route.returnTo ? historyRouteSnapshot(route.returnTo) : undefined
+  };
+}
+
+function restoreHistoryRoute(route = {}) {
+  return {
+    ...route,
+    scrollY: Number.isFinite(route.scrollY) ? route.scrollY : 0
+  };
+}
+
+function restoreRouteScroll(route) {
+  const y = Number.isFinite(route?.scrollY) ? route.scrollY : 0;
+  requestAnimationFrame(() => window.scrollTo(0, y));
+}
+
+function render(options = {}) {
   applyTheme(currentThemeId());
   app.innerHTML = `<main class="app route-${escapeAttr(state.route.name)}">${view()}</main>${updatePromptView()}`;
   bind();
+  if (options.restoreScroll) restoreRouteScroll(state.route);
 }
 
 function currentThemeId() {
@@ -1173,7 +1250,7 @@ function homeView() {
 }
 
 function searchView() {
-  const params = state.route.params ?? { text: "", address: "", tagIds: [] };
+  const params = normalizeSearchParams(state.route.params);
   const hasCriteria = hasSearchCriteria(params);
   const results = hasCriteria ? searchPeople(params) : [];
   return `
@@ -1182,14 +1259,23 @@ function searchView() {
       <h1 class="section-title">搜尋</h1>
       <span></span>
     </header>
-    <section class="panel">
+    <section class="panel search-panel">
       <div class="field">
         <label>依輸入文字搜尋</label>
-        <input data-search="text" placeholder="姓名、其它、自訂欄位…" value="${escapeAttr(params.text)}" />
+        <input data-search="text" placeholder="姓名、其它、嗜好品、重大事件、自訂欄位…" value="${escapeAttr(params.text)}" />
       </div>
       <div class="field">
         <label>依地址搜尋</label>
         <input data-search="address" placeholder="地址" value="${escapeAttr(params.address)}" />
+      </div>
+      <div class="field">
+        <label>生日將至</label>
+        <select data-search="birthdayWithinMonths">
+          <option value="" ${params.birthdayWithinMonths ? "" : "selected"}>不篩選</option>
+          <option value="1" ${params.birthdayWithinMonths === "1" ? "selected" : ""}>一個月內</option>
+          <option value="2" ${params.birthdayWithinMonths === "2" ? "selected" : ""}>兩個月內</option>
+          <option value="3" ${params.birthdayWithinMonths === "3" ? "selected" : ""}>三個月內</option>
+        </select>
       </div>
       <div class="field">
         <label>依興趣喜好搜尋</label>
@@ -2260,7 +2346,11 @@ function notFoundView() {
 
 function bind() {
   app.querySelectorAll("[data-nav]").forEach((el) => {
-    el.addEventListener("click", () => navigate({ name: el.dataset.nav, id: el.dataset.id }));
+    el.addEventListener("click", () => {
+      const fallbackRoute = { name: el.dataset.nav, id: el.dataset.id };
+      if (el.textContent.trim() === "返回") navigateBack(fallbackRoute);
+      else navigate(fallbackRoute);
+    });
   });
   app.querySelectorAll("[data-detail]").forEach((el) => {
     el.addEventListener("click", () => navigate(detailRoute(el.dataset.detail)));
@@ -2348,11 +2438,13 @@ function bind() {
     });
   });
   app.querySelectorAll("[data-search]").forEach((el) => {
-    el.addEventListener("input", () => {
-      const params = state.route.params ?? { text: "", address: "", tagIds: [] };
+    const updateSearch = () => {
+      const params = normalizeSearchParams(state.route.params);
       params[el.dataset.search] = el.value;
       state.route.params = params;
-    });
+    };
+    el.addEventListener("input", updateSearch);
+    el.addEventListener("change", updateSearch);
   });
   const form = app.querySelector("[data-form='person']");
   if (form) form.addEventListener("submit", savePersonForm);
@@ -2449,7 +2541,7 @@ async function handleAction(event, el) {
   if (action === "rename-custom-option") return renameCustomOption(el.dataset.fieldId, el.dataset.option);
   if (action === "delete-custom-option") return deleteCustomOption(el.dataset.fieldId, el.dataset.option);
   if (action === "apply-search") return render();
-  if (action === "clear-search") return navigate({ name: "search", params: { text: "", address: "", tagIds: [] } });
+  if (action === "clear-search") return navigate({ name: "search", params: emptySearchParams() });
 }
 
 function toggleRouteFlag(key) {
@@ -2600,7 +2692,7 @@ function toggleInterest(id) {
 }
 
 function toggleSearchTag(id) {
-  const params = state.route.params ?? { text: "", address: "", tagIds: [] };
+  const params = normalizeSearchParams(state.route.params);
   params.tagIds = params.tagIds.includes(id) ? params.tagIds.filter((item) => item !== id) : [...params.tagIds, id];
   state.route.params = params;
   render();
@@ -3110,19 +3202,28 @@ function countBy(items, keyFn) {
 }
 
 function searchPeople(params) {
-  const text = params.text.trim().toLowerCase();
-  const address = params.address.trim().toLowerCase();
-  const tagIds = params.tagIds;
+  const normalizedParams = normalizeSearchParams(params);
+  const text = normalizedParams.text.trim().toLowerCase();
+  const address = normalizedParams.address.trim().toLowerCase();
+  const tagIds = normalizedParams.tagIds;
+  const birthdayMonths = Number(normalizedParams.birthdayWithinMonths || 0);
   const matched = visiblePeople(state.vault.people).filter((person) => {
     const textMatch =
       !text ||
-      [person.name, person.note, ...person.customValues.map((value) => String(value.value))]
+      [
+        person.name,
+        person.note,
+        ...(person.favoriteItems ?? []).map((item) => item.value),
+        ...(person.lifeEvents ?? []).map((event) => event.text),
+        ...person.customValues.map((value) => formatSearchValue(value.value))
+      ]
         .join(" ")
         .toLowerCase()
         .includes(text);
     const addressMatch = !address || person.addresses.some((item) => item.value.toLowerCase().includes(address));
-    const tagMatch = tagIds.every((id) => person.interestTagIds.includes(id));
-    return textMatch && addressMatch && tagMatch;
+    const tagMatch = tagIds.every((id) => (person.interestTagIds ?? []).includes(id));
+    const birthdayMatch = !birthdayMonths || isBirthdayWithinMonths(person.birthDate, birthdayMonths);
+    return textMatch && addressMatch && tagMatch && birthdayMatch;
   });
   return matched.sort((a, b) => {
     const aName = text && a.name.toLowerCase().includes(text);
@@ -3133,7 +3234,51 @@ function searchPeople(params) {
 }
 
 function hasSearchCriteria(params) {
-  return Boolean(params.text.trim() || params.address.trim() || params.tagIds.length);
+  const normalizedParams = normalizeSearchParams(params);
+  return Boolean(normalizedParams.text.trim() || normalizedParams.address.trim() || normalizedParams.tagIds.length || normalizedParams.birthdayWithinMonths);
+}
+
+function emptySearchParams() {
+  return { text: "", address: "", tagIds: [], birthdayWithinMonths: "" };
+}
+
+function normalizeSearchParams(params = {}) {
+  return {
+    text: params.text ?? "",
+    address: params.address ?? "",
+    tagIds: params.tagIds ?? [],
+    birthdayWithinMonths: params.birthdayWithinMonths ?? ""
+  };
+}
+
+function formatSearchValue(value) {
+  if (Array.isArray(value)) return value.join(" ");
+  return String(value ?? "");
+}
+
+function isBirthdayWithinMonths(birthDate, months) {
+  if (!birthDate) return false;
+  const [, month, day] = birthDate.split("-").map(Number);
+  if (!month || !day) return false;
+  const today = startOfDay(new Date());
+  const endDate = addCalendarMonths(today, months);
+  let nextBirthday = new Date(today.getFullYear(), month - 1, day);
+  if (nextBirthday < today) nextBirthday = new Date(today.getFullYear() + 1, month - 1, day);
+  return nextBirthday >= today && nextBirthday <= endDate;
+}
+
+function startOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addCalendarMonths(date, months) {
+  const result = new Date(date);
+  const targetMonth = result.getMonth() + months;
+  result.setMonth(targetMonth);
+  if (result.getMonth() !== ((targetMonth % 12) + 12) % 12) {
+    result.setDate(0);
+  }
+  return startOfDay(result);
 }
 
 function customDefsForPerson(personId) {
