@@ -17,7 +17,7 @@ for (const [name, test] of tests) {
 console.log("Smoke tests passed.");
 
 function testConfigDefaults() {
-  assert(APP_CONFIG.appVersion === "0.1.0", "unexpected app version");
+  assert(APP_CONFIG.appVersion === "1.0.55", "unexpected app version");
   assert(isMockDrive(), "drive provider should default to mock");
   assert(!isGoogleDriveConfigured(), "Google Drive should not be configured by default");
   assert(driveProviderLabel() === "本機模擬", "wrong drive provider label");
