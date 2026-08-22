@@ -28,6 +28,21 @@ import {
 const app = document.querySelector("#app");
 const FAMILY_RELATIONSHIP_ORDER = ["父", "母", "配偶", "子", "女", "兄", "姐", "弟", "妹"];
 const FAMILY_RELATIONSHIP_OPTIONS = [...FAMILY_RELATIONSHIP_ORDER, "其它"];
+const NO_SLIDE_ROUTE_NAMES = new Set([
+  "loading",
+  "welcome",
+  "unlock",
+  "driveIntro",
+  "driveCloudChoice",
+  "driveMergeUnlock",
+  "driveExistingUnlock",
+  "setupMasterPassword",
+  "showRecoveryCode",
+  "changePassword",
+  "forgotPassword",
+  "regenerateRecovery",
+  "logoutAllDevices"
+]);
 const THEME_OPTIONS = [
   { id: "comfortable-green", name: "舒適綠", colors: ["#24443D", "#5B9EA6", "#F4F6F5"] },
   { id: "business-blue", name: "商務藍", colors: ["#1E293B", "#2563EB", "#F8FAFC"] },
@@ -173,10 +188,11 @@ function registerHistoryNavigation() {
       return;
     }
     if (!event.state?.appRoute) return;
+    const fromRoute = state.route;
     const nextRoute = restoreHistoryRoute(event.state.route);
     if (!confirmBeforeLeavingCurrentRoute(nextRoute, { viaHistory: true })) return;
     state.route = nextRoute;
-    render({ restoreScroll: true });
+    render({ restoreScroll: true, transition: "back", fromRoute });
   });
   window.addEventListener("beforeunload", (event) => {
     if (!hasPendingRouteWork()) return;
@@ -1117,8 +1133,13 @@ function hasAnyDraftValue(draft = {}) {
 function navigate(route, options = {}) {
   if (!confirmBeforeLeavingCurrentRoute(route, options)) return;
   syncCurrentHistoryScroll();
+  const fromRoute = state.route;
   state.route = prepareRouteForNavigation(route);
-  render({ restoreScroll: true });
+  render({
+    restoreScroll: true,
+    transition: options.transition ?? (options.replace ? "replace" : "forward"),
+    fromRoute
+  });
   writeHistoryRoute(state.route, options);
 }
 
@@ -1151,7 +1172,7 @@ function navigateBack(fallbackRoute) {
     history.back();
     return;
   }
-  navigate(fallbackRoute, { replace: true });
+  navigate(fallbackRoute, { replace: true, force: true, transition: "back" });
 }
 
 function prepareRouteForNavigation(route) {
@@ -1206,9 +1227,23 @@ function restoreRouteScroll(route) {
 
 function render(options = {}) {
   applyTheme(currentThemeId());
-  app.innerHTML = `<main class="app route-${escapeAttr(state.route.name)}">${view()}</main>${updatePromptView()}`;
+  const transitionClass = routeTransitionClass(options.transition, options.fromRoute, state.route);
+  app.innerHTML = `<main class="app route-${escapeAttr(state.route.name)} ${transitionClass}">${view()}</main>${updatePromptView()}`;
   bind();
   if (options.restoreScroll) restoreRouteScroll(state.route);
+}
+
+function routeTransitionClass(direction, fromRoute, toRoute) {
+  if (!direction) return "";
+  const safeDirection = ["forward", "back", "replace"].includes(direction) ? direction : "replace";
+  const mode = shouldUseSlideTransition(fromRoute, toRoute, safeDirection) ? safeDirection : "fade";
+  return `page-transition page-transition-${mode}`;
+}
+
+function shouldUseSlideTransition(fromRoute, toRoute, direction) {
+  if (direction === "replace") return false;
+  if (NO_SLIDE_ROUTE_NAMES.has(fromRoute?.name) || NO_SLIDE_ROUTE_NAMES.has(toRoute?.name)) return false;
+  return true;
 }
 
 function currentThemeId() {
