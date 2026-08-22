@@ -2436,9 +2436,10 @@ function detailLine(label, value = "", action = "", className = "") {
 
 function bottomNav(current) {
   const target = current === "home" ? { name: "settings", label: "設定" } : { name: "home", label: "首頁" };
+  const backAttribute = current === "settings" ? ` data-back="true"` : "";
   return `
     <nav class="bottom-nav">
-      <button data-nav="${target.name}">${target.label}</button>
+      <button data-nav="${target.name}"${backAttribute}>${target.label}</button>
     </nav>
   `;
 }
@@ -2451,7 +2452,7 @@ function bind() {
   app.querySelectorAll("[data-nav]").forEach((el) => {
     el.addEventListener("click", () => {
       const fallbackRoute = { name: el.dataset.nav, id: el.dataset.id };
-      if (el.textContent.trim() === "返回") navigateBack(fallbackRoute);
+      if (shouldUseBackNavigation(el)) navigateBack(fallbackRoute);
       else navigate(fallbackRoute);
     });
   });
@@ -2561,6 +2562,14 @@ function bind() {
   });
 }
 
+function shouldUseBackNavigation(el) {
+  if (el.dataset.back === "true") return true;
+  const label = el.textContent.trim();
+  if (label === "返回") return true;
+  if (state.route.name === "settings" && el.dataset.nav === "home" && label === "首頁") return true;
+  return false;
+}
+
 function bindSecurityForms() {
   const handlers = {
     unlock: unlockWithMasterPassword,
@@ -2601,7 +2610,7 @@ async function handleAction(event, el) {
   if (action === "download-local-snapshot") return downloadLocalSnapshot(el.dataset.id);
   if (action === "open-detail") return navigate(detailRoute(el.dataset.id));
   if (action === "detail-back") return navigateBackFromDetail();
-  if (action === "cancel-form") return navigate(state.route.id ? detailRoute(state.route.id) : { name: "home" });
+  if (action === "cancel-form") return navigateBack(state.route.id ? detailRoute(state.route.id) : { name: "home" });
   if (action === "edit-person") return navigate({ name: "edit", id: el.dataset.id, returnTo: state.route.returnTo });
   if (action === "delete-person") return deletePerson(el.dataset.id);
   if (action === "archive-person") return archivePerson(el.dataset.id);
