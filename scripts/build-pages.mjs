@@ -11,6 +11,7 @@ const entries = [
   "manifest.webmanifest",
   "service-worker.js",
   "assets",
+  "pics",
   "src"
 ];
 
