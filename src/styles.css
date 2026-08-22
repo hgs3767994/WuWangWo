@@ -143,6 +143,46 @@ body[data-theme="gentle-pink"] {
   --disabled-text: #b58a9a;
 }
 
+body[data-theme="memory-paper"] {
+  --primary: #667887;
+  --primary-hover: #566978;
+  --primary-active: #465866;
+
+  --secondary: #F3EEE4;
+  --accent: #A77A52;
+  --accent-hover: #936946;
+  --accent-soft: #E8E2D8;
+
+  --info: #4F7EA8;
+  --success: #4F8A68;
+  --warning: #B9853E;
+  --danger: #B85C56;
+  --danger-hover: #A24E49;
+  --danger-active: #8B423D;
+
+  --text-primary: #3D4143;
+  --text-secondary: #5E625F;
+  --text-tertiary: #74716C;
+
+  --text-on-primary: #F8F5EE;
+  --text-on-accent: #FFF9F0;
+
+  --bg: #F3EEE4;
+  --panel: #FFFDF8;
+  --surface-section: #E8E2D8;
+  --surface-muted: #EFE8DD;
+  --surface-dark: #3D4143;
+
+  --line: #CFC7BB;
+  --line-soft: #E2DCD2;
+  --divider: #E2DCD2;
+
+  --focus: #A77A52;
+
+  --disabled: #E6DED3;
+  --disabled-text: #9A948C;
+}
+
 button,
 input,
 textarea,
