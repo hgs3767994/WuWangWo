@@ -61,6 +61,7 @@ let state = {
   serviceWorkerRegistration: null,
   historyNavigationRegistered: false,
   ignoreNextPopstate: false,
+  skipNextPopstateConfirm: false,
   installPromptEvent: null,
   installDismissed: localStorage.getItem("forget-me-not-install-dismissed") === "true",
   isInstalled: isPwaInstalled()
@@ -190,7 +191,11 @@ function registerHistoryNavigation() {
     if (!event.state?.appRoute) return;
     const fromRoute = state.route;
     const nextRoute = restoreHistoryRoute(event.state.route);
-    if (!confirmBeforeLeavingCurrentRoute(nextRoute, { viaHistory: true })) return;
+    if (state.skipNextPopstateConfirm) {
+      state.skipNextPopstateConfirm = false;
+    } else if (!confirmBeforeLeavingCurrentRoute(nextRoute, { viaHistory: true })) {
+      return;
+    }
     state.route = nextRoute;
     render({ restoreScroll: true, transition: "back", fromRoute });
   });
@@ -379,12 +384,12 @@ async function save() {
   }
 }
 
-async function commitVault(vault) {
+async function commitVault(vault, options = {}) {
   await createLocalSnapshot("修改前自動快照");
   state.vault = touchVault(vault, state.appState.deviceId);
   markLocalVaultChanged();
   await save();
-  render();
+  if (options.render !== false) render();
 }
 
 async function setupMasterPassword(event) {
@@ -1099,6 +1104,7 @@ function personDraftSignature(draft) {
   return JSON.stringify({
     id: normalized.id,
     name: normalized.name ?? "",
+    nationalId: normalized.nationalId ?? "",
     birthDate: normalized.birthDate ?? "",
     phones: normalized.phones ?? [],
     addresses: normalized.addresses ?? [],
@@ -1165,10 +1171,11 @@ function navigateBackFromDetail() {
   navigateBack(state.route.returnTo ?? { name: "home" });
 }
 
-function navigateBack(fallbackRoute) {
-  if (!confirmBeforeLeavingCurrentRoute(fallbackRoute, { viaBack: true })) return;
+function navigateBack(fallbackRoute, options = {}) {
+  if (!confirmBeforeLeavingCurrentRoute(fallbackRoute, { viaBack: true, force: options.force })) return;
   syncCurrentHistoryScroll();
   if (history.state?.appRoute && history.length > 1) {
+    if (options.force) state.skipNextPopstateConfirm = true;
     history.back();
     return;
   }
@@ -1388,6 +1395,7 @@ function searchView() {
   const params = normalizeSearchParams(state.route.params);
   const hasCriteria = hasSearchCriteria(params);
   const results = hasCriteria ? searchPeople(params) : [];
+  const birthdayOptions = birthdaySearchOptions();
   return `
     <header class="topbar">
       <button class="secondary" data-nav="home">返回</button>
@@ -1402,6 +1410,19 @@ function searchView() {
       <div class="field">
         <label>依地址搜尋</label>
         <input data-search="address" placeholder="地址" value="${escapeAttr(params.address)}" />
+      </div>
+      <div class="field">
+        <label>依生日年、月搜尋</label>
+        <div class="row birthday-search-row">
+          <select data-search="birthYear">
+            <option value="" ${params.birthYear ? "" : "selected"}>年份</option>
+            ${birthdayOptions.years.map((year) => `<option value="${year}" ${params.birthYear === String(year) ? "selected" : ""}>${year} 年</option>`).join("")}
+          </select>
+          <select data-search="birthMonth">
+            <option value="" ${params.birthMonth ? "" : "selected"}>月份</option>
+            ${birthdayOptions.months.map((month) => `<option value="${month}" ${params.birthMonth === String(month) ? "selected" : ""}>${month} 月</option>`).join("")}
+          </select>
+        </div>
       </div>
       <div class="field">
         <label>生日將至</label>
@@ -1444,10 +1465,8 @@ function personFormView(person = null) {
       <span></span>
     </header>
     <form class="stack" data-form="person">
-      ${inputField("姓名 *", "name", d.name)}
-      ${inputField("生日", "birthDate", d.birthDate, "date")}
-      ${listEditor("電話", "phones", d.phones, ["手機", "家裡", "公司", "其它"], "電話號碼")}
-      ${listEditor("地址", "addresses", d.addresses, ["住家", "公司", "其它"], "地址")}
+      ${nameField(d.name)}
+      ${basicFieldsEditor(d)}
       ${interestEditor(d.interestTagIds)}
       ${favoriteItemsEditor(d.favoriteItems)}
       ${familyMembersEditor(d.familyMembers, d.id)}
@@ -1471,11 +1490,7 @@ function detailView(person) {
   const favoriteItems = person.favoriteItems ?? [];
   const familyMembers = sortFamilyMembers(person.familyMembers ?? []);
   const lifeEvents = sortLifeEvents(person.lifeEvents ?? []);
-  const identityLines = [
-    person.birthDate ? detailLine("生日", person.birthDate) : ""
-  ]
-    .filter(Boolean)
-    .join("");
+  const basicLines = basicDetailLines(person);
   const customSections = customDefsForPerson(person.id)
     .map((field) => {
       const value = person.customValues.find((item) => item.fieldId === field.id)?.value;
@@ -1485,9 +1500,7 @@ function detailView(person) {
     .filter(Boolean)
     .join("");
   const detailSections = [
-    identityLines ? detailGroup("基本資料", identityLines) : "",
-    person.phones.length ? detailGroup("電話", sortDefaultFirst(person.phones).map((phone) => detailLine(`${phone.label} ${phone.value}`, "", `<a class="button-link" href="tel:${escapeAttr(phone.value)}">撥打</a><button class="secondary" data-copy="${escapeAttr(phone.value)}">複製</button>`)).join("")) : "",
-    person.addresses.length ? detailGroup("地址", sortDefaultFirst(person.addresses).map((address) => detailLine(`${address.label} ${address.value}`, "", `<button class="secondary" data-copy="${escapeAttr(address.value)}">複製</button>`)).join("")) : "",
+    basicLines ? detailGroup("基本資料", basicLines) : "",
     tags.length ? detailGroup("興趣喜好", `<div class="chip-list">${tags.map((tag) => `<span class="chip selected">${tagLabel(tag)}</span>`).join("")}</div>`) : "",
     favoriteItems.length ? detailGroup("嗜好品", `<div class="chip-list">${favoriteItems.map((item) => `<span class="chip selected">${escapeHtml(item.value)}</span>`).join("")}</div>`) : "",
     familyMembers.length ? detailGroup("家族成員", familyMembers.map(familyMemberLine).join("")) : "",
@@ -1496,9 +1509,7 @@ function detailView(person) {
     person.note ? detailGroup("其它備註", `<p class="detail-value">${escapeHtml(person.note).replaceAll("\n", "<br>")}</p>`) : ""
   ].filter(Boolean).join("");
   const hasDetailContent = Boolean(
-    identityLines ||
-      person.phones.length ||
-      person.addresses.length ||
+    basicLines ||
       tags.length ||
       favoriteItems.length ||
       familyMembers.length ||
@@ -2151,9 +2162,67 @@ function familyMemberLine(member) {
   return `<div class="detail-line"><span>${escapeHtml(member.relationship)}</span><span>${action}</span></div>`;
 }
 
+function basicDetailLines(person) {
+  return [
+    person.birthDate ? detailLine("生日", person.birthDate) : "",
+    person.nationalId ? detailLine("身分證字號", person.nationalId, `<button class="secondary" data-copy="${escapeAttr(person.nationalId)}">複製</button>`) : "",
+    ...((person.phones ?? []).length
+      ? sortDefaultFirst(person.phones).map((phone) =>
+          detailLine(
+            `電話｜${phone.label}`,
+            phone.value,
+            `<a class="button-link" href="tel:${escapeAttr(phone.value)}">撥打</a><button class="secondary" data-copy="${escapeAttr(phone.value)}">複製</button>`
+          )
+        )
+      : []),
+    ...((person.addresses ?? []).length
+      ? sortDefaultFirst(person.addresses).map((address) =>
+          detailLine(`地址｜${address.label}`, address.value, `<button class="secondary" data-copy="${escapeAttr(address.value)}">複製</button>`)
+        )
+      : [])
+  ]
+    .flat()
+    .filter(Boolean)
+    .join("");
+}
+
 function lifeEventLine(event) {
   const date = event.date ? formatCustomValue({ type: "date" }, event.date) : "未填日期";
   return detailLine(date, event.text);
+}
+
+function nameField(value) {
+  return `
+    <section class="panel">
+      <h2 class="section-title">姓名 *</h2>
+      <div class="row name-check-row">
+        <input type="text" data-field="name" value="${escapeAttr(value)}" />
+        <button type="button" class="secondary" data-action="check-duplicate-name">檢查重複姓名</button>
+      </div>
+    </section>
+  `;
+}
+
+function basicFieldsEditor(d) {
+  const expanded = Boolean(state.route.moreBasicFieldsExpanded);
+  const showBirthDate = expanded || Boolean(d.birthDate);
+  const showNationalId = expanded || Boolean(d.nationalId);
+  const showPhones = expanded || hasListValue(d.phones);
+  const showAddresses = expanded || hasListValue(d.addresses);
+  return `
+    <section class="more-fields-toggle">
+      <span>${expanded ? "收起空白欄位" : "顯示更多欄位"}</span>
+      <button type="button" class="disclosure-button" data-action="toggle-more-basic-fields" aria-label="${expanded ? "收起空白欄位" : "顯示更多欄位"}">${expanded ? "▲" : "▼"}</button>
+    </section>
+    ${showBirthDate ? inputField("生日", "birthDate", d.birthDate, "date") : ""}
+    ${showNationalId ? inputField("身分證字號", "nationalId", d.nationalId) : ""}
+    ${showPhones ? listEditor("電話", "phones", d.phones, ["手機", "家裡", "公司", "其它"], "電話號碼") : ""}
+    ${showAddresses ? listEditor("地址", "addresses", d.addresses, ["住家", "公司", "其它"], "地址") : ""}
+  `;
+}
+
+function hasListValue(rows = []) {
+  return rows.some((row) => String(row.value ?? "").trim());
 }
 
 function inputField(label, field, value, type = "text") {
@@ -2258,7 +2327,7 @@ function familyMembersEditor(rows, currentPersonId) {
         ${suggestions.map((person) => `<option value="${escapeAttr(person.name)}" data-person-id="${escapeAttr(person.id)}"></option>`).join("")}
       </datalist>
       <div class="stack">
-        ${rows.length ? rows.map((row, index) => familyMemberEditorRow(row, index, listId, deleting)).join("") : `<p class="muted">尚未新增家族成員。</p>`}
+        ${rows.length ? familyMemberEditorEntries(rows).map(({ row, index }) => familyMemberEditorRow(row, index, listId, deleting)).join("") : `<p class="muted">尚未新增家族成員。</p>`}
       </div>
       <div class="actions">
         <button type="button" class="secondary" data-action="add-family-member">＋ 新增家族成員</button>
@@ -2286,6 +2355,12 @@ function familyMemberEditorRow(row, index, listId, deleting) {
       ${deleting ? `<div class="actions"><button type="button" class="danger" data-action="remove-family-member" data-index="${index}">刪除</button></div>` : ""}
     </div>
   `;
+}
+
+function familyMemberEditorEntries(rows = []) {
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => compareFamilyMembers(a.row, b.row));
 }
 
 function lifeEventsEditor(rows) {
@@ -2647,6 +2722,8 @@ async function handleAction(event, el) {
   if (action === "detail-back") return navigateBackFromDetail();
   if (action === "cancel-form") return navigateBack(state.route.id ? detailRoute(state.route.id) : { name: "home" });
   if (action === "edit-person") return navigate({ name: "edit", id: el.dataset.id, returnTo: state.route.returnTo });
+  if (action === "toggle-more-basic-fields") return toggleMoreBasicFields();
+  if (action === "check-duplicate-name") return checkDuplicateName();
   if (action === "delete-person") return deletePerson(el.dataset.id);
   if (action === "archive-person") return archivePerson(el.dataset.id);
   if (action === "restore-archived-person") return restoreArchivedPerson(el.dataset.id);
@@ -2696,6 +2773,21 @@ function toggleRouteFlag(key) {
   render();
 }
 
+function toggleMoreBasicFields() {
+  state.route.moreBasicFieldsExpanded = !state.route.moreBasicFieldsExpanded;
+  render();
+}
+
+function checkDuplicateName() {
+  const cleanName = state.route.draft?.name?.trim() ?? "";
+  if (!cleanName) {
+    alert("請先輸入姓名");
+    return;
+  }
+  const duplicated = visiblePeople(state.vault.people).some((person) => person.id !== state.route.draft.id && person.name.trim() === cleanName);
+  alert(duplicated ? "發現重覆姓名人物" : "未發現");
+}
+
 async function setTheme(themeId) {
   if (!THEME_OPTIONS.some((theme) => theme.id === themeId) || !state.appState) return;
   state.appState = {
@@ -2733,10 +2825,17 @@ async function savePersonForm(event) {
     updatedByDeviceId: state.appState.deviceId
   };
   const index = vault.people.findIndex((item) => item.id === person.id);
-  if (index >= 0) vault.people[index] = person;
+  const isEditing = index >= 0;
+  if (isEditing) vault.people[index] = person;
   else vault.people.push(person);
+  await commitVault(vault, { render: false });
+  if (isEditing) {
+    state.route.draftBaseline = personDraftSignature(person);
+    navigateBack({ name: "detail", id: person.id, returnTo: state.route.returnTo }, { force: true });
+    return;
+  }
   state.route = { name: "detail", id: person.id, returnTo: state.route.returnTo };
-  await commitVault(vault);
+  render({ transition: "replace" });
   writeHistoryRoute(state.route, { replace: true, force: true });
 }
 
@@ -3355,6 +3454,8 @@ function searchPeople(params) {
   const address = normalizedParams.address.trim().toLowerCase();
   const tagIds = normalizedParams.tagIds;
   const birthdayMonths = Number(normalizedParams.birthdayWithinMonths || 0);
+  const birthYear = normalizedParams.birthYear;
+  const birthMonth = normalizedParams.birthMonth;
   const matched = visiblePeople(state.vault.people).filter((person) => {
     const textMatch =
       !text ||
@@ -3371,7 +3472,9 @@ function searchPeople(params) {
     const addressMatch = !address || person.addresses.some((item) => item.value.toLowerCase().includes(address));
     const tagMatch = tagIds.every((id) => (person.interestTagIds ?? []).includes(id));
     const birthdayMatch = !birthdayMonths || isBirthdayWithinMonths(person.birthDate, birthdayMonths);
-    return textMatch && addressMatch && tagMatch && birthdayMatch;
+    const birthYearMatch = !birthYear || birthDatePart(person.birthDate, "year") === birthYear;
+    const birthMonthMatch = !birthMonth || birthDatePart(person.birthDate, "month") === birthMonth;
+    return textMatch && addressMatch && tagMatch && birthdayMatch && birthYearMatch && birthMonthMatch;
   });
   return matched.sort((a, b) => {
     const aName = text && a.name.toLowerCase().includes(text);
@@ -3383,11 +3486,18 @@ function searchPeople(params) {
 
 function hasSearchCriteria(params) {
   const normalizedParams = normalizeSearchParams(params);
-  return Boolean(normalizedParams.text.trim() || normalizedParams.address.trim() || normalizedParams.tagIds.length || normalizedParams.birthdayWithinMonths);
+  return Boolean(
+    normalizedParams.text.trim() ||
+      normalizedParams.address.trim() ||
+      normalizedParams.tagIds.length ||
+      normalizedParams.birthdayWithinMonths ||
+      normalizedParams.birthYear ||
+      normalizedParams.birthMonth
+  );
 }
 
 function emptySearchParams() {
-  return { text: "", address: "", tagIds: [], birthdayWithinMonths: "" };
+  return { text: "", address: "", tagIds: [], birthdayWithinMonths: "", birthYear: "", birthMonth: "" };
 }
 
 function normalizeSearchParams(params = {}) {
@@ -3395,8 +3505,32 @@ function normalizeSearchParams(params = {}) {
     text: params.text ?? "",
     address: params.address ?? "",
     tagIds: params.tagIds ?? [],
-    birthdayWithinMonths: params.birthdayWithinMonths ?? ""
+    birthdayWithinMonths: params.birthdayWithinMonths ?? "",
+    birthYear: params.birthYear ?? "",
+    birthMonth: params.birthMonth ?? ""
   };
+}
+
+function birthdaySearchOptions() {
+  const years = new Set();
+  const months = new Set();
+  visiblePeople(state.vault.people).forEach((person) => {
+    const year = birthDatePart(person.birthDate, "year");
+    const month = birthDatePart(person.birthDate, "month");
+    if (year) years.add(year);
+    if (month) months.add(month);
+  });
+  return {
+    years: [...years].sort((a, b) => Number(b) - Number(a)),
+    months: [...months].sort((a, b) => Number(a) - Number(b))
+  };
+}
+
+function birthDatePart(birthDate, part) {
+  const [year, month] = String(birthDate ?? "").split("-");
+  if (part === "year") return year || "";
+  if (part === "month") return month ? String(Number(month)) : "";
+  return "";
 }
 
 function formatSearchValue(value) {
@@ -3752,12 +3886,17 @@ function sortFamilyMembers(rows = []) {
 }
 
 function compareFamilyMembers(a, b) {
-  const aIndex = FAMILY_RELATIONSHIP_ORDER.indexOf(a.relationship);
-  const bIndex = FAMILY_RELATIONSHIP_ORDER.indexOf(b.relationship);
-  const aRank = aIndex >= 0 ? aIndex : FAMILY_RELATIONSHIP_ORDER.length;
-  const bRank = bIndex >= 0 ? bIndex : FAMILY_RELATIONSHIP_ORDER.length;
-  if (aRank !== bRank) return aRank - bRank;
+  const aBirthDate = familyMemberBirthDate(a);
+  const bBirthDate = familyMemberBirthDate(b);
+  if (aBirthDate && bBirthDate && aBirthDate !== bBirthDate) return aBirthDate.localeCompare(bBirthDate);
+  if (aBirthDate && !bBirthDate) return -1;
+  if (!aBirthDate && bBirthDate) return 1;
   return new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime();
+}
+
+function familyMemberBirthDate(member) {
+  const linked = member.personId ? getPerson(member.personId) : findUniqueVisiblePersonByName(member.name ?? "");
+  return linked?.birthDate ?? "";
 }
 
 function sortLifeEvents(rows = []) {
