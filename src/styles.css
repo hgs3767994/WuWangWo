@@ -388,6 +388,34 @@ textarea {
   font-size: 28px;
 }
 
+.route-detail .topbar-centered {
+  min-height: 82px;
+}
+
+.topbar-centered .detail-title-block {
+  position: absolute;
+  left: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  max-width: calc(100% - 190px);
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.topbar-centered .detail-title-block .section-title {
+  position: static;
+  max-width: 100%;
+  transform: none;
+}
+
+.detail-date-meta {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .detail-edit-button {
   position: absolute;
   right: 0;

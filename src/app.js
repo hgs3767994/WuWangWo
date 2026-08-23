@@ -26,7 +26,7 @@ import {
 } from "./model.js";
 
 const app = document.querySelector("#app");
-const FAMILY_RELATIONSHIP_ORDER = ["父", "母", "配偶", "子", "女", "兄", "姐", "弟", "妹"];
+const FAMILY_RELATIONSHIP_ORDER = ["父", "母", "配偶", "子", "女", "兄", "姊", "弟", "妹"];
 const FAMILY_RELATIONSHIP_OPTIONS = [...FAMILY_RELATIONSHIP_ORDER, "其它"];
 const NO_SLIDE_ROUTE_NAMES = new Set([
   "loading",
@@ -1524,7 +1524,11 @@ function detailView(person) {
   return `
     <header class="topbar topbar-centered">
       <button class="secondary" data-action="detail-back">返回</button>
-      <h1 class="section-title detail-page-title">${escapeHtml(person.name)}</h1>
+      <div class="detail-title-block">
+        <h1 class="section-title detail-page-title">${escapeHtml(person.name)}</h1>
+        <p class="detail-date-meta">建立日期：${escapeHtml(formatDateTime(person.createdAt))}</p>
+        <p class="detail-date-meta">最近修改：${escapeHtml(formatDateTime(person.updatedAt))}</p>
+      </div>
       <button class="detail-edit-button" data-action="edit-person" data-id="${person.id}">編輯人物</button>
     </header>
     ${person.archivedAt ? `<div class="inline-item archived-banner"><strong>已封存</strong><span class="muted">此人物不會顯示於首頁或搜尋結果。</span></div>` : ""}
@@ -2823,8 +2827,8 @@ function checkDuplicateName() {
     alert("請先輸入姓名");
     return;
   }
-  const duplicated = visiblePeople(state.vault.people).some((person) => person.id !== state.route.draft.id && person.name.trim() === cleanName);
-  alert(duplicated ? "發現重覆姓名人物" : "未發現");
+  const duplicateCount = visiblePeople(state.vault.people).filter((person) => person.id !== state.route.draft.id && person.name.trim() === cleanName).length;
+  alert(duplicateCount ? `發現${duplicateCount}位姓名重覆人物` : "未發現");
 }
 
 function openFamilyMember(sourcePersonId, familyMemberId, name) {
