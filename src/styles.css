@@ -313,7 +313,7 @@ textarea {
 @keyframes page-enter-from-right {
   from {
     opacity: 0;
-    transform: translateX(16px);
+    transform: translateX(20px);
   }
 
   to {
@@ -325,7 +325,7 @@ textarea {
 @keyframes page-enter-from-left {
   from {
     opacity: 0;
-    transform: translateX(-16px);
+    transform: translateX(-20px);
   }
 
   to {
@@ -659,6 +659,76 @@ button:focus-visible,
 
 .birthday-search-row select {
   flex: 1 1 0;
+}
+
+.compact-editor-row {
+  align-items: stretch;
+}
+
+.compact-editor-row input {
+  flex: 1 1 auto;
+}
+
+.compact-row-button {
+  flex: 0 0 auto;
+}
+
+.family-member-row {
+  display: grid;
+  grid-template-columns: 5.8em minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.family-member-row.has-custom-relationship {
+  grid-template-columns: 5.8em minmax(7.5em, 0.7fr) minmax(0, 1fr);
+}
+
+.relationship-select {
+  min-width: 0;
+  padding-inline: 8px 6px;
+}
+
+.life-event-row {
+  display: grid;
+  grid-template-columns: 10.8em minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.date-input {
+  min-width: 0;
+}
+
+.custom-field-main {
+  margin-top: 0;
+}
+
+.custom-field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.custom-field-header label {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.custom-field-header button {
+  flex: 0 0 auto;
+}
+
+.custom-option-row {
+  align-items: stretch;
+}
+
+.custom-option-row input {
+  flex: 1 1 0;
+}
+
+.custom-option-row button {
+  flex: 0 0 auto;
 }
 
 .more-fields-toggle {
@@ -1176,8 +1246,14 @@ code {
   }
 
   .name-check-row,
-  .birthday-search-row {
+  .birthday-search-row,
+  .compact-editor-row,
+  .custom-option-row {
     flex-direction: row;
+  }
+
+  .family-member-row.has-custom-relationship {
+    grid-template-columns: 5.8em minmax(5.5em, 0.7fr) minmax(0, 1fr);
   }
 
   .bottom-nav {

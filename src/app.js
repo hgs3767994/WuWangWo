@@ -707,7 +707,7 @@ async function exportData() {
   const exportedAt = new Date().toISOString();
   const payload = buildExportPayload(exportedAt);
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `勿忘我-資料備份-${fileDateTime(exportedAt)}.json`);
+  downloadBlob(blob, `莫忘-資料備份-${fileDateTime(exportedAt)}.json`);
   await rememberDataManagementEvent("lastJsonExportAt", exportedAt);
 }
 
@@ -751,20 +751,20 @@ function downloadLocalSnapshot(id) {
   const payload = {
     fileType: "forget-me-not-vault-export",
     schemaVersion: 1,
-    appName: "勿忘我",
+    appName: "莫忘",
     exportedAt: new Date().toISOString(),
     note: "此檔案來自本機快照，只包含人物資料，不包含密碼、資料金鑰或救援碼。",
     vault: snapshot.vault
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `勿忘我-本機快照-${fileDateTime(snapshot.createdAt)}.json`);
+  downloadBlob(blob, `莫忘-本機快照-${fileDateTime(snapshot.createdAt)}.json`);
 }
 
 async function exportExcel() {
   if (!state.vault) return;
   const exportedAt = new Date().toISOString();
   const blob = buildVaultXlsx(state.vault, exportedAt);
-  downloadBlob(blob, `勿忘我-資料匯出-${fileDateTime(exportedAt)}.xlsx`);
+  downloadBlob(blob, `莫忘-資料匯出-${fileDateTime(exportedAt)}.xlsx`);
   await rememberDataManagementEvent("lastExcelExportAt", exportedAt);
 }
 
@@ -772,7 +772,7 @@ function buildExportPayload(exportedAt = new Date().toISOString()) {
   return {
     fileType: "forget-me-not-vault-export",
     schemaVersion: 1,
-    appName: "勿忘我",
+    appName: "莫忘",
     exportedAt,
     note: "此檔案只包含人物資料，不包含密碼、資料金鑰或救援碼。",
     vault: state.vault
@@ -831,7 +831,7 @@ async function importDataFile(event) {
     alert(merged.conflicts.length ? "已匯入資料，但有資料衝突需要處理" : "資料匯入完成");
     navigate(merged.conflicts.length ? { name: "syncConflicts" } : { name: "settings" });
   } catch {
-    alert("匯入失敗，請確認檔案是否為勿忘我的資料備份檔。");
+    alert("匯入失敗，請確認檔案是否為莫忘的資料備份檔。");
   }
 }
 
@@ -849,7 +849,7 @@ function exportPreImportBackup() {
   const exportedAt = new Date().toISOString();
   const payload = buildExportPayload(exportedAt);
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `勿忘我-匯入前本機備份-${fileDateTime(exportedAt)}.json`);
+  downloadBlob(blob, `莫忘-匯入前本機備份-${fileDateTime(exportedAt)}.json`);
 }
 
 async function rememberDataManagementEvent(key, value) {
@@ -1365,7 +1365,7 @@ function welcomeView() {
   return `
     <section class="welcome">
       <div>
-        <h1 class="title">勿忘我</h1>
+        <h1 class="title">莫忘</h1>
         <p class="subtitle">把重要的人與細節先安心記下來。</p>
       </div>
       <div class="panel stack">
@@ -1381,7 +1381,7 @@ function homeView() {
   return `
     <header class="home-header app-header">
       <div></div>
-      <h1 class="title">勿忘我</h1>
+      <h1 class="title">莫忘</h1>
       <div class="icon-actions" aria-label="首頁操作">
         <button type="button" class="icon-button" data-nav="search" aria-label="搜尋"><img class="button-icon" src="./pics/magnifier.png" alt="" /></button>
         <button type="button" class="icon-button" data-nav="settings" aria-label="設定"><img class="button-icon" src="./pics/gear.png" alt="" /></button>
@@ -1678,7 +1678,7 @@ function installPromptCard(location) {
   return `
     <section class="install-card panel">
       <div>
-        <h2 class="section-title">安裝勿忘我</h2>
+        <h2 class="section-title">安裝莫忘</h2>
         <p class="muted">加到手機主畫面後，可以像 App 一樣快速開啟；已快取的畫面也能離線啟動。</p>
       </div>
       <div class="install-actions">
@@ -1696,7 +1696,7 @@ function installSettingsSection() {
     <section class="panel stack">
       <h2 class="section-title">安裝到裝置</h2>
       <p>狀態：${installed ? "已使用 App 模式開啟" : "尚未以 App 模式開啟"}</p>
-      <p class="muted">${installed ? "目前已像 App 一樣獨立開啟，不需要重複安裝。" : "建議安裝到手機主畫面，日後可以直接從主畫面開啟勿忘我。"}</p>
+      <p class="muted">${installed ? "目前已像 App 一樣獨立開啟，不需要重複安裝。" : "建議安裝到手機主畫面，日後可以直接從主畫面開啟莫忘。"}</p>
       ${installed ? "" : `<button type="button" data-action="${canPrompt ? "install-app" : "open-install-guide"}">${canPrompt ? "安裝到裝置" : "查看安裝方式"}</button>`}
     </section>
   `;
@@ -1738,7 +1738,7 @@ function installGuideView() {
     <section class="panel stack">
       <h2 class="section-title">Android Chrome / Edge</h2>
       <ol class="guide-list">
-        <li>開啟勿忘我網址。</li>
+        <li>開啟莫忘網址。</li>
         <li>點右上角「⋮」。</li>
         <li>選擇「安裝應用程式」或「加入主畫面」。</li>
         <li>確認後即可從主畫面開啟。</li>
@@ -1747,7 +1747,7 @@ function installGuideView() {
     <section class="panel stack">
       <h2 class="section-title">iPhone / iPad Safari</h2>
       <ol class="guide-list">
-        <li>請使用 Safari 開啟勿忘我網址。</li>
+        <li>請使用 Safari 開啟莫忘網址。</li>
         <li>點下方或上方的「分享」按鈕。</li>
         <li>選擇「加入主畫面」。</li>
         <li>點「新增」。</li>
@@ -1756,9 +1756,9 @@ function installGuideView() {
     <section class="panel stack">
       <h2 class="section-title">電腦版 Chrome / Edge</h2>
       <ol class="guide-list">
-        <li>開啟勿忘我網址。</li>
+        <li>開啟莫忘網址。</li>
         <li>若網址列右側出現安裝圖示，可直接點擊。</li>
-        <li>也可從瀏覽器選單選擇「安裝勿忘我」。</li>
+        <li>也可從瀏覽器選單選擇「安裝莫忘」。</li>
       </ol>
     </section>
   `;
@@ -1967,7 +1967,7 @@ function driveIntroView() {
       <span></span>
     </header>
     <section class="panel stack">
-      <p>${isCreateFromLocal ? "將使用目前本機資料建立新的 Google Drive 同步資料。" : "連結 Google Drive 後，勿忘我會先在本機建立加密用的資料金鑰，並用你的密碼與救援碼分別保護它。"}</p>
+      <p>${isCreateFromLocal ? "將使用目前本機資料建立新的 Google Drive 同步資料。" : "連結 Google Drive 後，莫忘會先在本機建立加密用的資料金鑰，並用你的密碼與救援碼分別保護它。"}</p>
       <p class="muted">目前同步模式：${driveProviderLabel()}。資料會先加密後再寫入 Google Drive appDataFolder。</p>
       <button data-nav="setupMasterPassword">開始設定密碼</button>
     </section>
@@ -1983,7 +1983,7 @@ function driveCloudChoiceView() {
       <span></span>
     </header>
     <section class="panel stack">
-      <p>Google Drive 中已有勿忘我的同步資料。</p>
+      <p>Google Drive 中已有莫忘的同步資料。</p>
       <p class="muted">此裝置目前有本機資料：人物 ${dataSummary.peopleCount} 位。按下資料同步後，系統會先解開雲端資料，再依既有合併規則整合本機與雲端內容。</p>
       <button type="button" data-nav="driveMergeUnlock">資料同步</button>
     </section>
@@ -2072,7 +2072,7 @@ function unlockView() {
   return `
     <section class="welcome">
       <div>
-        <h1 class="title">勿忘我</h1>
+        <h1 class="title">莫忘</h1>
         <p class="subtitle">${escapeHtml(message)}</p>
       </div>
       <form class="panel stack" data-form="unlock">
@@ -2246,24 +2246,28 @@ function nameField(value) {
 
 function basicFieldsEditor(d) {
   const expanded = Boolean(state.route.moreBasicFieldsExpanded);
-  const showBirthDate = expanded || Boolean(d.birthDate);
-  const showNationalId = expanded || Boolean(d.nationalId);
-  const showPhones = expanded || hasListValue(d.phones);
-  const showAddresses = expanded || hasListValue(d.addresses);
+  const fields = [
+    { key: "birthDate", filled: Boolean(d.birthDate), html: inputField("生日", "birthDate", d.birthDate, "date") },
+    { key: "nationalId", filled: Boolean(d.nationalId), html: inputField("身分證字號", "nationalId", d.nationalId) },
+    { key: "phones", filled: hasListValue(d.phones), html: listEditor("電話", "phones", d.phones, ["手機", "家裡", "公司", "其它"], "電話號碼") },
+    { key: "addresses", filled: hasListValue(d.addresses), html: listEditor("地址", "addresses", d.addresses, ["住家", "公司", "其它"], "地址") }
+  ];
+  const visibleFields = expanded ? sortMoreBasicFields(fields) : fields.filter((field) => field.filled);
   return `
     <section class="more-fields-toggle">
       <span>${expanded ? "收起空白欄位" : "顯示更多欄位"}</span>
       <button type="button" class="disclosure-button" data-action="toggle-more-basic-fields" aria-label="${expanded ? "收起空白欄位" : "顯示更多欄位"}">${expanded ? "▲" : "▼"}</button>
     </section>
-    ${showBirthDate ? inputField("生日", "birthDate", d.birthDate, "date") : ""}
-    ${showNationalId ? inputField("身分證字號", "nationalId", d.nationalId) : ""}
-    ${showPhones ? listEditor("電話", "phones", d.phones, ["手機", "家裡", "公司", "其它"], "電話號碼") : ""}
-    ${showAddresses ? listEditor("地址", "addresses", d.addresses, ["住家", "公司", "其它"], "地址") : ""}
+    ${visibleFields.map((field) => field.html).join("")}
   `;
 }
 
 function hasListValue(rows = []) {
   return rows.some((row) => String(row.value ?? "").trim());
+}
+
+function sortMoreBasicFields(fields) {
+  return [...fields].sort((a, b) => Number(a.filled) - Number(b.filled));
 }
 
 function inputField(label, field, value, type = "text") {
@@ -2291,7 +2295,7 @@ function listEditor(title, key, rows, labels, placeholder) {
         `).join("")}
       </div>
       <div class="actions">
-        <button type="button" class="secondary" data-action="add-list-item" data-list-key="${key}">＋ 新增${title}</button>
+        <button type="button" data-action="add-list-item" data-list-key="${key}">＋ 新增${title}</button>
       </div>
     </section>
   `;
@@ -2305,7 +2309,7 @@ function interestEditor(selectedIds) {
       <div class="chip-list">${state.vault.interestTags.map((tag) => interestOption(tag, selectedIds.includes(tag.id), managing)).join("")}</div>
       ${managing ? interestManageForm() : ""}
       <div class="actions">
-        <button type="button" class="secondary" data-action="toggle-interest-manage">${managing ? "完成編輯" : "新增/移除興趣喜好"}</button>
+        <button type="button" class="${managing ? "" : "secondary"}" data-action="toggle-interest-manage">${managing ? "完成編輯" : "新增/移除興趣喜好"}</button>
         <button type="button" class="secondary" data-action="restore-default-interests">恢復預設興趣喜好</button>
       </div>
     </section>
@@ -2344,14 +2348,16 @@ function favoriteItemsEditor(rows) {
       <div class="stack">
         ${rows.length ? rows.map((row, index) => `
           <div class="inline-item">
-            <input data-favorite-item="${index}" placeholder="例如：咖啡、紅酒、雪茄" value="${escapeAttr(row.value)}" />
-            ${deleting ? `<div class="actions"><button type="button" class="danger" data-action="remove-favorite-item" data-index="${index}">刪除</button></div>` : ""}
+            <div class="row compact-editor-row">
+              <input data-favorite-item="${index}" placeholder="例如：咖啡、紅酒、雪茄" value="${escapeAttr(row.value)}" />
+              ${deleting ? `<button type="button" class="danger compact-row-button" data-action="remove-favorite-item" data-index="${index}">刪除</button>` : ""}
+            </div>
           </div>
         `).join("") : `<p class="muted">尚未新增嗜好品</p>`}
       </div>
       <div class="actions">
-        <button type="button" class="secondary" data-action="add-favorite-item">＋ 新增嗜好品</button>
-        <button type="button" class="secondary" data-action="toggle-favorite-item-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
+        <button type="button" data-action="add-favorite-item">＋ 新增嗜好品</button>
+        <button type="button" class="${deleting ? "" : "secondary"}" data-action="toggle-favorite-item-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
       </div>
     </section>
   `;
@@ -2371,8 +2377,8 @@ function familyMembersEditor(rows, currentPersonId) {
         ${rows.length ? familyMemberEditorEntries(rows).map(({ row, index }) => familyMemberEditorRow(row, index, listId, deleting)).join("") : `<p class="muted">尚未新增家族成員。</p>`}
       </div>
       <div class="actions">
-        <button type="button" class="secondary" data-action="add-family-member">＋ 新增家族成員</button>
-        <button type="button" class="secondary" data-action="toggle-family-member-delete-mode">${deleting ? "完成編輯" : "刪除成員"}</button>
+        <button type="button" data-action="add-family-member">＋ 新增家族成員</button>
+        <button type="button" class="${deleting ? "" : "secondary"}" data-action="toggle-family-member-delete-mode">${deleting ? "完成編輯" : "刪除成員"}</button>
       </div>
     </section>
   `;
@@ -2382,17 +2388,17 @@ function familyMemberEditorRow(row, index, listId, deleting) {
   const preset = FAMILY_RELATIONSHIP_ORDER.includes(row.relationship) ? row.relationship : "其它";
   return `
     <div class="inline-item">
-      <div class="row">
-        <select data-family-member="${index}" data-prop="relationshipPreset">
+      <div class="row family-member-row ${preset === "其它" ? "has-custom-relationship" : ""}">
+        <select class="relationship-select" data-family-member="${index}" data-prop="relationshipPreset">
           ${FAMILY_RELATIONSHIP_OPTIONS.map((label) => `<option value="${label}" ${preset === label ? "selected" : ""}>${label}</option>`).join("")}
         </select>
+        ${
+          preset === "其它"
+            ? `<input class="custom-relationship-input" data-family-member="${index}" data-prop="customRelationship" placeholder="自訂稱謂" value="${escapeAttr(customRelationshipValue(row))}" />`
+            : ""
+        }
         <input data-family-member="${index}" data-prop="name" list="${listId}" placeholder="姓名" value="${escapeAttr(row.name)}" />
       </div>
-      ${
-        preset === "其它"
-          ? `<div class="field"><label>自訂稱謂</label><input data-family-member="${index}" data-prop="customRelationship" placeholder="例如：表哥" value="${escapeAttr(customRelationshipValue(row))}" /></div>`
-          : ""
-      }
       ${deleting ? `<div class="actions"><button type="button" class="danger" data-action="remove-family-member" data-index="${index}">刪除</button></div>` : ""}
     </div>
   `;
@@ -2412,8 +2418,8 @@ function lifeEventsEditor(rows) {
       <div class="stack">
         ${rows.length ? rows.map((row, index) => `
           <div class="inline-item">
-            <div class="row">
-              <input type="date" data-life-event="${index}" data-prop="date" value="${escapeAttr(row.date)}" />
+            <div class="row life-event-row">
+              <input class="date-input" type="date" data-life-event="${index}" data-prop="date" value="${escapeAttr(row.date)}" />
               <input data-life-event="${index}" data-prop="text" placeholder="事件內容" value="${escapeAttr(row.text)}" />
             </div>
             ${deleting ? `<div class="actions"><button type="button" class="danger" data-action="remove-life-event" data-index="${index}">刪除</button></div>` : ""}
@@ -2421,8 +2427,8 @@ function lifeEventsEditor(rows) {
         `).join("") : `<p class="muted">尚未新增重大事件</p>`}
       </div>
       <div class="actions">
-        <button type="button" class="secondary" data-action="add-life-event">＋ 新增重大事件</button>
-        <button type="button" class="secondary" data-action="toggle-life-event-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
+        <button type="button" data-action="add-life-event">＋ 新增重大事件</button>
+        <button type="button" class="${deleting ? "" : "secondary"}" data-action="toggle-life-event-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
       </div>
     </section>
   `;
@@ -2443,17 +2449,15 @@ function tagLabelPlain(tag) {
 function customFieldEditor(person) {
   const fields = customDefsForPerson(person.id);
   const adding = Boolean(state.route.customFieldAdd);
-  const editing = Boolean(state.route.customFieldEdit);
   return `
     <section class="panel">
       <h2 class="section-title">自訂欄位</h2>
       <div class="stack">
-        ${fields.length ? fields.map((field) => customFieldInput(field, person, editing)).join("") : `<p class="muted">尚未建立自訂欄位。</p>`}
+        ${fields.length ? fields.map((field) => customFieldInput(field, person)).join("") : `<p class="muted">尚未建立自訂欄位。</p>`}
       </div>
       ${adding ? customFieldAddForm() : ""}
       <div class="actions">
-        <button type="button" class="secondary" data-action="toggle-custom-field-add">＋ 新增自訂欄位</button>
-        <button type="button" class="secondary" data-action="toggle-custom-field-edit">${editing ? "完成編輯" : "編輯自訂欄位"}</button>
+        <button type="button" data-action="toggle-custom-field-add">＋ 新增自訂欄位</button>
       </div>
     </section>
   `;
@@ -2492,7 +2496,7 @@ function customFieldAddForm() {
               <div class="chip-list">${(draft.options ?? []).map((option, index) => `<span class="tag-option"><span class="chip selected">${escapeHtml(option)}</span><button type="button" class="danger mini" data-action="remove-custom-field-draft-option" data-index="${index}">移除</button></span>`).join("")}</div>
               <div class="row manage-form">
                 <input data-custom-draft="newOption" placeholder="新增選項" value="${escapeAttr(draft.newOption ?? "")}" />
-                <button type="button" class="secondary" data-action="add-custom-field-draft-option">新增</button>
+                <button type="button" data-action="add-custom-field-draft-option">新增</button>
               </div>
             </div>`
           : ""
@@ -2505,13 +2509,17 @@ function customFieldAddForm() {
   `;
 }
 
-function customFieldInput(field, person, editing) {
+function customFieldInput(field, person) {
   const current = person.customValues.find((item) => item.fieldId === field.id)?.value ?? "";
+  const editing = state.route.activeCustomFieldEditId === field.id;
   if (isChoiceField(field)) {
     return `
       <div class="inline-item custom-field-card">
-        <div class="field">
-          <label>${escapeHtml(field.name)}</label>
+        <div class="field custom-field-main">
+          <div class="custom-field-header">
+            <label>${escapeHtml(field.name)}</label>
+            <button type="button" class="${editing ? "" : "secondary"}" data-action="toggle-custom-field-edit" data-id="${field.id}">${editing ? "完成編輯" : "編輯自訂欄位"}</button>
+          </div>
           <div class="chip-list">${(field.options ?? []).map((option) => choiceChip(field, current, option)).join("")}</div>
         </div>
         ${editing ? customFieldActions(field) : ""}
@@ -2521,8 +2529,11 @@ function customFieldInput(field, person, editing) {
   const type = field.type === "number" ? "number" : field.type === "date" ? "date" : "text";
   return `
     <div class="inline-item custom-field-card">
-      <div class="field">
-        <label>${escapeHtml(field.name)}</label>
+      <div class="field custom-field-main">
+        <div class="custom-field-header">
+          <label>${escapeHtml(field.name)}</label>
+          <button type="button" class="${editing ? "" : "secondary"}" data-action="toggle-custom-field-edit" data-id="${field.id}">${editing ? "完成編輯" : "編輯自訂欄位"}</button>
+        </div>
         <input type="${type}" data-custom-value="${field.id}" value="${escapeAttr(current)}" />
       </div>
       ${editing ? customFieldActions(field) : ""}
@@ -2560,9 +2571,9 @@ function customFieldOptionEditor(field) {
         ${(field.options ?? []).map((option) => {
           const draftName = state.route.editingCustomOptionNames?.[field.id]?.[option] ?? option;
           return `
-            <div class="row">
+            <div class="row custom-option-row">
               <input data-custom-option-name="${field.id}" data-option="${escapeAttr(option)}" value="${escapeAttr(draftName)}" />
-              <button type="button" class="secondary" data-action="rename-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">變更選項名稱</button>
+              <button type="button" class="secondary custom-option-action" data-action="rename-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">變更選項名稱</button>
               <button type="button" class="danger" data-action="delete-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">刪除選項</button>
             </div>
           `;
@@ -2570,7 +2581,7 @@ function customFieldOptionEditor(field) {
       </div>
       <div class="row">
         <input data-custom-option-new="${field.id}" placeholder="選項名稱" value="${escapeAttr(newValue)}" />
-        <button type="button" class="secondary" data-action="add-custom-option" data-field-id="${field.id}">新增選項</button>
+        <button type="button" data-action="add-custom-option" data-field-id="${field.id}">新增選項</button>
       </div>
     </div>
   `;
@@ -2794,7 +2805,7 @@ async function handleAction(event, el) {
   if (action === "remove-interest") return removeInterest(el.dataset.id);
   if (action === "restore-default-interests") return restoreDefaultInterests();
   if (action === "toggle-custom-field-add") return toggleCustomFieldAdd();
-  if (action === "toggle-custom-field-edit") return toggleCustomFieldEdit();
+  if (action === "toggle-custom-field-edit") return toggleCustomFieldEdit(el.dataset.id);
   if (action === "add-custom-field-draft-option") return addCustomFieldDraftOption();
   if (action === "remove-custom-field-draft-option") return removeCustomFieldDraftOption(Number(el.dataset.index));
   if (action === "confirm-add-custom-field") return addCustomField();
@@ -3117,10 +3128,12 @@ function toggleCustomFieldAdd() {
   render();
 }
 
-function toggleCustomFieldEdit() {
-  state.route.customFieldEdit = !state.route.customFieldEdit;
-  state.route.editingCustomFieldId = "";
+function toggleCustomFieldEdit(id) {
+  const isEditing = state.route.activeCustomFieldEditId === id;
+  state.route.activeCustomFieldEditId = isEditing ? "" : id;
   state.route.editingCustomFieldName = "";
+  state.route.editingCustomFieldId = "";
+  if (isEditing) state.route.editingCustomOptionNames = { ...(state.route.editingCustomOptionNames ?? {}), [id]: {} };
   render();
 }
 

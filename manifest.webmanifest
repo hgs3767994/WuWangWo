@@ -1,6 +1,6 @@
 {
-  "name": "勿忘我",
-  "short_name": "勿忘我",
+  "name": "莫忘",
+  "short_name": "莫忘",
   "description": "記錄人物資料、興趣喜好與重要備註的 personal CRM PWA。",
   "id": "./",
   "start_url": "./",
@@ -13,9 +13,15 @@
   "categories": ["productivity", "lifestyle", "utilities"],
   "icons": [
     {
-      "src": "./assets/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "./assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]

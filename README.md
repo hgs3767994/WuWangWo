@@ -1,6 +1,6 @@
-# 勿忘我 PWA
+# 莫忘 PWA
 
-「勿忘我」是一個用來記錄人物資料、興趣喜好、自訂欄位與備註的 local-first PWA。
+「莫忘」是一個用來記錄人物資料、興趣喜好、自訂欄位與備註的 local-first PWA。
 
 目前專案以純前端靜態檔案運作，資料先保存在瀏覽器本機 IndexedDB；若啟用 Google Drive，同步會使用真實 OAuth 與 `appDataFolder` 儲存加密資料。
 
@@ -136,7 +136,7 @@ window.FORGET_ME_NOT_CONFIG = {
 };
 ```
 
-勿忘我使用 Google Drive `appDataFolder`，OAuth scope 為：
+莫忘使用 Google Drive `appDataFolder`，OAuth scope 為：
 
 ```text
 https://www.googleapis.com/auth/drive.appdata
@@ -152,7 +152,7 @@ email
 
 Google Cloud Console 建議設定：
 
-- App name：勿忘我
+- App name：莫忘
 - App home page：GitHub Pages 正式 App 網址
 - Privacy policy：GitHub Pages 的 `/privacy.html`
 - Terms of service：GitHub Pages 的 `/terms.html`
@@ -163,7 +163,7 @@ Google Cloud Console 建議設定：
 
 - 先確認 GitHub Pages 正式 App、隱私權政策、服務條款都能公開開啟。
 - 在 OAuth Branding 填入首頁、隱私權政策、服務條款、支援信箱與開發者聯絡信箱。
-- 在 Data Access 宣告 `drive.appdata`、`openid`、`email`；用途寫明為儲存使用者加密後的勿忘我同步資料，並顯示目前連結的 Google 帳號。
+- 在 Data Access 宣告 `drive.appdata`、`openid`、`email`；用途寫明為儲存使用者加密後的莫忘同步資料，並顯示目前連結的 Google 帳號。
 - 將 Publishing status 從 Testing 發布到 Production。
 - 若 Google 要求驗證，依 Verification Center 補 scope justification 與 demo video。
 
@@ -202,7 +202,7 @@ http://localhost:4173
 本次快取版本：
 
 ```text
-forget-me-not-v65
+forget-me-not-v66
 ```
 
 ## 返回鍵第二版待辦
