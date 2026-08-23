@@ -759,6 +759,35 @@ button:focus-visible,
   color: var(--accent);
 }
 
+.candidate-list {
+  display: grid;
+  gap: 10px;
+}
+
+.candidate-card {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  width: 100%;
+  min-height: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.candidate-card:hover {
+  background: var(--surface-section);
+  border-color: var(--accent);
+}
+
+.candidate-name {
+  font-size: 17px;
+  font-weight: 700;
+}
+
 .inline-item {
   display: grid;
   gap: 8px;

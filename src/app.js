@@ -1216,6 +1216,9 @@ function historyRouteSnapshot(route = {}) {
     message: route.message,
     showForgotPassword: route.showForgotPassword,
     scrollY: Number.isFinite(route.scrollY) ? route.scrollY : 0,
+    sourcePersonId: route.sourcePersonId,
+    familyMemberId: route.familyMemberId,
+    memberName: route.memberName,
     returnTo: route.returnTo ? historyRouteSnapshot(route.returnTo) : undefined
   };
 }
@@ -1335,6 +1338,7 @@ function view() {
   if (state.route.name === "new") return personFormView();
   if (state.route.name === "edit") return personFormView(getPerson(state.route.id));
   if (state.route.name === "detail") return detailView(getPerson(state.route.id));
+  if (state.route.name === "selectFamilyMember") return selectFamilyMemberView();
   if (state.route.name === "settings") return settingsView();
   if (state.route.name === "syncConflicts") return syncConflictsView();
   if (state.route.name === "dataHealth") return dataHealthView();
@@ -1405,7 +1409,7 @@ function searchView() {
     <section class="panel search-panel">
       <div class="field">
         <label>依輸入文字搜尋</label>
-        <input data-search="text" placeholder="姓名、其它、嗜好品、重大事件、自訂欄位…" value="${escapeAttr(params.text)}" />
+        <input data-search="text" placeholder="姓名、其它、嗜好品、重大事件、自訂欄位" value="${escapeAttr(params.text)}" />
       </div>
       <div class="field">
         <label>依地址搜尋</label>
@@ -1503,7 +1507,7 @@ function detailView(person) {
     basicLines ? detailGroup("基本資料", basicLines) : "",
     tags.length ? detailGroup("興趣喜好", `<div class="chip-list">${tags.map((tag) => `<span class="chip selected">${tagLabel(tag)}</span>`).join("")}</div>`) : "",
     favoriteItems.length ? detailGroup("嗜好品", `<div class="chip-list">${favoriteItems.map((item) => `<span class="chip selected">${escapeHtml(item.value)}</span>`).join("")}</div>`) : "",
-    familyMembers.length ? detailGroup("家族成員", familyMembers.map(familyMemberLine).join("")) : "",
+    familyMembers.length ? detailGroup("家族成員", familyMembers.map((member) => familyMemberLine(person, member)).join("")) : "",
     lifeEvents.length ? detailGroup("重大事件", lifeEvents.map(lifeEventLine).join("")) : "",
     customSections,
     person.note ? detailGroup("其它備註", `<p class="detail-value">${escapeHtml(person.note).replaceAll("\n", "<br>")}</p>`) : ""
@@ -1530,6 +1534,39 @@ function detailView(person) {
       <button class="danger" data-action="delete-person" data-id="${person.id}">刪除人物</button>
       <button class="warning" data-action="archive-person" data-id="${person.id}" ${person.archivedAt ? "disabled" : ""}>封存</button>
     </div>
+  `;
+}
+
+function selectFamilyMemberView() {
+  const sourcePerson = getPerson(state.route.sourcePersonId);
+  const memberName = state.route.memberName ?? "";
+  const candidates = familyMemberNameMatches(memberName, state.route.sourcePersonId);
+  return `
+    <header class="topbar topbar-centered">
+      <button class="secondary" data-nav="detail" data-id="${escapeAttr(state.route.sourcePersonId ?? "")}">返回</button>
+      <h1 class="section-title">選擇家族成員</h1>
+      <span></span>
+    </header>
+    <section class="panel stack">
+      <h2 class="section-title">發現多位同名人物</h2>
+      <p class="muted">請選擇要連結到「${escapeHtml(sourcePerson?.name ?? "這位人物")}」家族成員中的「${escapeHtml(memberName)}」。</p>
+      <div class="candidate-list">
+        ${
+          candidates.length
+            ? candidates
+                .map(
+                  (person) => `
+                    <button type="button" class="candidate-card" data-action="select-family-member-link" data-source-id="${escapeAttr(state.route.sourcePersonId)}" data-member-id="${escapeAttr(state.route.familyMemberId)}" data-target-id="${escapeAttr(person.id)}">
+                      <span class="candidate-name">${escapeHtml(person.name)}</span>
+                      <span class="muted">建立日期：${escapeHtml(formatDateTime(person.createdAt))}</span>
+                    </button>
+                  `
+                )
+                .join("")
+            : `<div class="empty">目前找不到同名人物。</div>`
+        }
+      </div>
+    </section>
   `;
 }
 
@@ -2148,7 +2185,7 @@ function personCard(person) {
   `;
 }
 
-function familyMemberLine(member) {
+function familyMemberLine(sourcePerson, member) {
   const linked = member.personId ? getPerson(member.personId) : null;
   const canOpen = linked && !linked.archivedAt;
   const name = member.name || linked?.name || "";
@@ -2157,7 +2194,7 @@ function familyMemberLine(member) {
     : name
       ? linked?.archivedAt
         ? `<span class="muted">${escapeHtml(name)}</span>`
-        : `<button type="button" class="ghost link-button" data-action="new-person-prefill" data-name="${escapeAttr(name)}">${escapeHtml(name)}</button>`
+        : `<button type="button" class="ghost link-button" data-action="open-family-member" data-source-id="${escapeAttr(sourcePerson.id)}" data-member-id="${escapeAttr(member.id)}" data-name="${escapeAttr(name)}">${escapeHtml(name)}</button>`
       : "";
   return `<div class="detail-line"><span>${escapeHtml(member.relationship)}</span><span>${action}</span></div>`;
 }
@@ -2306,7 +2343,7 @@ function favoriteItemsEditor(rows) {
             <input data-favorite-item="${index}" placeholder="例如：咖啡、紅酒、雪茄" value="${escapeAttr(row.value)}" />
             ${deleting ? `<div class="actions"><button type="button" class="danger" data-action="remove-favorite-item" data-index="${index}">刪除</button></div>` : ""}
           </div>
-        `).join("") : `<p class="muted">尚未新增嗜好品。</p>`}
+        `).join("") : `<p class="muted">尚未新增嗜好品</p>`}
       </div>
       <div class="actions">
         <button type="button" class="secondary" data-action="add-favorite-item">＋ 新增嗜好品</button>
@@ -2331,7 +2368,7 @@ function familyMembersEditor(rows, currentPersonId) {
       </div>
       <div class="actions">
         <button type="button" class="secondary" data-action="add-family-member">＋ 新增家族成員</button>
-        <button type="button" class="secondary" data-action="toggle-family-member-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
+        <button type="button" class="secondary" data-action="toggle-family-member-delete-mode">${deleting ? "完成編輯" : "刪除成員"}</button>
       </div>
     </section>
   `;
@@ -2377,7 +2414,7 @@ function lifeEventsEditor(rows) {
             </div>
             ${deleting ? `<div class="actions"><button type="button" class="danger" data-action="remove-life-event" data-index="${index}">刪除</button></div>` : ""}
           </div>
-        `).join("") : `<p class="muted">尚未新增重大事件。</p>`}
+        `).join("") : `<p class="muted">尚未新增重大事件</p>`}
       </div>
       <div class="actions">
         <button type="button" class="secondary" data-action="add-life-event">＋ 新增重大事件</button>
@@ -2497,7 +2534,7 @@ function customFieldActions(field) {
       ${
         canEditInline
           ? `<input data-route-field="editingCustomFieldName" value="${escapeAttr(state.route.editingCustomFieldName ?? field.name)}" /><button type="button" data-action="confirm-rename-custom-field" data-id="${field.id}">確認改名</button><button type="button" class="secondary" data-action="cancel-rename-custom-field">取消</button>`
-          : `<button type="button" class="secondary" data-action="start-rename-custom-field" data-id="${field.id}">變更欄位名稱</button><button type="button" class="danger" data-action="delete-custom-field" data-id="${field.id}">刪除</button>`
+          : `<button type="button" class="secondary" data-action="start-rename-custom-field" data-id="${field.id}">變更欄位名稱</button><button type="button" class="danger" data-action="delete-custom-field" data-id="${field.id}">刪除欄位</button>`
       }
       </div>
       ${isChoiceField(field) ? customFieldOptionEditor(field) : ""}
@@ -2521,14 +2558,14 @@ function customFieldOptionEditor(field) {
           return `
             <div class="row">
               <input data-custom-option-name="${field.id}" data-option="${escapeAttr(option)}" value="${escapeAttr(draftName)}" />
-              <button type="button" class="secondary" data-action="rename-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">改名</button>
-              <button type="button" class="danger" data-action="delete-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">刪除</button>
+              <button type="button" class="secondary" data-action="rename-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">變更選項名稱</button>
+              <button type="button" class="danger" data-action="delete-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">刪除選項</button>
             </div>
           `;
         }).join("")}
       </div>
       <div class="row">
-        <input data-custom-option-new="${field.id}" placeholder="新增選項" value="${escapeAttr(newValue)}" />
+        <input data-custom-option-new="${field.id}" placeholder="選項名稱" value="${escapeAttr(newValue)}" />
         <button type="button" class="secondary" data-action="add-custom-option" data-field-id="${field.id}">新增選項</button>
       </div>
     </div>
@@ -2724,6 +2761,8 @@ async function handleAction(event, el) {
   if (action === "edit-person") return navigate({ name: "edit", id: el.dataset.id, returnTo: state.route.returnTo });
   if (action === "toggle-more-basic-fields") return toggleMoreBasicFields();
   if (action === "check-duplicate-name") return checkDuplicateName();
+  if (action === "open-family-member") return openFamilyMember(el.dataset.sourceId, el.dataset.memberId, el.dataset.name);
+  if (action === "select-family-member-link") return linkFamilyMemberAndOpen(el.dataset.sourceId, el.dataset.memberId, el.dataset.targetId, { replace: true });
   if (action === "delete-person") return deletePerson(el.dataset.id);
   if (action === "archive-person") return archivePerson(el.dataset.id);
   if (action === "restore-archived-person") return restoreArchivedPerson(el.dataset.id);
@@ -2788,6 +2827,50 @@ function checkDuplicateName() {
   alert(duplicated ? "發現重覆姓名人物" : "未發現");
 }
 
+function openFamilyMember(sourcePersonId, familyMemberId, name) {
+  const cleanName = String(name ?? "").trim();
+  const candidates = familyMemberNameMatches(cleanName, sourcePersonId);
+  if (!candidates.length) {
+    navigate({ name: "new", prefillName: cleanName, returnTo: { name: "detail", id: sourcePersonId, scrollY: window.scrollY } });
+    return;
+  }
+  if (candidates.length === 1) {
+    void linkFamilyMemberAndOpen(sourcePersonId, familyMemberId, candidates[0].id);
+    return;
+  }
+  navigate({
+    name: "selectFamilyMember",
+    sourcePersonId,
+    familyMemberId,
+    memberName: cleanName,
+    returnTo: { name: "detail", id: sourcePersonId, scrollY: window.scrollY }
+  });
+}
+
+async function linkFamilyMemberAndOpen(sourcePersonId, familyMemberId, targetPersonId, options = {}) {
+  const target = getPerson(targetPersonId);
+  if (!target) return;
+  const now = new Date().toISOString();
+  const vault = {
+    ...state.vault,
+    people: state.vault.people.map((person) => {
+      if (person.id !== sourcePersonId) return person;
+      return {
+        ...person,
+        familyMembers: (person.familyMembers ?? []).map((member) =>
+          member.id === familyMemberId
+            ? { ...member, name: target.name, personId: target.id, updatedAt: now }
+            : member
+        ),
+        updatedAt: now,
+        updatedByDeviceId: state.appState.deviceId
+      };
+    })
+  };
+  await commitVault(vault, { render: false });
+  navigate({ name: "detail", id: target.id, returnTo: { name: "detail", id: sourcePersonId } }, { replace: Boolean(options.replace), force: true });
+}
+
 async function setTheme(themeId) {
   if (!THEME_OPTIONS.some((theme) => theme.id === themeId) || !state.appState) return;
   state.appState = {
@@ -2808,7 +2891,7 @@ async function savePersonForm(event) {
     alert("姓名為必填欄位");
     return;
   }
-  const vault = structuredClone(state.vault);
+  let vault = structuredClone(state.vault);
   const now = new Date().toISOString();
   const person = {
     ...draft,
@@ -2828,6 +2911,7 @@ async function savePersonForm(event) {
   const isEditing = index >= 0;
   if (isEditing) vault.people[index] = person;
   else vault.people.push(person);
+  vault = linkPendingFamilyMembersToUniquePerson(vault, person);
   await commitVault(vault, { render: false });
   if (isEditing) {
     state.route.draftBaseline = personDraftSignature(person);
@@ -3897,6 +3981,38 @@ function compareFamilyMembers(a, b) {
 function familyMemberBirthDate(member) {
   const linked = member.personId ? getPerson(member.personId) : findUniqueVisiblePersonByName(member.name ?? "");
   return linked?.birthDate ?? "";
+}
+
+function linkPendingFamilyMembersToUniquePerson(vault, targetPerson) {
+  if (!targetPerson?.name?.trim() || targetPerson.archivedAt) return vault;
+  const matches = visiblePeopleInVault(vault.people).filter((person) => person.name.trim() === targetPerson.name.trim());
+  if (matches.length !== 1) return vault;
+  const now = new Date().toISOString();
+  return {
+    ...vault,
+    people: vault.people.map((person) => {
+      if (person.id === targetPerson.id) return person;
+      let changed = false;
+      const familyMembers = (person.familyMembers ?? []).map((member) => {
+        if (member.personId || (member.name ?? "").trim() !== targetPerson.name.trim()) return member;
+        changed = true;
+        return { ...member, personId: targetPerson.id, name: targetPerson.name, updatedAt: now };
+      });
+      return changed
+        ? { ...person, familyMembers, updatedAt: now, updatedByDeviceId: state.appState.deviceId }
+        : person;
+    })
+  };
+}
+
+function familyMemberNameMatches(name, sourcePersonId = "") {
+  const cleanName = String(name ?? "").trim();
+  if (!cleanName) return [];
+  return visiblePeople(state.vault.people).filter((person) => person.id !== sourcePersonId && person.name.trim() === cleanName);
+}
+
+function visiblePeopleInVault(people = []) {
+  return sortPeople(people.filter((person) => !person.archivedAt));
 }
 
 function sortLifeEvents(rows = []) {
