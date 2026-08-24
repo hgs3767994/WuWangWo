@@ -3,6 +3,11 @@
   --primary: #24443d;
   --primary-hover: #1e3a34;
   --primary-active: #19332d;
+  --action-soft-bg: #d9e7e3;
+  --action-soft-border: #6f958c;
+  --action-soft-text: #24443d;
+  --action-soft-hover-bg: #6f958c;
+  --action-soft-hover-text: #ffffff;
   --secondary: #f4f6f5;
   --accent: #5b9ea6;
   --accent-hover: #4d9098;
@@ -51,6 +56,11 @@ body[data-theme="business-blue"] {
   --primary: #1e293b;
   --primary-hover: #172033;
   --primary-active: #111827;
+  --action-soft-bg: #e2e8f0;
+  --action-soft-border: #64748b;
+  --action-soft-text: #1e293b;
+  --action-soft-hover-bg: #64748b;
+  --action-soft-hover-text: #ffffff;
   --secondary: #f8fafc;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
@@ -83,6 +93,11 @@ body[data-theme="warm-amber"] {
   --primary: #292D32;
   --primary-hover: #1F2328;
   --primary-active: #161A1F;
+  --action-soft-bg: #F2DEBC;
+  --action-soft-border: #C58B3A;
+  --action-soft-text: #292D32;
+  --action-soft-hover-bg: #C58B3A;
+  --action-soft-hover-text: #FFFFFF;
   --secondary: #FAF9F6;
   --accent: #C58B3A;
   --accent-hover: #B77822;
@@ -115,6 +130,11 @@ body[data-theme="gentle-pink"] {
   --primary: #8b5e83;
   --primary-hover: #7a5072;
   --primary-active: #684361;
+  --action-soft-bg: #f3dce8;
+  --action-soft-border: #c48aae;
+  --action-soft-text: #8b5e83;
+  --action-soft-hover-bg: #c48aae;
+  --action-soft-hover-text: #ffffff;
   --secondary: #fff7f8;
   --accent: #d88fa3;
   --accent-hover: #c77d91;
@@ -147,6 +167,11 @@ body[data-theme="memory-paper"] {
   --primary: #667887;
   --primary-hover: #566978;
   --primary-active: #465866;
+  --action-soft-bg: #E1E7EA;
+  --action-soft-border: #A9B4BC;
+  --action-soft-text: #3D4143;
+  --action-soft-hover-bg: #A9B4BC;
+  --action-soft-hover-text: #FFFFFF;
   --secondary: #F3EEE4;
   --accent: #A77A52;
   --accent-hover: #936946;
@@ -212,6 +237,23 @@ button.secondary:hover {
   background: var(--secondary);
   border-color: var(--accent);
   color: var(--primary);
+}
+
+button.action-soft {
+  background: var(--action-soft-bg);
+  border-color: var(--action-soft-border);
+  color: var(--action-soft-text);
+  font-weight: 700;
+}
+
+button.action-soft:hover {
+  background: var(--action-soft-hover-bg);
+  border-color: var(--action-soft-hover-bg);
+  color: var(--action-soft-hover-text);
+}
+
+button.action-soft:active {
+  filter: brightness(0.96);
 }
 
 button.danger {
@@ -673,14 +715,54 @@ button:focus-visible,
   flex: 0 0 auto;
 }
 
+.interest-manage-field {
+  margin: 0;
+}
+
+.interest-manage-row {
+  align-items: stretch;
+}
+
+.interest-manage-row input {
+  flex: 1 1 auto;
+}
+
+.interest-manage-row button {
+  flex: 0 0 auto;
+}
+
+.list-editor-row {
+  display: grid;
+  grid-template-columns: 5.2em auto minmax(0, 1fr) auto;
+  align-items: stretch;
+}
+
+.list-label-select {
+  min-width: 0;
+  padding-inline: 8px 6px;
+}
+
+.default-inline-button {
+  min-width: 4.8em;
+  padding-inline: 8px;
+}
+
 .family-member-row {
   display: grid;
-  grid-template-columns: 5.8em minmax(0, 1fr);
+  grid-template-columns: 4.6em minmax(0, 1fr);
   align-items: stretch;
 }
 
 .family-member-row.has-custom-relationship {
-  grid-template-columns: 5.8em minmax(7.5em, 0.7fr) minmax(0, 1fr);
+  grid-template-columns: 4.6em minmax(5.2em, 0.45fr) minmax(0, 1fr);
+}
+
+.family-member-row.has-delete {
+  grid-template-columns: 4.6em minmax(0, 1fr) auto;
+}
+
+.family-member-row.has-custom-relationship.has-delete {
+  grid-template-columns: 4.6em minmax(5.2em, 0.45fr) minmax(0, 1fr) auto;
 }
 
 .relationship-select {
@@ -690,8 +772,12 @@ button:focus-visible,
 
 .life-event-row {
   display: grid;
-  grid-template-columns: 10.8em minmax(0, 1fr);
+  grid-template-columns: 9.3em minmax(0, 1fr);
   align-items: stretch;
+}
+
+.life-event-row.has-delete {
+  grid-template-columns: 9.3em minmax(0, 1fr) auto;
 }
 
 .date-input {
@@ -1248,12 +1334,34 @@ code {
   .name-check-row,
   .birthday-search-row,
   .compact-editor-row,
+  .interest-manage-row,
   .custom-option-row {
     flex-direction: row;
   }
 
   .family-member-row.has-custom-relationship {
-    grid-template-columns: 5.8em minmax(5.5em, 0.7fr) minmax(0, 1fr);
+    grid-template-columns: 4.6em minmax(5.2em, 0.45fr) minmax(0, 1fr);
+  }
+
+  .family-member-row.has-delete {
+    grid-template-columns: 4.6em minmax(0, 1fr) auto;
+  }
+
+  .family-member-row.has-custom-relationship.has-delete {
+    grid-template-columns: 4.6em minmax(5.2em, 0.45fr) minmax(0, 1fr) auto;
+  }
+
+  .life-event-row,
+  .life-event-row.has-delete {
+    grid-template-columns: 9.3em minmax(0, 1fr) auto;
+  }
+
+  .life-event-row:not(.has-delete) {
+    grid-template-columns: 9.3em minmax(0, 1fr);
+  }
+
+  .list-editor-row {
+    grid-template-columns: 5.2em auto minmax(0, 1fr) auto;
   }
 
   .bottom-nav {

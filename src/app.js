@@ -2281,21 +2281,19 @@ function listEditor(title, key, rows, labels, placeholder) {
       <div class="stack">
         ${rows.map((row, index) => `
           <div class="inline-item">
-            <div class="row">
-              <select data-list="${key}" data-index="${index}" data-prop="label">
+            <div class="row list-editor-row">
+              <select class="list-label-select" data-list="${key}" data-index="${index}" data-prop="label">
                 ${labels.map((label) => `<option ${row.label === label ? "selected" : ""}>${label}</option>`).join("")}
               </select>
+              <button type="button" class="secondary default-inline-button" data-action="set-default" data-list-key="${key}" data-index="${index}">${row.isDefault ? "預設" : "設為預設"}</button>
               <input data-list="${key}" data-index="${index}" data-prop="value" placeholder="${placeholder}" value="${escapeAttr(row.value)}" />
-            </div>
-            <div class="actions">
-              <button type="button" class="secondary" data-action="set-default" data-list-key="${key}" data-index="${index}">${row.isDefault ? "預設" : "設為預設"}</button>
               <button type="button" class="danger" data-action="remove-list-item" data-list-key="${key}" data-index="${index}">刪除</button>
             </div>
           </div>
         `).join("")}
       </div>
       <div class="actions">
-        <button type="button" data-action="add-list-item" data-list-key="${key}">＋ 新增${title}</button>
+        <button type="button" class="action-soft" data-action="add-list-item" data-list-key="${key}">＋ 新增${title}</button>
       </div>
     </section>
   `;
@@ -2309,7 +2307,7 @@ function interestEditor(selectedIds) {
       <div class="chip-list">${state.vault.interestTags.map((tag) => interestOption(tag, selectedIds.includes(tag.id), managing)).join("")}</div>
       ${managing ? interestManageForm() : ""}
       <div class="actions">
-        <button type="button" class="${managing ? "" : "secondary"}" data-action="toggle-interest-manage">${managing ? "完成編輯" : "新增/移除興趣喜好"}</button>
+        <button type="button" class="${managing ? "action-soft" : "secondary"}" data-action="toggle-interest-manage">${managing ? "完成編輯" : "新增/移除興趣喜好"}</button>
         <button type="button" class="secondary" data-action="restore-default-interests">恢復預設興趣喜好</button>
       </div>
     </section>
@@ -2328,13 +2326,12 @@ function interestOption(tag, selected, managing) {
 function interestManageForm() {
   return `
     <div class="inline-item manage-form">
-      <div class="field">
+      <div class="field interest-manage-field">
         <label>新增興趣喜好名稱</label>
-        <input data-route-field="newInterestName" placeholder="例如：🍞 烘焙" value="${escapeAttr(state.route.newInterestName ?? "")}" />
-      </div>
-      <div class="actions">
-        <button type="button" data-action="confirm-add-interest">確認</button>
-        <button type="button" class="secondary" data-action="cancel-interest-manage">取消</button>
+        <div class="row interest-manage-row">
+          <input data-route-field="newInterestName" placeholder="例如：🍞 烘焙" value="${escapeAttr(state.route.newInterestName ?? "")}" />
+          <button type="button" class="action-soft" data-action="confirm-add-interest">確認</button>
+        </div>
       </div>
     </div>
   `;
@@ -2356,8 +2353,8 @@ function favoriteItemsEditor(rows) {
         `).join("") : `<p class="muted">尚未新增嗜好品</p>`}
       </div>
       <div class="actions">
-        <button type="button" data-action="add-favorite-item">＋ 新增嗜好品</button>
-        <button type="button" class="${deleting ? "" : "secondary"}" data-action="toggle-favorite-item-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
+        <button type="button" class="action-soft" data-action="add-favorite-item">＋ 新增嗜好品</button>
+        <button type="button" class="${deleting ? "action-soft" : "secondary"}" data-action="toggle-favorite-item-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
       </div>
     </section>
   `;
@@ -2377,8 +2374,8 @@ function familyMembersEditor(rows, currentPersonId) {
         ${rows.length ? familyMemberEditorEntries(rows).map(({ row, index }) => familyMemberEditorRow(row, index, listId, deleting)).join("") : `<p class="muted">尚未新增家族成員。</p>`}
       </div>
       <div class="actions">
-        <button type="button" data-action="add-family-member">＋ 新增家族成員</button>
-        <button type="button" class="${deleting ? "" : "secondary"}" data-action="toggle-family-member-delete-mode">${deleting ? "完成編輯" : "刪除成員"}</button>
+        <button type="button" class="action-soft" data-action="add-family-member">＋ 新增家族成員</button>
+        <button type="button" class="${deleting ? "action-soft" : "secondary"}" data-action="toggle-family-member-delete-mode">${deleting ? "完成編輯" : "刪除成員"}</button>
       </div>
     </section>
   `;
@@ -2388,7 +2385,7 @@ function familyMemberEditorRow(row, index, listId, deleting) {
   const preset = FAMILY_RELATIONSHIP_ORDER.includes(row.relationship) ? row.relationship : "其它";
   return `
     <div class="inline-item">
-      <div class="row family-member-row ${preset === "其它" ? "has-custom-relationship" : ""}">
+      <div class="row family-member-row ${preset === "其它" ? "has-custom-relationship" : ""} ${deleting ? "has-delete" : ""}">
         <select class="relationship-select" data-family-member="${index}" data-prop="relationshipPreset">
           ${FAMILY_RELATIONSHIP_OPTIONS.map((label) => `<option value="${label}" ${preset === label ? "selected" : ""}>${label}</option>`).join("")}
         </select>
@@ -2398,8 +2395,8 @@ function familyMemberEditorRow(row, index, listId, deleting) {
             : ""
         }
         <input data-family-member="${index}" data-prop="name" list="${listId}" placeholder="姓名" value="${escapeAttr(row.name)}" />
+        ${deleting ? `<button type="button" class="danger compact-row-button" data-action="remove-family-member" data-index="${index}">刪除</button>` : ""}
       </div>
-      ${deleting ? `<div class="actions"><button type="button" class="danger" data-action="remove-family-member" data-index="${index}">刪除</button></div>` : ""}
     </div>
   `;
 }
@@ -2418,17 +2415,17 @@ function lifeEventsEditor(rows) {
       <div class="stack">
         ${rows.length ? rows.map((row, index) => `
           <div class="inline-item">
-            <div class="row life-event-row">
+            <div class="row life-event-row ${deleting ? "has-delete" : ""}">
               <input class="date-input" type="date" data-life-event="${index}" data-prop="date" value="${escapeAttr(row.date)}" />
               <input data-life-event="${index}" data-prop="text" placeholder="事件內容" value="${escapeAttr(row.text)}" />
+              ${deleting ? `<button type="button" class="danger compact-row-button" data-action="remove-life-event" data-index="${index}">刪除</button>` : ""}
             </div>
-            ${deleting ? `<div class="actions"><button type="button" class="danger" data-action="remove-life-event" data-index="${index}">刪除</button></div>` : ""}
           </div>
         `).join("") : `<p class="muted">尚未新增重大事件</p>`}
       </div>
       <div class="actions">
-        <button type="button" data-action="add-life-event">＋ 新增重大事件</button>
-        <button type="button" class="${deleting ? "" : "secondary"}" data-action="toggle-life-event-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
+        <button type="button" class="action-soft" data-action="add-life-event">＋ 新增重大事件</button>
+        <button type="button" class="${deleting ? "action-soft" : "secondary"}" data-action="toggle-life-event-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
       </div>
     </section>
   `;
@@ -2457,7 +2454,7 @@ function customFieldEditor(person) {
       </div>
       ${adding ? customFieldAddForm() : ""}
       <div class="actions">
-        <button type="button" data-action="toggle-custom-field-add">＋ 新增自訂欄位</button>
+        <button type="button" class="action-soft" data-action="toggle-custom-field-add">＋ 新增自訂欄位</button>
       </div>
     </section>
   `;
@@ -2496,13 +2493,13 @@ function customFieldAddForm() {
               <div class="chip-list">${(draft.options ?? []).map((option, index) => `<span class="tag-option"><span class="chip selected">${escapeHtml(option)}</span><button type="button" class="danger mini" data-action="remove-custom-field-draft-option" data-index="${index}">移除</button></span>`).join("")}</div>
               <div class="row manage-form">
                 <input data-custom-draft="newOption" placeholder="新增選項" value="${escapeAttr(draft.newOption ?? "")}" />
-                <button type="button" data-action="add-custom-field-draft-option">新增</button>
+                <button type="button" class="action-soft" data-action="add-custom-field-draft-option">新增</button>
               </div>
             </div>`
           : ""
       }
       <div class="actions">
-        <button type="button" data-action="confirm-add-custom-field">確認</button>
+        <button type="button" class="action-soft" data-action="confirm-add-custom-field">確認</button>
         <button type="button" class="secondary" data-action="cancel-custom-field-add">取消</button>
       </div>
     </div>
@@ -2518,7 +2515,7 @@ function customFieldInput(field, person) {
         <div class="field custom-field-main">
           <div class="custom-field-header">
             <label>${escapeHtml(field.name)}</label>
-            <button type="button" class="${editing ? "" : "secondary"}" data-action="toggle-custom-field-edit" data-id="${field.id}">${editing ? "完成編輯" : "編輯自訂欄位"}</button>
+            <button type="button" class="${editing ? "action-soft" : "secondary"}" data-action="toggle-custom-field-edit" data-id="${field.id}">${editing ? "完成編輯" : "編輯自訂欄位"}</button>
           </div>
           <div class="chip-list">${(field.options ?? []).map((option) => choiceChip(field, current, option)).join("")}</div>
         </div>
@@ -2532,7 +2529,7 @@ function customFieldInput(field, person) {
       <div class="field custom-field-main">
         <div class="custom-field-header">
           <label>${escapeHtml(field.name)}</label>
-          <button type="button" class="${editing ? "" : "secondary"}" data-action="toggle-custom-field-edit" data-id="${field.id}">${editing ? "完成編輯" : "編輯自訂欄位"}</button>
+          <button type="button" class="${editing ? "action-soft" : "secondary"}" data-action="toggle-custom-field-edit" data-id="${field.id}">${editing ? "完成編輯" : "編輯自訂欄位"}</button>
         </div>
         <input type="${type}" data-custom-value="${field.id}" value="${escapeAttr(current)}" />
       </div>
@@ -2548,7 +2545,7 @@ function customFieldActions(field) {
       <div class="inline-actions">
       ${
         canEditInline
-          ? `<input data-route-field="editingCustomFieldName" value="${escapeAttr(state.route.editingCustomFieldName ?? field.name)}" /><button type="button" data-action="confirm-rename-custom-field" data-id="${field.id}">確認改名</button><button type="button" class="secondary" data-action="cancel-rename-custom-field">取消</button>`
+          ? `<input data-route-field="editingCustomFieldName" value="${escapeAttr(state.route.editingCustomFieldName ?? field.name)}" /><button type="button" class="action-soft" data-action="confirm-rename-custom-field" data-id="${field.id}">確認改名</button><button type="button" class="secondary" data-action="cancel-rename-custom-field">取消</button>`
           : `<button type="button" class="secondary" data-action="start-rename-custom-field" data-id="${field.id}">變更欄位名稱</button><button type="button" class="danger" data-action="delete-custom-field" data-id="${field.id}">刪除欄位</button>`
       }
       </div>
@@ -2573,7 +2570,7 @@ function customFieldOptionEditor(field) {
           return `
             <div class="row custom-option-row">
               <input data-custom-option-name="${field.id}" data-option="${escapeAttr(option)}" value="${escapeAttr(draftName)}" />
-              <button type="button" class="secondary custom-option-action" data-action="rename-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">變更選項名稱</button>
+              <button type="button" class="action-soft custom-option-action" data-action="rename-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">變更選項名稱</button>
               <button type="button" class="danger" data-action="delete-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">刪除選項</button>
             </div>
           `;
@@ -2581,7 +2578,7 @@ function customFieldOptionEditor(field) {
       </div>
       <div class="row">
         <input data-custom-option-new="${field.id}" placeholder="選項名稱" value="${escapeAttr(newValue)}" />
-        <button type="button" data-action="add-custom-option" data-field-id="${field.id}">新增選項</button>
+        <button type="button" class="action-soft" data-action="add-custom-option" data-field-id="${field.id}">新增選項</button>
       </div>
     </div>
   `;
