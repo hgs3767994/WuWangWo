@@ -396,6 +396,7 @@ async function commitVault(vault, options = {}) {
 async function setupMasterPassword(event) {
   event.preventDefault();
   const draft = state.route.passwordDraft ?? { password: "", confirm: "" };
+  const isRebuildCloudFromBackup = state.route.mode === "rebuildCloudFromBackup";
   if (draft.password.length < 6) {
     alert("密碼至少需要 6 個字元");
     return;
@@ -403,6 +404,13 @@ async function setupMasterPassword(event) {
   if (draft.password !== draft.confirm) {
     alert("兩次輸入的密碼不一致");
     return;
+  }
+  if (isRebuildCloudFromBackup) {
+    const summary = vaultDataSummary();
+    const confirmed = confirm(
+      `確定要使用本機備份重建雲端資料嗎？\n\n目前本機資料：人物 ${summary.peopleCount} 位\n\n此操作會用目前本機資料覆蓋 Google Drive 中既有的莫忘同步資料，舊密碼與舊救援碼將失效。完成後請務必保存新的救援碼。`
+    );
+    if (!confirmed) return;
   }
 
   const result = await createKeyPackage({
@@ -426,8 +434,13 @@ async function setupMasterPassword(event) {
     }
   };
   await save();
-  await uploadKeyPackageToDrive();
-  await uploadCurrentVaultToDrive();
+  try {
+    await uploadKeyPackageToDrive();
+    await uploadCurrentVaultToDrive();
+  } catch (error) {
+    markDriveSyncIssue(error);
+    alert(driveErrorMessage(error, "密碼與救援碼已在本機建立，但寫入 Google Drive 失敗。請不要刪除本機資料，稍後到設定頁按「立即同步」。"));
+  }
   showRecoveryCodeRoute(result.recoveryCode, { returnTo: { name: "home" } });
 }
 
@@ -2087,6 +2100,12 @@ function conflictCard(conflict, index) {
 
 function driveIntroView() {
   const isCreateFromLocal = state.route.mode === "createFromLocal";
+  const isRebuildCloudFromBackup = state.route.mode === "rebuildCloudFromBackup";
+  const introText = isRebuildCloudFromBackup
+    ? "將使用目前本機資料重建 Google Drive 雲端同步資料。這會覆蓋既有雲端同步資料，並讓舊密碼與舊救援碼失效。"
+    : isCreateFromLocal
+      ? "將使用目前本機資料建立新的 Google Drive 同步資料。"
+      : "連結 Google Drive 後，莫忘會先在本機建立加密用的資料金鑰，並用你的密碼與救援碼分別保護它。";
   return `
     <header class="topbar">
       <button class="secondary" data-action="cancel-drive-setup">返回</button>
@@ -2094,9 +2113,10 @@ function driveIntroView() {
       <span></span>
     </header>
     <section class="panel stack">
-      <p>${isCreateFromLocal ? "將使用目前本機資料建立新的 Google Drive 同步資料。" : "連結 Google Drive 後，莫忘會先在本機建立加密用的資料金鑰，並用你的密碼與救援碼分別保護它。"}</p>
+      <p>${introText}</p>
       <p class="muted">目前同步模式：${driveProviderLabel()}。資料會先加密後再寫入 Google Drive appDataFolder。</p>
-      <button data-nav="setupMasterPassword">開始設定密碼</button>
+      ${isRebuildCloudFromBackup ? `<p class="danger-text">請確認你已匯入正確的 JSON 備份；重建完成並確認同步成功前，不要刪除本機資料。</p>` : ""}
+      <button data-nav="setupMasterPassword" ${isRebuildCloudFromBackup ? `data-mode="rebuildCloudFromBackup"` : ""}>${isRebuildCloudFromBackup ? "設定新密碼並重建" : "開始設定密碼"}</button>
     </section>
   `;
 }
@@ -2113,6 +2133,11 @@ function driveCloudChoiceView() {
       <p>Google Drive 中已有莫忘的同步資料。</p>
       <p class="muted">此裝置目前有本機資料：人物 ${dataSummary.peopleCount} 位。按下資料同步後，系統會先解開雲端資料，再依既有合併規則整合本機與雲端內容。</p>
       <button type="button" data-nav="driveMergeUnlock">資料同步</button>
+      <div class="inline-item stack">
+        <strong>若舊密碼與救援碼都無法使用</strong>
+        <p class="muted">你可以先匯入 JSON 備份，再用本機資料覆蓋並重建 Google Drive 同步資料。</p>
+        <button type="button" class="action-quiet" data-nav="driveIntro" data-mode="rebuildCloudFromBackup">使用本機備份重建雲端資料</button>
+      </div>
     </section>
   `;
 }
