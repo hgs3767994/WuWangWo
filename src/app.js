@@ -36,6 +36,7 @@ const NO_SLIDE_ROUTE_NAMES = new Set([
   "driveCloudChoice",
   "driveMergeUnlock",
   "driveExistingUnlock",
+  "driveRecoveryReset",
   "setupMasterPassword",
   "showRecoveryCode",
   "changePassword",
@@ -962,6 +963,98 @@ async function resetForgottenPassword(event) {
   }
 }
 
+async function resetCloudPasswordWithRecovery(event) {
+  event.preventDefault();
+  const draft = state.route.securityDraft ?? {};
+  if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
+  const mode = state.route.mode === "merge" ? "merge" : "existing";
+  const recoveryCode = normalizeRecoveryCode(draft.recoveryCode ?? "");
+  let keyPackage;
+  let vaultEnvelope;
+  let dekBytes;
+  let remoteVault;
+  try {
+    keyPackage = await readDriveFile(driveFileName("keyPackage"));
+    vaultEnvelope = await readDriveFile(driveFileName("vault"));
+    if (!keyPackage || !vaultEnvelope) {
+      alert("尚未找到既有同步資料");
+      return;
+    }
+    dekBytes = await unwrapDek(keyPackage.recoveryCodeWrapper, recoveryCode, keyPackage.crypto.iterations);
+    remoteVault = normalizeVault(pruneDeleted(await decryptVaultEnvelope(vaultEnvelope, dekBytes)));
+  } catch {
+    alert("救援碼不正確，請確認後再試一次");
+    return;
+  }
+
+  const deviceId = state.appState?.deviceId ?? createDeviceId();
+  const updated = await buildReplacedMasterPasswordAndRecovery({
+    keyPackage,
+    dekBytes,
+    newPassword: draft.newPassword,
+    deviceId,
+    bumpSession: true
+  });
+  let finalVault = remoteVault;
+  let conflicts = [];
+  let localBeforeSync = null;
+  if (mode === "merge" && state.appState && state.vault) {
+    localBeforeSync = structuredClone(state.vault);
+    const merged = mergeVaults(state.vault, remoteVault, deviceId);
+    finalVault = {
+      ...merged.vault,
+      vaultId: remoteVault.vaultId
+    };
+    conflicts = merged.conflicts;
+  }
+  const syncedAt = new Date().toISOString();
+  state.dekBytes = dekBytes;
+  state.vault = normalizeVault(pruneDeleted(finalVault));
+  state.appState = {
+    schemaVersion: state.appState?.schemaVersion ?? 1,
+    mode: "driveSync",
+    deviceId,
+    currentVaultId: remoteVault.vaultId,
+    ui: {
+      themeId: currentThemeId()
+    },
+    ...(state.appState ?? {}),
+    mode: "driveSync",
+    deviceId,
+    currentVaultId: remoteVault.vaultId,
+    googleDrive: {
+      ...(state.appState?.googleDrive ?? {}),
+      connected: true,
+      syncStatus: conflicts.length ? "needsResolution" : "synced",
+      lastSyncAt: syncedAt,
+      lastLocalChangeAt: "",
+      lastSyncError: "",
+      accountEmail: currentDriveAccountEmail(),
+      lastSyncSummary: buildSyncSummary({ localBeforeSync, remoteVault, mergedVault: state.vault, conflicts, syncedAt }),
+      pendingConflicts: conflicts,
+      simulated: isSimulatedDrive()
+    }
+  };
+  await setItem("keyPackage", updated.keyPackage);
+  await setItem("vault", state.vault);
+  await setItem(
+    "trustedSession",
+    await createTrustedSessionWithDek({
+      vaultId: updated.keyPackage.vaultId,
+      deviceId,
+      sessionEpoch: updated.keyPackage.securityMeta.sessionEpoch,
+      dekBytes
+    })
+  );
+  await save();
+  await uploadKeyPackageToDrive();
+  if (mode === "merge") await uploadCurrentVaultToDrive();
+  showRecoveryCodeRoute(updated.recoveryCode, {
+    oldInvalid: true,
+    returnTo: conflicts.length ? { name: "syncConflicts" } : { name: "home" }
+  });
+}
+
 async function regenerateRecoveryCode(event) {
   event.preventDefault();
   const draft = state.route.securityDraft ?? {};
@@ -1012,30 +1105,14 @@ function validateNewPassword(password = "", confirm = "") {
 }
 
 async function replaceMasterPasswordAndRecovery(keyPackage, dekBytes, newPassword, bumpSession) {
-  const now = new Date().toISOString();
-  const recoveryCode = generateRecoveryCode();
-  const masterPasswordWrapper = await wrapDekForSecret(dekBytes, newPassword, keyPackage.crypto.iterations);
-  const recoveryCodeWrapper = await wrapDekForSecret(dekBytes, recoveryCode, keyPackage.crypto.iterations);
-  const sessionEpoch = bumpSession ? keyPackage.securityMeta.sessionEpoch + 1 : keyPackage.securityMeta.sessionEpoch;
-  const updatedKeyPackage = {
-    ...keyPackage,
-    masterPasswordWrapper: {
-      ...masterPasswordWrapper,
-      updatedByDeviceId: state.appState.deviceId
-    },
-    recoveryCodeWrapper: {
-      ...recoveryCodeWrapper,
-      recoveryCodeVersion: keyPackage.recoveryCodeWrapper.recoveryCodeVersion + 1,
-      updatedByDeviceId: state.appState.deviceId
-    },
-    securityMeta: {
-      ...keyPackage.securityMeta,
-      passwordChangedAt: now,
-      passwordChangedByDeviceId: state.appState.deviceId,
-      sessionEpoch,
-      updatedAt: now
-    }
-  };
+  const updated = await buildReplacedMasterPasswordAndRecovery({
+    keyPackage,
+    dekBytes,
+    newPassword,
+    deviceId: state.appState.deviceId,
+    bumpSession
+  });
+  const updatedKeyPackage = updated.keyPackage;
   await setItem("keyPackage", updatedKeyPackage);
   await setItem(
     "trustedSession",
@@ -1046,7 +1123,38 @@ async function replaceMasterPasswordAndRecovery(keyPackage, dekBytes, newPasswor
       dekBytes
     })
   );
-  return { keyPackage: updatedKeyPackage, recoveryCode };
+  return updated;
+}
+
+async function buildReplacedMasterPasswordAndRecovery({ keyPackage, dekBytes, newPassword, deviceId, bumpSession }) {
+  const now = new Date().toISOString();
+  const recoveryCode = generateRecoveryCode();
+  const masterPasswordWrapper = await wrapDekForSecret(dekBytes, newPassword, keyPackage.crypto.iterations);
+  const recoveryCodeWrapper = await wrapDekForSecret(dekBytes, recoveryCode, keyPackage.crypto.iterations);
+  const sessionEpoch = bumpSession ? (keyPackage.securityMeta?.sessionEpoch ?? 1) + 1 : (keyPackage.securityMeta?.sessionEpoch ?? 1);
+  const recoveryCodeVersion = keyPackage.recoveryCodeWrapper?.recoveryCodeVersion ?? 1;
+  return {
+    recoveryCode,
+    keyPackage: {
+      ...keyPackage,
+      masterPasswordWrapper: {
+        ...masterPasswordWrapper,
+        updatedByDeviceId: deviceId
+      },
+      recoveryCodeWrapper: {
+        ...recoveryCodeWrapper,
+        recoveryCodeVersion: recoveryCodeVersion + 1,
+        updatedByDeviceId: deviceId
+      },
+      securityMeta: {
+        ...(keyPackage.securityMeta ?? {}),
+        passwordChangedAt: now,
+        passwordChangedByDeviceId: deviceId,
+        sessionEpoch,
+        updatedAt: now
+      }
+    }
+  };
 }
 
 async function replaceRecoveryCode(keyPackage, dekBytes) {
@@ -1140,6 +1248,7 @@ function hasPendingSecurityOperation() {
   const guardedRoutes = new Set([
     "driveMergeUnlock",
     "driveExistingUnlock",
+    "driveRecoveryReset",
     "changePassword",
     "forgotPassword",
     "regenerateRecovery",
@@ -1368,6 +1477,7 @@ function view() {
   if (state.route.name === "driveCloudChoice") return driveCloudChoiceView();
   if (state.route.name === "driveMergeUnlock") return driveMergeUnlockView();
   if (state.route.name === "driveExistingUnlock") return driveExistingUnlockView();
+  if (state.route.name === "driveRecoveryReset") return driveRecoveryResetView();
   if (state.route.name === "setupMasterPassword") return setupMasterPasswordView();
   if (state.route.name === "showRecoveryCode") return showRecoveryCodeView();
   if (state.route.name === "unlock") return unlockView();
@@ -2021,6 +2131,7 @@ function driveMergeUnlockView() {
         <input type="password" data-security-draft="password" autocomplete="current-password" />
       </div>
       <button type="submit">開始同步</button>
+      <button type="button" class="secondary" data-nav="driveRecoveryReset" data-mode="merge">忘記密碼</button>
     </form>
   `;
 }
@@ -2039,8 +2150,25 @@ function driveExistingUnlockView() {
         <input type="password" data-security-draft="password" autocomplete="current-password" />
       </div>
       <button type="submit">登入 App</button>
+      <button type="button" class="secondary" data-nav="driveRecoveryReset" data-mode="existing">忘記密碼</button>
     </form>
   `;
+}
+
+function driveRecoveryResetView() {
+  const mode = state.route.mode === "merge" ? "merge" : "existing";
+  return securityFormView({
+    title: "忘記密碼",
+    form: "drive-recovery-reset",
+    backRoute: mode === "merge" ? "driveMergeUnlock" : "driveExistingUnlock",
+    intro: "請輸入救援碼並設定新密碼。完成後會產生新的救援碼，舊救援碼將失效。",
+    fields: [
+      ["recoveryCode", "救援碼", "one-time-code"],
+      ["newPassword", "新密碼", "new-password"],
+      ["confirmPassword", "再次輸入新密碼", "new-password"]
+    ],
+    submit: "重設密碼"
+  });
 }
 
 function setupMasterPasswordView() {
@@ -2150,10 +2278,10 @@ function logoutAllDevicesView() {
   });
 }
 
-function securityFormView({ title, form, fields, submit, intro = "", danger = false }) {
+function securityFormView({ title, form, fields, submit, intro = "", danger = false, backRoute = "settings" }) {
   return `
     <header class="topbar topbar-centered">
-      <button class="secondary" data-nav="settings">返回</button>
+      <button class="secondary" data-nav="${backRoute}">返回</button>
       <h1 class="section-title">${title}</h1>
       <span></span>
     </header>
@@ -2687,7 +2815,11 @@ function notFoundView() {
 function bind() {
   app.querySelectorAll("[data-nav]").forEach((el) => {
     el.addEventListener("click", () => {
-      const fallbackRoute = { name: el.dataset.nav, id: el.dataset.id };
+      const fallbackRoute = {
+        name: el.dataset.nav,
+        id: el.dataset.id,
+        ...(el.dataset.mode ? { mode: el.dataset.mode } : {})
+      };
       if (shouldUseBackNavigation(el)) navigateBack(fallbackRoute);
       else navigate(fallbackRoute);
     });
@@ -2816,6 +2948,7 @@ function bindSecurityForms() {
     unlock: unlockWithMasterPassword,
     "drive-existing-unlock": unlockExistingDriveVault,
     "drive-merge-unlock": mergeExistingDriveVault,
+    "drive-recovery-reset": resetCloudPasswordWithRecovery,
     "change-password": changeMasterPassword,
     "forgot-password": resetForgottenPassword,
     "regenerate-recovery": regenerateRecoveryCode,
