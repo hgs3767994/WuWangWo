@@ -733,8 +733,20 @@ button:focus-visible,
 
 .list-editor-row {
   display: grid;
-  grid-template-columns: 5.2em auto minmax(0, 1fr) auto;
+  grid-template-columns: 5.2em auto minmax(0, 1fr);
   align-items: stretch;
+}
+
+.list-editor-row.has-delete {
+  grid-template-columns: 5.2em auto minmax(0, 1fr) auto;
+}
+
+.phone-list-row {
+  grid-template-columns: 3.4em auto minmax(0, 1fr);
+}
+
+.phone-list-row.has-delete {
+  grid-template-columns: 3.4em auto minmax(0, 1fr) auto;
 }
 
 .list-label-select {
@@ -742,9 +754,39 @@ button:focus-visible,
   padding-inline: 8px 6px;
 }
 
+.phone-label-select {
+  padding-inline: 6px 4px;
+}
+
 .default-inline-button {
   min-width: 4.8em;
   padding-inline: 8px;
+}
+
+.address-list-row {
+  display: grid;
+  gap: 8px;
+}
+
+.address-list-top-row,
+.address-list-bottom-row {
+  align-items: stretch;
+}
+
+.address-list-top-row .list-label-select {
+  flex: 0 0 5.2em;
+}
+
+.address-list-top-row .default-inline-button {
+  flex: 0 0 auto;
+}
+
+.address-list-bottom-row input {
+  flex: 1 1 auto;
+}
+
+.address-list-bottom-row .danger {
+  flex: 0 0 auto;
 }
 
 .family-member-row {
@@ -772,12 +814,12 @@ button:focus-visible,
 
 .life-event-row {
   display: grid;
-  grid-template-columns: 9.3em minmax(0, 1fr);
+  grid-template-columns: 8.4em minmax(0, 1fr);
   align-items: stretch;
 }
 
 .life-event-row.has-delete {
-  grid-template-columns: 9.3em minmax(0, 1fr) auto;
+  grid-template-columns: 8.4em minmax(0, 1fr) auto;
 }
 
 .date-input {
@@ -1335,6 +1377,8 @@ code {
   .birthday-search-row,
   .compact-editor-row,
   .interest-manage-row,
+  .address-list-top-row,
+  .address-list-bottom-row,
   .custom-option-row {
     flex-direction: row;
   }
@@ -1353,15 +1397,27 @@ code {
 
   .life-event-row,
   .life-event-row.has-delete {
-    grid-template-columns: 9.3em minmax(0, 1fr) auto;
+    grid-template-columns: 8.4em minmax(0, 1fr) auto;
   }
 
   .life-event-row:not(.has-delete) {
-    grid-template-columns: 9.3em minmax(0, 1fr);
+    grid-template-columns: 8.4em minmax(0, 1fr);
   }
 
   .list-editor-row {
+    grid-template-columns: 5.2em auto minmax(0, 1fr);
+  }
+
+  .list-editor-row.has-delete {
     grid-template-columns: 5.2em auto minmax(0, 1fr) auto;
+  }
+
+  .phone-list-row {
+    grid-template-columns: 3.4em auto minmax(0, 1fr);
+  }
+
+  .phone-list-row.has-delete {
+    grid-template-columns: 3.4em auto minmax(0, 1fr) auto;
   }
 
   .bottom-nav {

@@ -617,6 +617,7 @@ async function syncNow(options = {}) {
   if (!state.appState?.googleDrive?.connected) return;
   if (state.appState.googleDrive.syncStatus === "syncing") return;
   if (options.silent && !driveAuthStatus().hasAccessToken) return;
+  const previousGoogleDrive = state.appState.googleDrive;
   state.appState = {
     ...state.appState,
     googleDrive: {
@@ -661,9 +662,25 @@ async function syncNow(options = {}) {
     };
     await save();
     if (!options.silent) alert(syncAlertMessage(state.appState.googleDrive.lastSyncSummary, conflicts.length));
+    if (options.notifyConflicts && conflicts.length) {
+      alert("自動同步發現資料衝突，需要處理後才能完成同步。請到設定頁點擊「處理衝突資料」。");
+    }
     render();
   } catch (error) {
     const message = driveErrorMessage(error, "同步失敗，請稍後再試");
+    if (options.silent && isDriveAuthRequiredError(error)) {
+      state.appState = {
+        ...state.appState,
+        googleDrive: {
+          ...previousGoogleDrive,
+          syncStatus: previousGoogleDrive.syncStatus === "syncing" ? syncStatusAfterLocalChange(previousGoogleDrive) : previousGoogleDrive.syncStatus,
+          lastSyncError: "Google Drive 授權需要重新登入，請按「立即同步」完成授權。"
+        }
+      };
+      await setItem("appState", state.appState);
+      render();
+      return;
+    }
     state.appState = {
       ...state.appState,
       googleDrive: {
@@ -698,7 +715,7 @@ async function resumeDriveSyncInBackground() {
   if (!state.appState?.googleDrive?.connected || state.route.name !== "home") return;
   if (!driveAuthStatus().hasAccessToken) return;
   try {
-    await syncNow({ silent: true });
+    await syncNow({ silent: true, notifyConflicts: true });
   } catch {}
 }
 
@@ -2275,27 +2292,75 @@ function inputField(label, field, value, type = "text") {
 }
 
 function listEditor(title, key, rows, labels, placeholder) {
+  const deleting = Boolean(state.route[listDeleteModeKey(key)]);
+  const addLabel = `＋ 新增${title}`;
+  const deleteLabel = deleting ? "完成編輯" : `刪除${title}`;
   return `
     <section class="panel">
       <h2 class="section-title">${title}</h2>
       <div class="stack">
         ${rows.map((row, index) => `
           <div class="inline-item">
-            <div class="row list-editor-row">
-              <select class="list-label-select" data-list="${key}" data-index="${index}" data-prop="label">
-                ${labels.map((label) => `<option ${row.label === label ? "selected" : ""}>${label}</option>`).join("")}
-              </select>
-              <button type="button" class="secondary default-inline-button" data-action="set-default" data-list-key="${key}" data-index="${index}">${row.isDefault ? "預設" : "設為預設"}</button>
-              <input data-list="${key}" data-index="${index}" data-prop="value" placeholder="${placeholder}" value="${escapeAttr(row.value)}" />
-              <button type="button" class="danger" data-action="remove-list-item" data-list-key="${key}" data-index="${index}">刪除</button>
-            </div>
+            ${key === "addresses" ? addressListEditorRow(key, row, index, labels, placeholder, deleting) : phoneListEditorRow(key, row, index, labels, placeholder, deleting)}
           </div>
         `).join("")}
       </div>
       <div class="actions">
-        <button type="button" class="action-soft" data-action="add-list-item" data-list-key="${key}">＋ 新增${title}</button>
+        <button type="button" class="action-soft" data-action="add-list-item" data-list-key="${key}">${addLabel}</button>
+        <button type="button" class="${deleting ? "action-soft" : "secondary"}" data-action="toggle-list-delete-mode" data-list-key="${key}">${deleteLabel}</button>
       </div>
     </section>
+  `;
+}
+
+function listDeleteModeKey(key) {
+  return key === "phones" ? "phoneDeleteMode" : "addressDeleteMode";
+}
+
+function listLabelSelect(key, row, index, labels, className = "list-label-select") {
+  return `
+    <select class="${className}" data-list="${key}" data-index="${index}" data-prop="label">
+      ${labels.map((label) => `<option ${row.label === label ? "selected" : ""}>${label}</option>`).join("")}
+    </select>
+  `;
+}
+
+function listDefaultButton(key, row, index) {
+  return `<button type="button" class="secondary default-inline-button" data-action="set-default" data-list-key="${key}" data-index="${index}">${row.isDefault ? "預設" : "設為預設"}</button>`;
+}
+
+function listValueInput(key, row, index, placeholder) {
+  return `<input data-list="${key}" data-index="${index}" data-prop="value" placeholder="${placeholder}" value="${escapeAttr(row.value)}" />`;
+}
+
+function listRemoveButton(key, index, deleting) {
+  if (!deleting) return "";
+  return `<button type="button" class="danger" data-action="remove-list-item" data-list-key="${key}" data-index="${index}">刪除</button>`;
+}
+
+function phoneListEditorRow(key, row, index, labels, placeholder, deleting) {
+  return `
+    <div class="row list-editor-row phone-list-row ${deleting ? "has-delete" : ""}">
+      ${listLabelSelect(key, row, index, labels, "list-label-select phone-label-select")}
+      ${listDefaultButton(key, row, index)}
+      ${listValueInput(key, row, index, placeholder)}
+      ${listRemoveButton(key, index, deleting)}
+    </div>
+  `;
+}
+
+function addressListEditorRow(key, row, index, labels, placeholder, deleting) {
+  return `
+    <div class="address-list-row ${deleting ? "has-delete" : ""}">
+      <div class="row address-list-top-row">
+        ${listLabelSelect(key, row, index, labels)}
+        ${listDefaultButton(key, row, index)}
+      </div>
+      <div class="row address-list-bottom-row">
+        ${listValueInput(key, row, index, placeholder)}
+        ${listRemoveButton(key, index, deleting)}
+      </div>
+    </div>
   `;
 }
 
@@ -2783,6 +2848,7 @@ async function handleAction(event, el) {
   if (action === "purge-person") return purgePerson(el.dataset.id);
   if (action === "add-list-item") return addListItem(el.dataset.listKey);
   if (action === "remove-list-item") return removeListItem(el.dataset.listKey, Number(el.dataset.index));
+  if (action === "toggle-list-delete-mode") return toggleRouteFlag(listDeleteModeKey(el.dataset.listKey));
   if (action === "set-default") return setDefault(el.dataset.listKey, Number(el.dataset.index));
   if (action === "add-favorite-item") return addFavoriteItem();
   if (action === "remove-favorite-item") return removeFavoriteItem(Number(el.dataset.index));
@@ -3736,6 +3802,17 @@ function driveErrorMessage(error, fallback) {
   if (message.includes("google-drive-request-failed:403")) return "Google Drive 權限不足，請確認授權範圍後再試。";
   if (message.includes("google-drive-request-failed")) return "Google Drive 連線失敗，請稍後再試。";
   return fallback;
+}
+
+function isDriveAuthRequiredError(error) {
+  const message = error?.message ?? "";
+  return (
+    message.includes("google-drive-auth-required") ||
+    message.includes("interaction_required") ||
+    message.includes("login_required") ||
+    message.includes("consent_required") ||
+    message.includes("google-drive-request-failed:401")
+  );
 }
 
 function markDriveSyncIssue(error) {
