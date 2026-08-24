@@ -8,6 +8,11 @@
   --action-soft-text: #24443d;
   --action-soft-hover-bg: #6f958c;
   --action-soft-hover-text: #ffffff;
+  --action-quiet-bg: #edf5f2;
+  --action-quiet-border: #d9e7e3;
+  --action-quiet-text: #6f958c;
+  --action-quiet-hover-bg: #d9e7e3;
+  --action-quiet-hover-text: #24443d;
   --secondary: #f4f6f5;
   --accent: #5b9ea6;
   --accent-hover: #4d9098;
@@ -61,6 +66,11 @@ body[data-theme="business-blue"] {
   --action-soft-text: #1e293b;
   --action-soft-hover-bg: #64748b;
   --action-soft-hover-text: #ffffff;
+  --action-quiet-bg: #f1f5f9;
+  --action-quiet-border: #e2e8f0;
+  --action-quiet-text: #64748b;
+  --action-quiet-hover-bg: #e2e8f0;
+  --action-quiet-hover-text: #1e293b;
   --secondary: #f8fafc;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
@@ -98,6 +108,11 @@ body[data-theme="warm-amber"] {
   --action-soft-text: #292D32;
   --action-soft-hover-bg: #C58B3A;
   --action-soft-hover-text: #FFFFFF;
+  --action-quiet-bg: #FAF0DC;
+  --action-quiet-border: #F2DEBC;
+  --action-quiet-text: #C58B3A;
+  --action-quiet-hover-bg: #F2DEBC;
+  --action-quiet-hover-text: #292D32;
   --secondary: #FAF9F6;
   --accent: #C58B3A;
   --accent-hover: #B77822;
@@ -135,6 +150,11 @@ body[data-theme="gentle-pink"] {
   --action-soft-text: #8b5e83;
   --action-soft-hover-bg: #c48aae;
   --action-soft-hover-text: #ffffff;
+  --action-quiet-bg: #fbeef4;
+  --action-quiet-border: #f3dce8;
+  --action-quiet-text: #c48aae;
+  --action-quiet-hover-bg: #f3dce8;
+  --action-quiet-hover-text: #8b5e83;
   --secondary: #fff7f8;
   --accent: #d88fa3;
   --accent-hover: #c77d91;
@@ -172,6 +192,11 @@ body[data-theme="memory-paper"] {
   --action-soft-text: #3D4143;
   --action-soft-hover-bg: #A9B4BC;
   --action-soft-hover-text: #FFFFFF;
+  --action-quiet-bg: #F0F3F4;
+  --action-quiet-border: #E1E7EA;
+  --action-quiet-text: #667887;
+  --action-quiet-hover-bg: #E1E7EA;
+  --action-quiet-hover-text: #3D4143;
   --secondary: #F3EEE4;
   --accent: #A77A52;
   --accent-hover: #936946;
@@ -254,6 +279,23 @@ button.action-soft:hover {
 
 button.action-soft:active {
   filter: brightness(0.96);
+}
+
+button.action-quiet {
+  background: var(--action-quiet-bg);
+  border-color: var(--action-quiet-border);
+  color: var(--action-quiet-text);
+  font-weight: 700;
+}
+
+button.action-quiet:hover {
+  background: var(--action-quiet-hover-bg);
+  border-color: var(--action-quiet-hover-bg);
+  color: var(--action-quiet-hover-text);
+}
+
+button.action-quiet:active {
+  filter: brightness(0.98);
 }
 
 button.danger {
@@ -742,11 +784,11 @@ button:focus-visible,
 }
 
 .phone-list-row {
-  grid-template-columns: 3.4em auto minmax(0, 1fr);
+  grid-template-columns: 4.4em auto minmax(0, 1fr);
 }
 
 .phone-list-row.has-delete {
-  grid-template-columns: 3.4em auto minmax(0, 1fr) auto;
+  grid-template-columns: 4.4em auto minmax(0, 1fr) auto;
 }
 
 .list-label-select {
@@ -814,16 +856,30 @@ button:focus-visible,
 
 .life-event-row {
   display: grid;
-  grid-template-columns: 8.4em minmax(0, 1fr);
+  grid-template-columns: 8.9em minmax(0, 1fr);
   align-items: stretch;
 }
 
 .life-event-row.has-delete {
-  grid-template-columns: 8.4em minmax(0, 1fr) auto;
+  grid-template-columns: 8.9em minmax(0, 1fr) auto;
 }
 
 .date-input {
   min-width: 0;
+}
+
+.input-status-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.field-error {
+  min-width: max-content;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .custom-field-main {
@@ -1212,15 +1268,15 @@ button:focus-visible,
   justify-items: center;
   min-height: 76px;
   padding: 10px;
-  border-color: var(--line);
-  background: var(--panel);
-  color: var(--text-secondary);
+  border-color: var(--action-quiet-border);
+  background: var(--action-quiet-bg);
+  color: var(--action-quiet-text);
 }
 
 .theme-option:hover {
-  background: var(--secondary);
-  border-color: var(--accent);
-  color: var(--primary);
+  background: var(--action-quiet-hover-bg);
+  border-color: var(--action-quiet-hover-bg);
+  color: var(--action-quiet-hover-text);
 }
 
 .theme-option.selected {
@@ -1397,11 +1453,11 @@ code {
 
   .life-event-row,
   .life-event-row.has-delete {
-    grid-template-columns: 8.4em minmax(0, 1fr) auto;
+    grid-template-columns: 8.9em minmax(0, 1fr) auto;
   }
 
   .life-event-row:not(.has-delete) {
-    grid-template-columns: 8.4em minmax(0, 1fr);
+    grid-template-columns: 8.9em minmax(0, 1fr);
   }
 
   .list-editor-row {
@@ -1413,11 +1469,16 @@ code {
   }
 
   .phone-list-row {
-    grid-template-columns: 3.4em auto minmax(0, 1fr);
+    grid-template-columns: 4.4em auto minmax(0, 1fr);
   }
 
   .phone-list-row.has-delete {
-    grid-template-columns: 3.4em auto minmax(0, 1fr) auto;
+    grid-template-columns: 4.4em auto minmax(0, 1fr) auto;
+  }
+
+  .input-status-row {
+    grid-template-columns: 1fr;
+    justify-items: start;
   }
 
   .bottom-nav {

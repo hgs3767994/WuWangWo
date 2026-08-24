@@ -1418,7 +1418,7 @@ function searchView() {
   const results = hasCriteria ? searchPeople(params) : [];
   const birthdayOptions = birthdaySearchOptions();
   return `
-    <header class="topbar">
+    <header class="topbar topbar-centered">
       <button class="secondary" data-nav="home">返回</button>
       <h1 class="section-title">搜尋</h1>
       <span></span>
@@ -1609,13 +1609,13 @@ function settingsView() {
       ${driveSyncOverview(gd, authStatus, syncStatusText)}
       ${gd.lastSyncError ? `<p class="danger-text">${escapeHtml(gd.lastSyncError)}</p>` : ""}
       ${syncSummaryView(gd.lastSyncSummary)}
-      ${pendingConflicts.length ? `<button data-nav="syncConflicts">處理衝突資料</button>` : ""}
-      <button class="secondary" data-nav="syncTroubleshooting">同步疑難排解</button>
-      ${gd.connected ? `<button class="secondary" data-action="sync-now" ${gd.syncStatus === "syncing" ? "disabled" : ""}>立即同步</button><button class="secondary" data-action="drive-logout">登出 Google Drive</button>` : `<button data-action="drive-placeholder">連結 Google Drive</button>`}
+      ${pendingConflicts.length ? `<button class="action-quiet" data-nav="syncConflicts">處理衝突資料</button>` : ""}
+      <button class="action-quiet" data-nav="syncTroubleshooting">同步疑難排解</button>
+      ${gd.connected ? `<button class="action-quiet" data-action="sync-now" ${gd.syncStatus === "syncing" ? "disabled" : ""}>立即同步</button><button class="action-quiet" data-action="drive-logout">登出 Google Drive</button>` : `<button class="action-quiet" data-action="drive-placeholder">連結 Google Drive</button>`}
     </section>
     ${installSettingsSection()}
     ${themeSettingsSection()}
-    ${gd.connected ? `<section class="panel stack"><h2 class="section-title">安全性</h2><button class="secondary" data-nav="changePassword">更改密碼</button><button class="secondary" data-nav="forgotPassword">忘記密碼</button><button class="secondary" data-nav="regenerateRecovery">重新產生救援碼</button><button class="danger" data-nav="logoutAllDevices">登出所有裝置</button></section>` : ""}
+    ${gd.connected ? `<section class="panel stack"><h2 class="section-title">安全性</h2><button class="action-quiet" data-nav="changePassword">更改密碼</button><button class="action-quiet" data-nav="forgotPassword">忘記密碼</button><button class="action-quiet" data-nav="regenerateRecovery">重新產生救援碼</button><button class="danger" data-nav="logoutAllDevices">登出所有裝置</button></section>` : ""}
     <section class="panel stack">
       <h2 class="section-title">資料管理</h2>
       ${storageWarningView()}
@@ -1627,13 +1627,13 @@ function settingsView() {
       ${dataManagement.lastJsonExportAt ? `<p class="muted">最近 JSON 備份：${formatDateTime(dataManagement.lastJsonExportAt)}</p>` : ""}
       ${dataManagement.lastExcelExportAt ? `<p class="muted">最近 Excel 匯出：${formatDateTime(dataManagement.lastExcelExportAt)}</p>` : ""}
       ${dataManagement.lastImportAt ? `<p class="muted">最近匯入：${formatDateTime(dataManagement.lastImportAt)}</p>` : ""}
-      <button class="secondary" data-nav="localSnapshots">本機資料快照</button>
-      <button class="secondary" data-nav="deleted">最近刪除</button>
-      <button class="secondary" data-nav="archived">查看封存人物</button>
-      <button class="secondary" data-action="export-data">匯出備份檔（JSON）</button>
-      <button class="secondary" data-action="export-excel">匯出 Excel（XLSX）</button>
-      <button class="secondary" data-action="choose-import-file">匯入資料</button>
-      <button class="secondary" data-nav="dataHealth">資料完整性檢查</button>
+      <button class="action-quiet" data-nav="localSnapshots">本機資料快照</button>
+      <button class="action-quiet" data-nav="deleted">最近刪除</button>
+      <button class="action-quiet" data-nav="archived">查看封存人物</button>
+      <button class="action-quiet" data-action="export-data">匯出備份檔（JSON）</button>
+      <button class="action-quiet" data-action="export-excel">匯出 Excel（XLSX）</button>
+      <button class="action-quiet" data-action="choose-import-file">匯入資料</button>
+      <button class="action-quiet" data-nav="dataHealth">資料完整性檢查</button>
       <input type="file" accept="application/json,.json" data-import-file hidden />
       <p class="muted">JSON 備份檔可用於匯入復原；Excel 檔適合人工檢視。匯出的資料不包含密碼、資料金鑰或救援碼；請自行妥善保存，避免他人取得。</p>
     </section>
@@ -1641,7 +1641,7 @@ function settingsView() {
       <h2 class="section-title">關於</h2>
       <p>版本：${escapeHtml(APP_CONFIG.appVersion)}</p>
       <p class="muted">快取版本：${escapeHtml(APP_CONFIG.cacheName)}</p>
-      <button type="button" class="secondary" data-action="check-version-update">檢查版本更新</button>
+      <button type="button" class="action-quiet" data-action="check-version-update">檢查版本更新</button>
       <div class="legal-links">
         <a href="./privacy.html">隱私權政策</a>
         <a href="./terms.html">服務條款</a>
@@ -1714,7 +1714,7 @@ function installSettingsSection() {
       <h2 class="section-title">安裝到裝置</h2>
       <p>狀態：${installed ? "已使用 App 模式開啟" : "尚未以 App 模式開啟"}</p>
       <p class="muted">${installed ? "目前已像 App 一樣獨立開啟，不需要重複安裝。" : "建議安裝到手機主畫面，日後可以直接從主畫面開啟莫忘。"}</p>
-      ${installed ? "" : `<button type="button" data-action="${canPrompt ? "install-app" : "open-install-guide"}">${canPrompt ? "安裝到裝置" : "查看安裝方式"}</button>`}
+      ${installed ? "" : `<button type="button" class="action-quiet" data-action="${canPrompt ? "install-app" : "open-install-guide"}">${canPrompt ? "安裝到裝置" : "查看安裝方式"}</button>`}
     </section>
   `;
 }
@@ -1727,7 +1727,7 @@ function themeSettingsSection() {
       <p class="muted">此設定只保存在本機裝置，不會同步到 Google Drive。</p>
       <div class="theme-options">
         ${THEME_OPTIONS.map((theme) => `
-          <button type="button" class="theme-option ${theme.id === selected ? "selected" : ""}" data-action="set-theme" data-theme-id="${theme.id}" aria-pressed="${theme.id === selected}">
+          <button type="button" class="theme-option action-quiet ${theme.id === selected ? "selected" : ""}" data-action="set-theme" data-theme-id="${theme.id}" aria-pressed="${theme.id === selected}">
             <span class="theme-swatches" aria-hidden="true">
               ${theme.colors.map((color) => `<span style="background:${color}"></span>`).join("")}
             </span>
@@ -2223,19 +2223,19 @@ function familyMemberLine(sourcePerson, member) {
 function basicDetailLines(person) {
   return [
     person.birthDate ? detailLine("生日", person.birthDate) : "",
-    person.nationalId ? detailLine("身分證字號", person.nationalId, `<button class="secondary" data-copy="${escapeAttr(person.nationalId)}">複製</button>`) : "",
+    person.nationalId ? detailLine("身分證字號", person.nationalId, `<button class="action-quiet" data-copy="${escapeAttr(person.nationalId)}">複製</button>`) : "",
     ...((person.phones ?? []).length
       ? sortDefaultFirst(person.phones).map((phone) =>
           detailLine(
             `電話｜${phone.label}`,
             phone.value,
-            `<a class="button-link" href="tel:${escapeAttr(phone.value)}">撥打</a><button class="secondary" data-copy="${escapeAttr(phone.value)}">複製</button>`
+            `<a class="button-link" href="tel:${escapeAttr(phone.value)}">撥打</a><button class="action-quiet" data-copy="${escapeAttr(phone.value)}">複製</button>`
           )
         )
       : []),
     ...((person.addresses ?? []).length
       ? sortDefaultFirst(person.addresses).map((address) =>
-          detailLine(`地址｜${address.label}`, address.value, `<button class="secondary" data-copy="${escapeAttr(address.value)}">複製</button>`)
+          detailLine(`地址｜${address.label}`, address.value, `<button class="action-quiet" data-copy="${escapeAttr(address.value)}">複製</button>`)
         )
       : [])
   ]
@@ -2288,6 +2288,17 @@ function sortMoreBasicFields(fields) {
 }
 
 function inputField(label, field, value, type = "text") {
+  if (field === "nationalId") {
+    return `
+      <section class="panel">
+        <h2 class="section-title">${label}</h2>
+        <div class="input-status-row">
+          <input type="${type}" data-field="${field}" data-validate-national-id="true" value="${escapeAttr(value)}" />
+          <span class="field-error" data-national-id-message>${nationalIdErrorText(value)}</span>
+        </div>
+      </section>
+    `;
+  }
   return `<section class="panel"><h2 class="section-title">${label}</h2><input type="${type}" data-field="${field}" value="${escapeAttr(value)}" /></section>`;
 }
 
@@ -2307,7 +2318,7 @@ function listEditor(title, key, rows, labels, placeholder) {
       </div>
       <div class="actions">
         <button type="button" class="action-soft" data-action="add-list-item" data-list-key="${key}">${addLabel}</button>
-        <button type="button" class="${deleting ? "action-soft" : "secondary"}" data-action="toggle-list-delete-mode" data-list-key="${key}">${deleteLabel}</button>
+        <button type="button" class="action-quiet" data-action="toggle-list-delete-mode" data-list-key="${key}">${deleteLabel}</button>
       </div>
     </section>
   `;
@@ -2373,7 +2384,7 @@ function interestEditor(selectedIds) {
       ${managing ? interestManageForm() : ""}
       <div class="actions">
         <button type="button" class="${managing ? "action-soft" : "secondary"}" data-action="toggle-interest-manage">${managing ? "完成編輯" : "新增/移除興趣喜好"}</button>
-        <button type="button" class="secondary" data-action="restore-default-interests">恢復預設興趣喜好</button>
+        <button type="button" class="action-quiet" data-action="restore-default-interests">恢復預設興趣喜好</button>
       </div>
     </section>
   `;
@@ -2419,7 +2430,7 @@ function favoriteItemsEditor(rows) {
       </div>
       <div class="actions">
         <button type="button" class="action-soft" data-action="add-favorite-item">＋ 新增嗜好品</button>
-        <button type="button" class="${deleting ? "action-soft" : "secondary"}" data-action="toggle-favorite-item-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
+        <button type="button" class="action-quiet" data-action="toggle-favorite-item-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
       </div>
     </section>
   `;
@@ -2440,7 +2451,7 @@ function familyMembersEditor(rows, currentPersonId) {
       </div>
       <div class="actions">
         <button type="button" class="action-soft" data-action="add-family-member">＋ 新增家族成員</button>
-        <button type="button" class="${deleting ? "action-soft" : "secondary"}" data-action="toggle-family-member-delete-mode">${deleting ? "完成編輯" : "刪除成員"}</button>
+        <button type="button" class="action-quiet" data-action="toggle-family-member-delete-mode">${deleting ? "完成編輯" : "刪除成員"}</button>
       </div>
     </section>
   `;
@@ -2490,7 +2501,7 @@ function lifeEventsEditor(rows) {
       </div>
       <div class="actions">
         <button type="button" class="action-soft" data-action="add-life-event">＋ 新增重大事件</button>
-        <button type="button" class="${deleting ? "action-soft" : "secondary"}" data-action="toggle-life-event-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
+        <button type="button" class="action-quiet" data-action="toggle-life-event-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
       </div>
     </section>
   `;
@@ -2580,7 +2591,7 @@ function customFieldInput(field, person) {
         <div class="field custom-field-main">
           <div class="custom-field-header">
             <label>${escapeHtml(field.name)}</label>
-            <button type="button" class="${editing ? "action-soft" : "secondary"}" data-action="toggle-custom-field-edit" data-id="${field.id}">${editing ? "完成編輯" : "編輯自訂欄位"}</button>
+            <button type="button" class="action-quiet" data-action="toggle-custom-field-edit" data-id="${field.id}">${editing ? "完成編輯" : "編輯自訂欄位"}</button>
           </div>
           <div class="chip-list">${(field.options ?? []).map((option) => choiceChip(field, current, option)).join("")}</div>
         </div>
@@ -2594,7 +2605,7 @@ function customFieldInput(field, person) {
       <div class="field custom-field-main">
         <div class="custom-field-header">
           <label>${escapeHtml(field.name)}</label>
-          <button type="button" class="${editing ? "action-soft" : "secondary"}" data-action="toggle-custom-field-edit" data-id="${field.id}">${editing ? "完成編輯" : "編輯自訂欄位"}</button>
+          <button type="button" class="action-quiet" data-action="toggle-custom-field-edit" data-id="${field.id}">${editing ? "完成編輯" : "編輯自訂欄位"}</button>
         </div>
         <input type="${type}" data-custom-value="${field.id}" value="${escapeAttr(current)}" />
       </div>
@@ -2661,9 +2672,10 @@ function detailLine(label, value = "", action = "", className = "") {
 function bottomNav(current) {
   const target = current === "home" ? { name: "settings", label: "設定" } : { name: "home", label: "首頁" };
   const backAttribute = current === "settings" ? ` data-back="true"` : "";
+  const classAttribute = current === "settings" ? ` class="action-quiet"` : "";
   return `
     <nav class="bottom-nav">
-      <button data-nav="${target.name}"${backAttribute}>${target.label}</button>
+      <button${classAttribute} data-nav="${target.name}"${backAttribute}>${target.label}</button>
     </nav>
   `;
 }
@@ -2689,8 +2701,13 @@ function bind() {
   app.querySelectorAll("[data-field]").forEach((el) => {
     el.addEventListener("input", () => {
       if (!state.route.draft) return;
+      if (el.dataset.field === "nationalId") el.value = el.value.toUpperCase();
       state.route.draft[el.dataset.field] = el.value;
+      if (el.dataset.validateNationalId === "true") updateNationalIdFeedback(el);
     });
+    if (el.dataset.validateNationalId === "true") {
+      el.addEventListener("blur", () => updateNationalIdFeedback(el));
+    }
   });
   app.querySelectorAll("[data-route-field]").forEach((el) => {
     el.addEventListener("input", () => {
@@ -2882,7 +2899,7 @@ async function handleAction(event, el) {
   if (action === "rename-custom-option") return renameCustomOption(el.dataset.fieldId, el.dataset.option);
   if (action === "delete-custom-option") return deleteCustomOption(el.dataset.fieldId, el.dataset.option);
   if (action === "apply-search") return render();
-  if (action === "clear-search") return navigate({ name: "search", params: emptySearchParams() });
+  if (action === "clear-search") return clearSearch();
 }
 
 function toggleRouteFlag(key) {
@@ -2903,6 +2920,12 @@ function checkDuplicateName() {
   }
   const duplicateCount = visiblePeople(state.vault.people).filter((person) => person.id !== state.route.draft.id && person.name.trim() === cleanName).length;
   alert(duplicateCount ? `發現${duplicateCount}位姓名重覆人物` : "未發現");
+}
+
+function clearSearch() {
+  state.route.params = emptySearchParams();
+  render({ transition: "replace" });
+  writeHistoryRoute(state.route, { replace: true, force: true });
 }
 
 function openFamilyMember(sourcePersonId, familyMemberId, name) {
@@ -3615,24 +3638,25 @@ function countBy(items, keyFn) {
 function searchPeople(params) {
   const normalizedParams = normalizeSearchParams(params);
   const text = normalizedParams.text.trim().toLowerCase();
+  const textTokens = text.split(/\s+/).filter(Boolean);
   const address = normalizedParams.address.trim().toLowerCase();
   const tagIds = normalizedParams.tagIds;
   const birthdayMonths = Number(normalizedParams.birthdayWithinMonths || 0);
   const birthYear = normalizedParams.birthYear;
   const birthMonth = normalizedParams.birthMonth;
   const matched = visiblePeople(state.vault.people).filter((person) => {
+    const searchableText = [
+      person.name,
+      person.note,
+      ...(person.favoriteItems ?? []).map((item) => item.value),
+      ...(person.lifeEvents ?? []).map((event) => event.text),
+      ...person.customValues.map((value) => formatSearchValue(value.value))
+    ]
+      .join(" ")
+      .toLowerCase();
     const textMatch =
-      !text ||
-      [
-        person.name,
-        person.note,
-        ...(person.favoriteItems ?? []).map((item) => item.value),
-        ...(person.lifeEvents ?? []).map((event) => event.text),
-        ...person.customValues.map((value) => formatSearchValue(value.value))
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(text);
+      !textTokens.length ||
+      textTokens.every((token) => searchableText.includes(token));
     const addressMatch = !address || person.addresses.some((item) => item.value.toLowerCase().includes(address));
     const tagMatch = tagIds.every((id) => (person.interestTagIds ?? []).includes(id));
     const birthdayMatch = !birthdayMonths || isBirthdayWithinMonths(person.birthDate, birthdayMonths);
@@ -3641,8 +3665,8 @@ function searchPeople(params) {
     return textMatch && addressMatch && tagMatch && birthdayMatch && birthYearMatch && birthMonthMatch;
   });
   return matched.sort((a, b) => {
-    const aName = text && a.name.toLowerCase().includes(text);
-    const bName = text && b.name.toLowerCase().includes(text);
+    const aName = textTokens.some((token) => a.name.toLowerCase().includes(token));
+    const bName = textTokens.some((token) => b.name.toLowerCase().includes(token));
     if (aName !== bName) return aName ? -1 : 1;
     return sortPeople([a, b])[0].id === a.id ? -1 : 1;
   });
@@ -3700,6 +3724,66 @@ function birthDatePart(birthDate, part) {
 function formatSearchValue(value) {
   if (Array.isArray(value)) return value.join(" ");
   return String(value ?? "");
+}
+
+function updateNationalIdFeedback(input) {
+  const message = input.closest(".input-status-row")?.querySelector("[data-national-id-message]");
+  if (!message) return;
+  message.textContent = nationalIdErrorText(input.value);
+}
+
+function nationalIdErrorText(value) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (!normalized) return "";
+  return isValidTaiwanNationalId(normalized) ? "" : "身分證字號有誤";
+}
+
+function isValidTaiwanNationalId(value) {
+  const id = String(value ?? "").trim().toUpperCase();
+  if (!/^[A-Z][12]\d{8}$/.test(id)) return false;
+  const letterCodes = {
+    A: 10,
+    B: 11,
+    C: 12,
+    D: 13,
+    E: 14,
+    F: 15,
+    G: 16,
+    H: 17,
+    I: 34,
+    J: 18,
+    K: 19,
+    L: 20,
+    M: 21,
+    N: 22,
+    O: 35,
+    P: 23,
+    Q: 24,
+    R: 25,
+    S: 26,
+    T: 27,
+    U: 28,
+    V: 29,
+    W: 32,
+    X: 30,
+    Y: 31,
+    Z: 33
+  };
+  const code = letterCodes[id[0]];
+  const digits = id.slice(1).split("").map(Number);
+  const sum =
+    Math.floor(code / 10) +
+    (code % 10) * 9 +
+    digits[0] * 8 +
+    digits[1] * 7 +
+    digits[2] * 6 +
+    digits[3] * 5 +
+    digits[4] * 4 +
+    digits[5] * 3 +
+    digits[6] * 2 +
+    digits[7] +
+    digits[8];
+  return sum % 10 === 0;
 }
 
 function isBirthdayWithinMonths(birthDate, months) {
