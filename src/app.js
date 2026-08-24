@@ -1,5 +1,5 @@
 import { getItem, removeItem, setItem } from "./db.js";
-import { connectDrive, disconnectDrive, driveAuthStatus, driveReadiness, listDriveFiles, readDriveFile, writeDriveFile } from "./drive.js";
+import { connectDrive, disconnectDrive, driveAuthStatus, driveReadiness, listDriveFileRevisions, listDriveFiles, readDriveFile, readDriveFileRevision, writeDriveFile } from "./drive.js";
 import { APP_CONFIG, driveFileName, driveProviderLabel } from "./config.js";
 import { mergeVaults } from "./sync.js";
 import { buildVaultXlsx } from "./xlsx.js";
@@ -37,6 +37,7 @@ const NO_SLIDE_ROUTE_NAMES = new Set([
   "driveMergeUnlock",
   "driveExistingUnlock",
   "driveRecoveryReset",
+  "driveRevisionRecovery",
   "setupMasterPassword",
   "showRecoveryCode",
   "changePassword",
@@ -1068,6 +1069,147 @@ async function resetCloudPasswordWithRecovery(event) {
   });
 }
 
+async function scanDriveRevisionRecovery(event) {
+  event.preventDefault();
+  const draft = state.route.securityDraft ?? {};
+  if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
+  const credentialType = draft.credentialType === "recoveryCode" ? "recoveryCode" : "password";
+  const secret = credentialType === "recoveryCode" ? normalizeRecoveryCode(draft.secret ?? "") : (draft.secret ?? "");
+  if (!secret) {
+    alert(credentialType === "recoveryCode" ? "請輸入救援碼" : "請輸入原密碼");
+    return;
+  }
+  state.route.revisionRecoveryReport = {
+    status: "running",
+    message: "正在掃描 Google Drive 歷史版本…",
+    attempts: []
+  };
+  state.route.revisionRecoveryCandidate = null;
+  render();
+  try {
+    await connectDrive({ interactive: true });
+    const keyCandidates = await driveRevisionCandidates("keyPackage");
+    const vaultCandidates = await driveRevisionCandidates("vault");
+    const attempts = [];
+    for (const keyCandidate of keyCandidates) {
+      let keyPackage;
+      let dekBytes;
+      try {
+        keyPackage = await keyCandidate.read();
+        const wrapper = credentialType === "recoveryCode" ? keyPackage?.recoveryCodeWrapper : keyPackage?.masterPasswordWrapper;
+        if (!wrapper || !keyPackage?.crypto?.iterations) throw new Error("invalid-key-package");
+        dekBytes = await unwrapDek(wrapper, secret, keyPackage.crypto.iterations);
+        attempts.push(`金鑰檔 ${revisionLabel(keyCandidate)}：可解開`);
+      } catch {
+        attempts.push(`金鑰檔 ${revisionLabel(keyCandidate)}：不可用`);
+        continue;
+      }
+      for (const vaultCandidate of vaultCandidates) {
+        try {
+          const envelope = await vaultCandidate.read();
+          const vault = normalizeVault(pruneDeleted(await decryptVaultEnvelope(envelope, dekBytes)));
+          state.route.revisionRecoveryCandidate = {
+            keyPackage,
+            vault,
+            dekBytes,
+            keyRevision: revisionSummary(keyCandidate),
+            vaultRevision: revisionSummary(vaultCandidate)
+          };
+          state.route.revisionRecoveryReport = {
+            status: "success",
+            message: `找到可救援版本：人物 ${vault.people.length} 位。請確認後重建雲端同步資料。`,
+            attempts,
+            keyRevision: revisionSummary(keyCandidate),
+            vaultRevision: revisionSummary(vaultCandidate)
+          };
+          render();
+          return;
+        } catch {
+          attempts.push(`資料檔 ${revisionLabel(vaultCandidate)}：無法搭配此金鑰解開`);
+        }
+      }
+    }
+    state.route.revisionRecoveryReport = {
+      status: "error",
+      message: "沒有找到可用的歷史版本。可能是 Google Drive 未保留可下載舊版，或輸入的原密碼／救援碼與所有版本都不相符。",
+      attempts
+    };
+    render();
+  } catch (error) {
+    state.route.revisionRecoveryReport = {
+      status: "error",
+      message: driveErrorMessage(error, "雲端歷史版本掃描失敗，請稍後再試。"),
+      attempts: state.route.revisionRecoveryReport?.attempts ?? []
+    };
+    render();
+  }
+}
+
+async function applyDriveRevisionRecovery() {
+  const candidate = state.route.revisionRecoveryCandidate;
+  const draft = state.route.securityDraft ?? {};
+  if (!candidate) {
+    alert("尚未找到可用的歷史版本");
+    return;
+  }
+  if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
+  const confirmed = confirm(
+    `確定要使用找到的歷史版本重建雲端同步資料嗎？\n\n金鑰檔：${candidate.keyRevision.label}\n資料檔：${candidate.vaultRevision.label}\n人物：${candidate.vault.people.length} 位\n\n此操作會覆蓋目前 Google Drive 中的莫忘同步資料，並產生新的密碼與救援碼。`
+  );
+  if (!confirmed) return;
+  const deviceId = state.appState?.deviceId ?? createDeviceId();
+  const updated = await buildReplacedMasterPasswordAndRecovery({
+    keyPackage: candidate.keyPackage,
+    dekBytes: candidate.dekBytes,
+    newPassword: draft.newPassword,
+    deviceId,
+    bumpSession: true
+  });
+  const syncedAt = new Date().toISOString();
+  state.dekBytes = candidate.dekBytes;
+  state.vault = normalizeVault(pruneDeleted(candidate.vault));
+  state.appState = {
+    ...(state.appState ?? {}),
+    schemaVersion: state.appState?.schemaVersion ?? 1,
+    mode: "driveSync",
+    deviceId,
+    currentVaultId: state.vault.vaultId,
+    ui: {
+      themeId: currentThemeId()
+    },
+    googleDrive: {
+      ...(state.appState?.googleDrive ?? {}),
+      connected: true,
+      syncStatus: "synced",
+      lastSyncAt: syncedAt,
+      lastLocalChangeAt: "",
+      lastSyncError: "",
+      accountEmail: currentDriveAccountEmail(),
+      lastSyncSummary: buildSyncSummary({ localBeforeSync: null, remoteVault: candidate.vault, mergedVault: state.vault, conflicts: [], syncedAt }),
+      pendingConflicts: [],
+      simulated: isSimulatedDrive()
+    }
+  };
+  await setItem("keyPackage", updated.keyPackage);
+  await setItem("vault", state.vault);
+  await setItem(
+    "trustedSession",
+    await createTrustedSessionWithDek({
+      vaultId: updated.keyPackage.vaultId,
+      deviceId,
+      sessionEpoch: updated.keyPackage.securityMeta.sessionEpoch,
+      dekBytes: candidate.dekBytes
+    })
+  );
+  await save();
+  await uploadKeyPackageToDrive();
+  await uploadCurrentVaultToDrive();
+  showRecoveryCodeRoute(updated.recoveryCode, {
+    oldInvalid: true,
+    returnTo: { name: "home" }
+  });
+}
+
 async function regenerateRecoveryCode(event) {
   event.preventDefault();
   const draft = state.route.securityDraft ?? {};
@@ -1262,6 +1404,7 @@ function hasPendingSecurityOperation() {
     "driveMergeUnlock",
     "driveExistingUnlock",
     "driveRecoveryReset",
+    "driveRevisionRecovery",
     "changePassword",
     "forgotPassword",
     "regenerateRecovery",
@@ -1484,6 +1627,7 @@ function view() {
   if (state.route.name === "localSnapshots") return localSnapshotsView();
   if (state.route.name === "archived") return archivedPeopleView();
   if (state.route.name === "syncTroubleshooting") return syncTroubleshootingView();
+  if (state.route.name === "driveRevisionRecovery") return driveRevisionRecoveryView();
   if (state.route.name === "installGuide") return installGuideView();
   if (state.route.name === "deleted") return deletedView();
   if (state.route.name === "driveIntro") return driveIntroView();
@@ -1548,7 +1692,7 @@ function searchView() {
     </header>
     <section class="panel search-panel">
       <div class="field">
-        <label>依輸入文字搜尋</label>
+        <label>依輸入文字搜尋（可使用空格增加搜尋條件）</label>
         <input data-search="text" placeholder="姓名、其它、嗜好品、重大事件、自訂欄位" value="${escapeAttr(params.text)}" />
       </div>
       <div class="field">
@@ -1850,7 +1994,7 @@ function themeSettingsSection() {
       <p class="muted">此設定只保存在本機裝置，不會同步到 Google Drive。</p>
       <div class="theme-options">
         ${THEME_OPTIONS.map((theme) => `
-          <button type="button" class="theme-option action-quiet ${theme.id === selected ? "selected" : ""}" data-action="set-theme" data-theme-id="${theme.id}" aria-pressed="${theme.id === selected}">
+          <button type="button" class="theme-option ${theme.id === selected ? "selected" : ""}" data-action="set-theme" data-theme-id="${theme.id}" aria-pressed="${theme.id === selected}">
             <span class="theme-swatches" aria-hidden="true">
               ${theme.colors.map((color) => `<span style="background:${color}"></span>`).join("")}
             </span>
@@ -1913,6 +2057,119 @@ function syncSummaryView(summary) {
       <span>合併後人物 ${summary.mergedPeopleCount} 位，衝突 ${summary.conflictCount} 筆</span>
     </div>
   `;
+}
+
+function driveRevisionRecoveryView() {
+  const draft = state.route.securityDraft ?? { credentialType: "password", secret: "", newPassword: "", confirmPassword: "" };
+  const report = state.route.revisionRecoveryReport;
+  const candidate = state.route.revisionRecoveryCandidate;
+  return `
+    <header class="topbar topbar-centered">
+      <button class="secondary" data-nav="syncTroubleshooting">返回</button>
+      <h1 class="section-title">雲端歷史版本救援</h1>
+      <span></span>
+    </header>
+    <section class="panel stack">
+      <p>此工具會嘗試掃描 Google Drive 中莫忘同步檔的歷史版本，找出可用原密碼或救援碼解開的舊版資料。</p>
+      <p class="muted">Google Drive 可能未保留完整舊版，且部分舊版可能無法下載；此工具會盡力嘗試，但不能保證一定能救回。</p>
+    </section>
+    <form class="panel stack security-form" data-form="drive-revision-recovery">
+      <div class="field security-field">
+        <label>嘗試方式</label>
+        <select data-security-draft="credentialType">
+          <option value="password" ${draft.credentialType === "password" ? "selected" : ""}>原密碼</option>
+          <option value="recoveryCode" ${draft.credentialType === "recoveryCode" ? "selected" : ""}>救援碼</option>
+        </select>
+      </div>
+      <div class="field security-field">
+        <label>原密碼或救援碼</label>
+        <input type="password" data-security-draft="secret" value="${escapeAttr(draft.secret ?? "")}" autocomplete="current-password" />
+      </div>
+      <div class="field security-field">
+        <label>新密碼</label>
+        <input type="password" data-security-draft="newPassword" value="${escapeAttr(draft.newPassword ?? "")}" autocomplete="new-password" />
+      </div>
+      <div class="field security-field">
+        <label>再次輸入新密碼</label>
+        <input type="password" data-security-draft="confirmPassword" value="${escapeAttr(draft.confirmPassword ?? "")}" autocomplete="new-password" />
+      </div>
+      <button type="submit">掃描歷史版本</button>
+    </form>
+    ${report ? driveRevisionRecoveryReportView(report, candidate) : ""}
+  `;
+}
+
+function driveRevisionRecoveryReportView(report, candidate) {
+  const className = report.status === "success" ? "success" : report.status === "error" ? "error" : "info";
+  return `
+    <section class="panel stack">
+      <div class="inline-item troubleshoot-item ${className}">
+        <strong>${report.status === "success" ? "找到可用版本" : report.status === "error" ? "未找到可用版本" : "掃描中"}</strong>
+        <span class="muted">${escapeHtml(report.message)}</span>
+      </div>
+      ${
+        report.keyRevision && report.vaultRevision
+          ? `<div class="sync-summary"><strong>找到的版本</strong><span>金鑰檔：${escapeHtml(report.keyRevision.label)}</span><span>資料檔：${escapeHtml(report.vaultRevision.label)}</span></div>`
+          : ""
+      }
+      ${
+        candidate
+          ? `<button type="button" data-action="apply-drive-revision-recovery">使用找到的版本重建雲端資料</button>`
+          : ""
+      }
+      ${
+        report.attempts?.length
+          ? `<details><summary>查看掃描紀錄</summary><ul class="guide-list">${report.attempts.slice(-30).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></details>`
+          : ""
+      }
+    </section>
+  `;
+}
+
+async function driveRevisionCandidates(fileKey) {
+  const name = driveFileName(fileKey);
+  const [current, revisionInfo] = await Promise.all([
+    readDriveFile(name),
+    listDriveFileRevisions(name)
+  ]);
+  const candidates = [];
+  if (current) {
+    candidates.push({
+      id: "current",
+      label: "目前版本",
+      modifiedTime: revisionInfo.file?.modifiedTime ?? "",
+      keepForever: true,
+      read: async () => current
+    });
+  }
+  const sortedRevisions = [...(revisionInfo.revisions ?? [])].sort((a, b) =>
+    String(b.modifiedTime ?? "").localeCompare(String(a.modifiedTime ?? ""))
+  );
+  sortedRevisions.forEach((revision) => {
+    candidates.push({
+      id: revision.id,
+      label: `歷史版本 ${revision.id}`,
+      modifiedTime: revision.modifiedTime ?? "",
+      keepForever: Boolean(revision.keepForever),
+      read: async () => readDriveFileRevision(name, revision.id)
+    });
+  });
+  return candidates;
+}
+
+function revisionSummary(candidate) {
+  return {
+    id: candidate.id,
+    label: revisionLabel(candidate),
+    modifiedTime: candidate.modifiedTime ?? "",
+    keepForever: Boolean(candidate.keepForever)
+  };
+}
+
+function revisionLabel(candidate) {
+  const time = candidate.modifiedTime ? `（${formatDateTime(candidate.modifiedTime)}）` : "";
+  const keep = candidate.keepForever || candidate.id === "current" ? "" : "，可能無法下載";
+  return `${candidate.label}${time}${keep}`;
 }
 
 function localSnapshotsView() {
@@ -1993,6 +2250,7 @@ function syncTroubleshootingView() {
       ${issues.map(troubleshootingItem).join("")}
       <div class="actions">
         <button type="button" data-action="sync-now">立即同步</button>
+        <button type="button" class="action-quiet" data-nav="driveRevisionRecovery">雲端歷史版本救援</button>
       </div>
     </section>
   `;
@@ -2408,7 +2666,7 @@ function nameField(value) {
       <h2 class="section-title">姓名 *</h2>
       <div class="row name-check-row">
         <input type="text" data-field="name" value="${escapeAttr(value)}" />
-        <button type="button" class="secondary" data-action="check-duplicate-name">檢查重複姓名</button>
+        <button type="button" class="action-quiet" data-action="check-duplicate-name">檢查重複姓名</button>
       </div>
     </section>
   `;
@@ -2536,7 +2794,7 @@ function interestEditor(selectedIds) {
       <div class="chip-list">${state.vault.interestTags.map((tag) => interestOption(tag, selectedIds.includes(tag.id), managing)).join("")}</div>
       ${managing ? interestManageForm() : ""}
       <div class="actions">
-        <button type="button" class="${managing ? "action-soft" : "secondary"}" data-action="toggle-interest-manage">${managing ? "完成編輯" : "新增/移除興趣喜好"}</button>
+        <button type="button" class="${managing ? "action-soft" : "action-soft"}" data-action="toggle-interest-manage">${managing ? "完成編輯" : "新增/移除興趣喜好"}</button>
         <button type="button" class="action-quiet" data-action="restore-default-interests">恢復預設興趣喜好</button>
       </div>
     </section>
@@ -2559,7 +2817,7 @@ function interestManageForm() {
         <label>新增興趣喜好名稱</label>
         <div class="row interest-manage-row">
           <input data-route-field="newInterestName" placeholder="例如：🍞 烘焙" value="${escapeAttr(state.route.newInterestName ?? "")}" />
-          <button type="button" class="action-soft" data-action="confirm-add-interest">確認</button>
+          <button type="button" class="action-quiet" data-action="confirm-add-interest">確認</button>
         </div>
       </div>
     </div>
@@ -2775,7 +3033,7 @@ function customFieldActions(field) {
       ${
         canEditInline
           ? `<input data-route-field="editingCustomFieldName" value="${escapeAttr(state.route.editingCustomFieldName ?? field.name)}" /><button type="button" class="action-soft" data-action="confirm-rename-custom-field" data-id="${field.id}">確認改名</button><button type="button" class="secondary" data-action="cancel-rename-custom-field">取消</button>`
-          : `<button type="button" class="secondary" data-action="start-rename-custom-field" data-id="${field.id}">變更欄位名稱</button><button type="button" class="danger" data-action="delete-custom-field" data-id="${field.id}">刪除欄位</button>`
+          : `<button type="button" class="action-quiet" data-action="start-rename-custom-field" data-id="${field.id}">變更欄位名稱</button><button type="button" class="danger" data-action="delete-custom-field" data-id="${field.id}">刪除欄位</button>`
       }
       </div>
       ${isChoiceField(field) ? customFieldOptionEditor(field) : ""}
@@ -2799,7 +3057,7 @@ function customFieldOptionEditor(field) {
           return `
             <div class="row custom-option-row">
               <input data-custom-option-name="${field.id}" data-option="${escapeAttr(option)}" value="${escapeAttr(draftName)}" />
-              <button type="button" class="action-soft custom-option-action" data-action="rename-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">變更選項名稱</button>
+              <button type="button" class="action-quiet custom-option-action" data-action="rename-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">變更選項名稱</button>
               <button type="button" class="danger" data-action="delete-custom-option" data-field-id="${field.id}" data-option="${escapeAttr(option)}">刪除選項</button>
             </div>
           `;
@@ -2825,10 +3083,9 @@ function detailLine(label, value = "", action = "", className = "") {
 function bottomNav(current) {
   const target = current === "home" ? { name: "settings", label: "設定" } : { name: "home", label: "首頁" };
   const backAttribute = current === "settings" ? ` data-back="true"` : "";
-  const classAttribute = current === "settings" ? ` class="action-quiet"` : "";
   return `
     <nav class="bottom-nav">
-      <button${classAttribute} data-nav="${target.name}"${backAttribute}>${target.label}</button>
+      <button data-nav="${target.name}"${backAttribute}>${target.label}</button>
     </nav>
   `;
 }
@@ -2974,6 +3231,7 @@ function bindSecurityForms() {
     "drive-existing-unlock": unlockExistingDriveVault,
     "drive-merge-unlock": mergeExistingDriveVault,
     "drive-recovery-reset": resetCloudPasswordWithRecovery,
+    "drive-revision-recovery": scanDriveRevisionRecovery,
     "change-password": changeMasterPassword,
     "forgot-password": resetForgottenPassword,
     "regenerate-recovery": regenerateRecoveryCode,
@@ -3001,6 +3259,7 @@ async function handleAction(event, el) {
   if (action === "sync-now") return syncNow();
   if (action === "resolve-sync-conflict") return resolveSyncConflict(Number(el.dataset.index), el.dataset.source);
   if (action === "drive-logout") return logoutGoogleDrive();
+  if (action === "apply-drive-revision-recovery") return applyDriveRevisionRecovery();
   if (action === "export-data") return exportData();
   if (action === "export-excel") return exportExcel();
   if (action === "choose-import-file") return app.querySelector("[data-import-file]")?.click();

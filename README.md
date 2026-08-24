@@ -202,7 +202,7 @@ http://localhost:4173
 本次快取版本：
 
 ```text
-forget-me-not-v73
+forget-me-not-v75
 ```
 
 ## 返回鍵第二版待辦

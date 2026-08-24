@@ -1268,15 +1268,15 @@ button:focus-visible,
   justify-items: center;
   min-height: 76px;
   padding: 10px;
-  border-color: var(--action-quiet-border);
-  background: var(--action-quiet-bg);
-  color: var(--action-quiet-text);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--text-secondary);
 }
 
 .theme-option:hover {
-  background: var(--action-quiet-hover-bg);
-  border-color: var(--action-quiet-hover-bg);
-  color: var(--action-quiet-hover-text);
+  background: var(--secondary);
+  border-color: var(--accent);
+  color: var(--primary);
 }
 
 .theme-option.selected {
