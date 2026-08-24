@@ -16,6 +16,18 @@ export async function readMockDriveFile(name) {
   return file?.content ?? null;
 }
 
+export async function listMockDriveFileRevisions(name) {
+  const file = await getItem(`${DRIVE_PREFIX}${name}`);
+  return {
+    file: file ? { id: name, name, modifiedTime: file.updatedAt } : null,
+    revisions: []
+  };
+}
+
+export async function readMockDriveFileRevision(name) {
+  return readMockDriveFile(name);
+}
+
 export async function removeMockDriveFile(name) {
   await removeItem(`${DRIVE_PREFIX}${name}`);
 }

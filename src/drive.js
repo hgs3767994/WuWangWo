@@ -1,6 +1,6 @@
 import { isMockDrive } from "./config.js";
-import { connectGoogleDrive, disconnectGoogleDrive, googleDriveAuthStatus, googleDriveReadiness, listGoogleDriveFiles, readGoogleDriveFile, removeGoogleDriveFile, testGoogleDriveConnection, writeGoogleDriveFile } from "./drive-google.js";
-import { listMockDriveFiles, readMockDriveFile, removeMockDriveFile, writeMockDriveFile } from "./drive-mock.js";
+import { connectGoogleDrive, disconnectGoogleDrive, googleDriveAuthStatus, googleDriveReadiness, listGoogleDriveFileRevisions, listGoogleDriveFiles, readGoogleDriveFile, readGoogleDriveFileRevision, removeGoogleDriveFile, testGoogleDriveConnection, writeGoogleDriveFile } from "./drive-google.js";
+import { listMockDriveFileRevisions, listMockDriveFiles, readMockDriveFile, readMockDriveFileRevision, removeMockDriveFile, writeMockDriveFile } from "./drive-mock.js";
 
 export async function writeDriveFile(name, content) {
   if (isMockDrive()) return writeMockDriveFile(name, content);
@@ -24,6 +24,18 @@ export async function listDriveFiles() {
   if (isMockDrive()) return listMockDriveFiles();
   assertGoogleDriveReady();
   return listGoogleDriveFiles();
+}
+
+export async function listDriveFileRevisions(name) {
+  if (isMockDrive()) return listMockDriveFileRevisions(name);
+  assertGoogleDriveReady();
+  return listGoogleDriveFileRevisions(name);
+}
+
+export async function readDriveFileRevision(name, revisionId) {
+  if (isMockDrive()) return readMockDriveFileRevision(name, revisionId);
+  assertGoogleDriveReady();
+  return readGoogleDriveFileRevision(name, revisionId);
 }
 
 export async function connectDrive(options = {}) {

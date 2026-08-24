@@ -38,6 +38,32 @@ export async function readGoogleDriveFile(name) {
   return googleFetch(`${DRIVE_API_BASE}/files/${encodeURIComponent(file.id)}?alt=media`);
 }
 
+export async function listGoogleDriveFileRevisions(name) {
+  const file = await findGoogleDriveFile(name);
+  if (!file) return { file: null, revisions: [] };
+  const revisions = [];
+  let pageToken = "";
+  do {
+    const query = new URLSearchParams({
+      pageSize: "1000",
+      fields: "nextPageToken,revisions(id,modifiedTime,keepForever,mimeType,size)"
+    });
+    if (pageToken) query.set("pageToken", pageToken);
+    const result = await googleFetch(`${DRIVE_API_BASE}/files/${encodeURIComponent(file.id)}/revisions?${query.toString()}`);
+    revisions.push(...(result.revisions ?? []));
+    pageToken = result.nextPageToken ?? "";
+  } while (pageToken);
+  return { file, revisions };
+}
+
+export async function readGoogleDriveFileRevision(name, revisionId) {
+  const file = await findGoogleDriveFile(name);
+  if (!file) return null;
+  return googleFetch(
+    `${DRIVE_API_BASE}/files/${encodeURIComponent(file.id)}/revisions/${encodeURIComponent(revisionId)}?alt=media&acknowledgeAbuse=true`
+  );
+}
+
 export async function removeGoogleDriveFile(name) {
   const file = await findGoogleDriveFile(name);
   if (!file) return;
