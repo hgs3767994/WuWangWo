@@ -507,15 +507,37 @@ textarea {
 
 .home-header {
   display: grid;
-  justify-items: center;
-  gap: 14px;
+  gap: 12px;
   margin-bottom: 18px;
-  text-align: center;
 }
 
 .app-header {
-  grid-template-columns: 72px minmax(0, 1fr) 72px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+}
+
+.brand-logo-wrap {
+  display: grid;
+}
+
+.welcome-brand {
+  justify-items: center;
+}
+
+.home-brand {
+  justify-items: start;
+}
+
+.brand-logo {
+  display: block;
+  width: min(78vw, 360px);
+  height: auto;
+  object-fit: contain;
+}
+
+.home-brand .brand-logo {
+  width: min(38vw, 168px);
+  max-height: 72px;
 }
 
 .icon-actions {
@@ -590,6 +612,16 @@ textarea {
 .home-header .title,
 .welcome .title {
   font-size: 38px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .subtitle {
@@ -1132,6 +1164,17 @@ button:focus-visible,
   color: var(--text-secondary);
   font-size: 15px;
   line-height: 1.7;
+}
+
+.detail-value-link {
+  color: var(--primary);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.detail-value-link:hover {
+  color: var(--accent);
 }
 
 .custom-detail-line > span:first-child {

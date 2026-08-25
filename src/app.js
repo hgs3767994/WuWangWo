@@ -1649,7 +1649,7 @@ function welcomeView() {
   return `
     <section class="welcome">
       <div>
-        <h1 class="title">莫忘</h1>
+        ${brandLogo("welcome")}
         <p class="subtitle">把重要的人與細節先安心記下來。</p>
       </div>
       <div class="panel stack">
@@ -1664,8 +1664,7 @@ function homeView() {
   const people = visiblePeople(state.vault.people);
   return `
     <header class="home-header app-header">
-      <div></div>
-      <h1 class="title">莫忘</h1>
+      ${brandLogo("home")}
       <div class="icon-actions" aria-label="首頁操作">
         <button type="button" class="icon-button" data-nav="search" aria-label="搜尋"><img class="button-icon" src="./pics/magnifier.png" alt="" /></button>
         <button type="button" class="icon-button" data-nav="settings" aria-label="設定"><img class="button-icon" src="./pics/gear.png" alt="" /></button>
@@ -2500,7 +2499,7 @@ function unlockView() {
   return `
     <section class="welcome">
       <div>
-        <h1 class="title">莫忘</h1>
+        ${brandLogo("welcome")}
         <p class="subtitle">${escapeHtml(message)}</p>
       </div>
       <form class="panel stack" data-form="unlock">
@@ -2646,7 +2645,12 @@ function basicDetailLines(person) {
       : []),
     ...((person.addresses ?? []).length
       ? sortDefaultFirst(person.addresses).map((address) =>
-          detailLine(`地址｜${address.label}`, address.value, `<button class="action-quiet" data-copy="${escapeAttr(address.value)}">複製</button>`)
+          detailLinkLine(
+            `地址｜${address.label}`,
+            address.value,
+            mapSearchUrl(address.value),
+            `<button class="action-quiet" data-copy="${escapeAttr(address.value)}">複製</button>`
+          )
         )
       : [])
   ]
@@ -3071,6 +3075,15 @@ function customFieldOptionEditor(field) {
   `;
 }
 
+function brandLogo(variant) {
+  return `
+    <div class="brand-logo-wrap ${variant === "home" ? "home-brand" : "welcome-brand"}">
+      <img class="brand-logo" src="./pics/brand/banner.png" alt="莫忘" />
+      <span class="visually-hidden">莫忘</span>
+    </div>
+  `;
+}
+
 function detailGroup(title, content, className = "") {
   if (!content) return "";
   return `<section class="detail-section ${className}"><h2 class="section-title">${escapeHtml(title)}</h2>${content}</section>`;
@@ -3078,6 +3091,19 @@ function detailGroup(title, content, className = "") {
 
 function detailLine(label, value = "", action = "", className = "") {
   return `<div class="detail-line ${className}"><span>${escapeHtml(label)}${value ? `<br><span class="muted">${escapeHtml(value)}</span>` : ""}</span><span class="detail-actions-row">${action}</span></div>`;
+}
+
+function detailLinkLine(label, value = "", href = "", action = "", className = "") {
+  const linkedValue = value && href
+    ? `<a class="detail-value-link" href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>`
+    : escapeHtml(value);
+  return `<div class="detail-line ${className}"><span>${escapeHtml(label)}${value ? `<br><span class="muted">${linkedValue}</span>` : ""}</span><span class="detail-actions-row">${action}</span></div>`;
+}
+
+function mapSearchUrl(address) {
+  const cleanAddress = String(address ?? "").trim();
+  if (!cleanAddress) return "";
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanAddress)}`;
 }
 
 function bottomNav(current) {

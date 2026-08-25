@@ -8,7 +8,7 @@
   "display": "standalone",
   "lang": "zh-Hant",
   "dir": "ltr",
-  "background_color": "#F4F6F5",
+  "background_color": "#FDFDFD",
   "theme_color": "#24443D",
   "categories": ["productivity", "lifestyle", "utilities"],
   "icons": [
