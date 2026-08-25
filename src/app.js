@@ -1650,7 +1650,7 @@ function welcomeView() {
     <section class="welcome">
       <div>
         ${brandLogo("welcome")}
-        <p class="subtitle">把重要的人與細節先安心記下來。</p>
+        <p class="subtitle">鎖住時光裡的交集，溫習記憶中的點滴</p>
       </div>
       <div class="panel stack">
         <button data-action="start-local">開始使用</button>
@@ -1686,7 +1686,7 @@ function searchView() {
   return `
     <header class="topbar topbar-centered">
       <button class="secondary" data-nav="home">返回</button>
-      <h1 class="section-title">搜尋</h1>
+      <h1 class="section-title">眾裡尋他</h1>
       <span></span>
     </header>
     <section class="panel search-panel">
@@ -1725,8 +1725,8 @@ function searchView() {
         <div class="chip-list">${state.vault.interestTags.map((tag) => interestChip(tag, params.tagIds.includes(tag.id), "search-tag")).join("")}</div>
       </div>
       <div class="actions search-actions">
-        <button data-action="apply-search">套用搜尋</button>
-        <button data-action="clear-search" class="secondary">清除搜尋</button>
+        <button data-action="apply-search">開始找人</button>
+        <button data-action="clear-search" class="secondary">清除條件</button>
       </div>
     </section>
     ${

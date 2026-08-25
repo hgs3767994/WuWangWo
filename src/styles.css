@@ -536,8 +536,8 @@ textarea {
 }
 
 .home-brand .brand-logo {
-  width: min(38vw, 168px);
-  max-height: 72px;
+  width: min(46vw, 210px);
+  max-height: 86px;
 }
 
 .icon-actions {
