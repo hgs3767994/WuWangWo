@@ -2953,7 +2953,7 @@ function lifeEventsEditor(rows) {
           <div class="inline-item">
             <div class="row life-event-row ${deleting ? "has-delete" : ""}">
               <input class="date-input" type="date" data-life-event="${index}" data-prop="date" value="${escapeAttr(row.date)}" />
-              <input data-life-event="${index}" data-prop="text" placeholder="事件內容" value="${escapeAttr(row.text)}" />
+              <textarea class="life-event-textarea" rows="2" data-life-event="${index}" data-prop="text" placeholder="事件內容">${escapeHtml(row.text)}</textarea>
               ${deleting ? `<button type="button" class="danger compact-row-button" data-action="remove-life-event" data-index="${index}">刪除</button>` : ""}
             </div>
           </div>

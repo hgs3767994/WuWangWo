@@ -910,6 +910,11 @@ button:focus-visible,
   grid-template-columns: 8.9em minmax(0, 1fr) auto;
 }
 
+.life-event-textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
 .date-input {
   min-width: 0;
 }

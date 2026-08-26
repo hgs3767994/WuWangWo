@@ -24,12 +24,12 @@ export const DEFAULT_INTEREST_TAGS = [
 }));
 
 export const DEFAULT_PERSON_GROUP_TAGS = [
-  ["important-family", "重要家人"],
-  ["close-friend", "摯友"],
-  ["club-member", "社團成員"],
-  ["car-friend", "車友"],
-  ["classmate", "同學"],
-  ["client", "客戶"]
+  ["important-family", "🏠重要家人"],
+  ["close-friend", "🤝🏼摯友"],
+  ["club-member", "👥社團成員"],
+  ["car-friend", "🚗車友"],
+  ["classmate", "🎓同學"],
+  ["client", "💼客戶"]
 ].map(([slug, name]) => ({
   id: `default-group-${slug}`,
   name,
