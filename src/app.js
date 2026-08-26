@@ -16,6 +16,7 @@ import {
 } from "./crypto.js";
 import {
   DEFAULT_INTEREST_TAGS,
+  DEFAULT_PERSON_GROUP_TAGS,
   createDeviceId,
   createEmptyVault,
   createPerson,
@@ -831,10 +832,11 @@ async function importDataFile(event) {
     const payload = JSON.parse(await file.text());
     const importedVault = readImportVault(payload);
     const importedPeopleCount = importedVault.people.length;
+    const importedGroupCount = importedVault.personGroupTags.length;
     const importedTagCount = importedVault.interestTags.length;
     if (
       !confirm(
-        `確定要匯入這份資料嗎？\n\n人物：${importedPeopleCount} 位\n興趣喜好：${importedTagCount} 個\n\n匯入會與目前資料合併，不會直接清空現有資料。\n匯入前會先下載一份目前本機資料備份。`
+        `確定要匯入這份資料嗎？\n\n人物：${importedPeopleCount} 位\n人物群組：${importedGroupCount} 個\n興趣喜好：${importedTagCount} 個\n\n匯入會與目前資料合併，不會直接清空現有資料。\n匯入前會先下載一份目前本機資料備份。`
       )
     ) {
       return;
@@ -1388,6 +1390,7 @@ function personDraftSignature(draft) {
     birthDate: normalized.birthDate ?? "",
     phones: normalized.phones ?? [],
     addresses: normalized.addresses ?? [],
+    personGroupTagIds: normalized.personGroupTagIds ?? [],
     interestTagIds: normalized.interestTagIds ?? [],
     favoriteItems: normalized.favoriteItems ?? [],
     familyMembers: normalized.familyMembers ?? [],
@@ -1721,6 +1724,10 @@ function searchView() {
         </select>
       </div>
       <div class="field">
+        <label>依人物群組搜尋</label>
+        <div class="chip-list">${state.vault.personGroupTags.map((tag) => interestChip(tag, params.groupIds.includes(tag.id), "search-group")).join("")}</div>
+      </div>
+      <div class="field">
         <label>依興趣喜好搜尋</label>
         <div class="chip-list">${state.vault.interestTags.map((tag) => interestChip(tag, params.tagIds.includes(tag.id), "search-tag")).join("")}</div>
       </div>
@@ -1754,6 +1761,7 @@ function personFormView(person = null) {
     <form class="stack" data-form="person">
       ${nameField(d.name)}
       ${basicFieldsEditor(d)}
+      ${personGroupEditor(d.personGroupTagIds)}
       ${interestEditor(d.interestTagIds)}
       ${favoriteItemsEditor(d.favoriteItems)}
       ${familyMembersEditor(d.familyMembers, d.id)}
@@ -1773,6 +1781,7 @@ function personFormView(person = null) {
 
 function detailView(person) {
   if (!person) return notFoundView();
+  const groupTags = (person.personGroupTagIds ?? []).map((id) => state.vault.personGroupTags.find((tag) => tag.id === id)).filter(Boolean);
   const tags = person.interestTagIds.map((id) => state.vault.interestTags.find((tag) => tag.id === id)).filter(Boolean);
   const favoriteItems = person.favoriteItems ?? [];
   const familyMembers = sortFamilyMembers(person.familyMembers ?? []);
@@ -1788,6 +1797,7 @@ function detailView(person) {
     .join("");
   const detailSections = [
     basicLines ? detailGroup("基本資料", basicLines) : "",
+    groupTags.length ? detailGroup("人物群組", `<div class="chip-list">${groupTags.map((tag) => `<span class="chip selected">${tagLabel(tag)}</span>`).join("")}</div>`) : "",
     tags.length ? detailGroup("興趣喜好", `<div class="chip-list">${tags.map((tag) => `<span class="chip selected">${tagLabel(tag)}</span>`).join("")}</div>`) : "",
     favoriteItems.length ? detailGroup("嗜好品", `<div class="chip-list">${favoriteItems.map((item) => `<span class="chip selected">${escapeHtml(item.value)}</span>`).join("")}</div>`) : "",
     familyMembers.length ? detailGroup("家族成員", familyMembers.map((member) => familyMemberLine(person, member)).join("")) : "",
@@ -1797,6 +1807,7 @@ function detailView(person) {
   ].filter(Boolean).join("");
   const hasDetailContent = Boolean(
     basicLines ||
+      groupTags.length ||
       tags.length ||
       favoriteItems.length ||
       familyMembers.length ||
@@ -1887,6 +1898,7 @@ function settingsView() {
       ${storageWarningView()}
       <div class="data-summary">
         <span>人物 ${dataSummary.peopleCount} 位</span>
+        <span>人物群組 ${dataSummary.personGroupTagCount} 個</span>
         <span>興趣喜好 ${dataSummary.interestTagCount} 個</span>
         <span>自訂欄位 ${dataSummary.customFieldCount} 個</span>
       </div>
@@ -2790,6 +2802,44 @@ function addressListEditorRow(key, row, index, labels, placeholder, deleting) {
   `;
 }
 
+function personGroupEditor(selectedIds) {
+  const managing = Boolean(state.route.personGroupManage);
+  return `
+    <section class="panel">
+      <h2 class="section-title">人物群組</h2>
+      <div class="chip-list">${state.vault.personGroupTags.map((tag) => tagOption(tag, selectedIds.includes(tag.id), managing, "toggle-person-group", "remove-person-group")).join("")}</div>
+      ${managing ? personGroupManageForm() : ""}
+      <div class="actions">
+        <button type="button" class="action-soft" data-action="toggle-person-group-manage">${managing ? "完成編輯" : "新增/移除人物群組"}</button>
+        <button type="button" class="action-quiet" data-action="restore-default-person-groups">恢復預設人物群組</button>
+      </div>
+    </section>
+  `;
+}
+
+function personGroupManageForm() {
+  return `
+    <div class="inline-item manage-form">
+      <div class="field interest-manage-field">
+        <label>新增人物群組名稱</label>
+        <div class="row interest-manage-row">
+          <input data-route-field="newPersonGroupName" placeholder="例如：鄰居" value="${escapeAttr(state.route.newPersonGroupName ?? "")}" />
+          <button type="button" class="action-quiet" data-action="confirm-add-person-group">確認</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function tagOption(tag, selected, managing, toggleAction, removeAction) {
+  return `
+    <span class="tag-option">
+      ${interestChip(tag, selected, toggleAction)}
+      ${managing ? `<button type="button" class="danger mini" data-action="${removeAction}" data-id="${tag.id}">移除</button>` : ""}
+    </span>
+  `;
+}
+
 function interestEditor(selectedIds) {
   const managing = Boolean(state.route.interestManage);
   return `
@@ -2806,12 +2856,7 @@ function interestEditor(selectedIds) {
 }
 
 function interestOption(tag, selected, managing) {
-  return `
-    <span class="tag-option">
-      ${interestChip(tag, selected, "toggle-interest")}
-      ${managing ? `<button type="button" class="danger mini" data-action="remove-interest" data-id="${tag.id}">移除</button>` : ""}
-    </span>
-  `;
+  return tagOption(tag, selected, managing, "toggle-interest", "remove-interest");
 }
 
 function interestManageForm() {
@@ -3320,6 +3365,12 @@ async function handleAction(event, el) {
   if (action === "remove-life-event") return removeLifeEvent(Number(el.dataset.index));
   if (action === "toggle-life-event-delete-mode") return toggleRouteFlag("lifeEventDeleteMode");
   if (action === "new-person-prefill") return navigate({ name: "new", prefillName: el.dataset.name });
+  if (action === "toggle-person-group") return togglePersonGroup(el.dataset.id);
+  if (action === "search-group") return toggleSearchGroup(el.dataset.id);
+  if (action === "toggle-person-group-manage") return togglePersonGroupManage();
+  if (action === "confirm-add-person-group") return addPersonGroup();
+  if (action === "remove-person-group") return removePersonGroup(el.dataset.id);
+  if (action === "restore-default-person-groups") return restoreDefaultPersonGroups();
   if (action === "toggle-interest") return toggleInterest(el.dataset.id);
   if (action === "search-tag") return toggleSearchTag(el.dataset.id);
   if (action === "toggle-interest-manage") return toggleInterestManage();
@@ -3444,6 +3495,7 @@ async function savePersonForm(event) {
     note: draft.note.trim(),
     phones: cleanList(draft.phones),
     addresses: cleanList(draft.addresses),
+    personGroupTagIds: draft.personGroupTagIds ?? [],
     favoriteItems: cleanFavoriteItems(draft.favoriteItems),
     familyMembers: cleanFamilyMembers(draft.familyMembers, draft.id),
     lifeEvents: cleanLifeEvents(draft.lifeEvents),
@@ -3566,10 +3618,29 @@ function toggleInterest(id) {
   render();
 }
 
+function togglePersonGroup(id) {
+  const selected = state.route.draft.personGroupTagIds;
+  state.route.draft.personGroupTagIds = selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id];
+  render();
+}
+
+function toggleSearchGroup(id) {
+  const params = normalizeSearchParams(state.route.params);
+  params.groupIds = params.groupIds.includes(id) ? params.groupIds.filter((item) => item !== id) : [...params.groupIds, id];
+  state.route.params = params;
+  render();
+}
+
 function toggleSearchTag(id) {
   const params = normalizeSearchParams(state.route.params);
   params.tagIds = params.tagIds.includes(id) ? params.tagIds.filter((item) => item !== id) : [...params.tagIds, id];
   state.route.params = params;
+  render();
+}
+
+function togglePersonGroupManage() {
+  state.route.personGroupManage = !state.route.personGroupManage;
+  state.route.newPersonGroupName ??= "";
   render();
 }
 
@@ -3583,6 +3654,80 @@ function cancelInterestManage() {
   state.route.interestManage = false;
   state.route.newInterestName = "";
   render();
+}
+
+async function addPersonGroup() {
+  const cleanName = state.route.newPersonGroupName?.trim() ?? "";
+  if (!cleanName) {
+    alert("人物群組名稱不可空白");
+    return;
+  }
+  if (state.vault.personGroupTags.some((tag) => tag.name === cleanName)) {
+    alert("同名人物群組已存在");
+    return;
+  }
+  const now = new Date().toISOString();
+  const tag = {
+    id: `person-group-${crypto.randomUUID()}`,
+    name: cleanName,
+    isDefault: false,
+    createdAt: now,
+    updatedAt: now,
+    updatedByDeviceId: state.appState.deviceId
+  };
+  const vault = { ...state.vault, personGroupTags: [...state.vault.personGroupTags, tag] };
+  state.route.draft.personGroupTagIds.push(tag.id);
+  state.route.newPersonGroupName = "";
+  await commitVault(vault);
+}
+
+async function removePersonGroup(id) {
+  const tag = state.vault.personGroupTags.find((item) => item.id === id);
+  if (tag) await deletePersonGroup(tag);
+}
+
+async function deletePersonGroup(tag) {
+  const usedCount = state.vault.people.filter((person) => (person.personGroupTagIds ?? []).includes(tag.id)).length;
+  const usageWarning = usedCount ? `\n此人物群組目前有 ${usedCount} 位人物使用\n移除後會從這些人物身上移除此人物群組。` : "";
+  const defaultHint = tag.isDefault ? "\n之後可使用「恢復預設人物群組」重新加入。" : "";
+  const verb = tag.isDefault ? "移除" : "刪除";
+  if (!confirm(`確定要${verb}「${tagLabelPlain(tag)}」嗎？${usageWarning}${defaultHint}`)) return;
+  const now = new Date().toISOString();
+  const vault = {
+    ...state.vault,
+    personGroupTags: state.vault.personGroupTags.filter((item) => item.id !== tag.id),
+    people: state.vault.people.map((person) => {
+      const selected = person.personGroupTagIds ?? [];
+      return {
+        ...person,
+        personGroupTagIds: selected.filter((item) => item !== tag.id),
+        updatedAt: selected.includes(tag.id) ? now : person.updatedAt
+      };
+    }),
+    tombstones: [
+      ...state.vault.tombstones,
+      {
+        id: tag.id,
+        type: "personGroupTag",
+        deletedAt: now,
+        updatedAt: now,
+        updatedByDeviceId: state.appState.deviceId
+      }
+    ]
+  };
+  if (state.route.draft) state.route.draft.personGroupTagIds = state.route.draft.personGroupTagIds.filter((item) => item !== tag.id);
+  await commitVault(vault);
+}
+
+async function restoreDefaultPersonGroups() {
+  const now = new Date().toISOString();
+  const existing = new Set(state.vault.personGroupTags.map((tag) => tag.id));
+  const missing = DEFAULT_PERSON_GROUP_TAGS.filter((tag) => !existing.has(tag.id)).map((tag) => ({ ...tag, updatedAt: now, updatedByDeviceId: state.appState.deviceId }));
+  if (!missing.length) {
+    alert("預設人物群組都已存在");
+    return;
+  }
+  await commitVault({ ...state.vault, personGroupTags: [...state.vault.personGroupTags, ...missing] });
 }
 
 async function addInterest() {
@@ -4020,10 +4165,12 @@ async function resolveSyncConflict(index, source) {
 
 function buildDataHealthReport() {
   const issues = [];
+  const groupIds = new Set((state.vault.personGroupTags ?? []).map((tag) => tag.id));
   const tagIds = new Set(state.vault.interestTags.map((tag) => tag.id));
   const fieldIds = new Set(state.vault.customFieldDefs.map((field) => field.id));
   const people = visiblePeople(state.vault.people);
   const personNames = countBy(people, (person) => person.name.trim());
+  const groupNames = countBy(state.vault.personGroupTags ?? [], (tag) => tag.name.trim());
   const tagNames = countBy(state.vault.interestTags, (tag) => tag.name.trim());
   const globalFieldNames = countBy(
     state.vault.customFieldDefs.filter((field) => field.scope === "global"),
@@ -4040,6 +4187,12 @@ function buildDataHealthReport() {
       });
     });
 
+  Object.entries(groupNames)
+    .filter(([, count]) => count > 1)
+    .forEach(([name, count]) => {
+      issues.push({ title: "人物群組名稱重複", detail: `「${name}」出現 ${count} 次，可能需要合併。` });
+    });
+
   Object.entries(tagNames)
     .filter(([, count]) => count > 1)
     .forEach(([name, count]) => {
@@ -4053,6 +4206,12 @@ function buildDataHealthReport() {
     });
 
   people.forEach((person) => {
+    (person.personGroupTagIds ?? [])
+      .filter((id) => !groupIds.has(id))
+      .forEach((id) => {
+        issues.push({ title: "人物使用不存在的人物群組", detail: `${person.name} 指向不存在的人物群組 ID：${id}`, personIds: [person.id] });
+      });
+
     (person.interestTagIds ?? [])
       .filter((id) => !tagIds.has(id))
       .forEach((id) => {
@@ -4083,6 +4242,7 @@ function searchPeople(params) {
   const text = normalizedParams.text.trim().toLowerCase();
   const textTokens = text.split(/\s+/).filter(Boolean);
   const address = normalizedParams.address.trim().toLowerCase();
+  const groupIds = normalizedParams.groupIds;
   const tagIds = normalizedParams.tagIds;
   const birthdayMonths = Number(normalizedParams.birthdayWithinMonths || 0);
   const birthYear = normalizedParams.birthYear;
@@ -4101,11 +4261,12 @@ function searchPeople(params) {
       !textTokens.length ||
       textTokens.every((token) => searchableText.includes(token));
     const addressMatch = !address || person.addresses.some((item) => item.value.toLowerCase().includes(address));
+    const groupMatch = groupIds.every((id) => (person.personGroupTagIds ?? []).includes(id));
     const tagMatch = tagIds.every((id) => (person.interestTagIds ?? []).includes(id));
     const birthdayMatch = !birthdayMonths || isBirthdayWithinMonths(person.birthDate, birthdayMonths);
     const birthYearMatch = !birthYear || birthDatePart(person.birthDate, "year") === birthYear;
     const birthMonthMatch = !birthMonth || birthDatePart(person.birthDate, "month") === birthMonth;
-    return textMatch && addressMatch && tagMatch && birthdayMatch && birthYearMatch && birthMonthMatch;
+    return textMatch && addressMatch && groupMatch && tagMatch && birthdayMatch && birthYearMatch && birthMonthMatch;
   });
   return matched.sort((a, b) => {
     const aName = textTokens.some((token) => a.name.toLowerCase().includes(token));
@@ -4118,8 +4279,9 @@ function searchPeople(params) {
 function hasSearchCriteria(params) {
   const normalizedParams = normalizeSearchParams(params);
   return Boolean(
-    normalizedParams.text.trim() ||
+      normalizedParams.text.trim() ||
       normalizedParams.address.trim() ||
+      normalizedParams.groupIds.length ||
       normalizedParams.tagIds.length ||
       normalizedParams.birthdayWithinMonths ||
       normalizedParams.birthYear ||
@@ -4128,13 +4290,14 @@ function hasSearchCriteria(params) {
 }
 
 function emptySearchParams() {
-  return { text: "", address: "", tagIds: [], birthdayWithinMonths: "", birthYear: "", birthMonth: "" };
+  return { text: "", address: "", groupIds: [], tagIds: [], birthdayWithinMonths: "", birthYear: "", birthMonth: "" };
 }
 
 function normalizeSearchParams(params = {}) {
   return {
     text: params.text ?? "",
     address: params.address ?? "",
+    groupIds: params.groupIds ?? [],
     tagIds: params.tagIds ?? [],
     birthdayWithinMonths: params.birthdayWithinMonths ?? "",
     birthYear: params.birthYear ?? "",
@@ -4312,6 +4475,7 @@ function syncAlertMessage(summary, conflictCount) {
 function vaultDataSummary() {
   return {
     peopleCount: state.vault?.people?.length ?? 0,
+    personGroupTagCount: state.vault?.personGroupTags?.length ?? 0,
     interestTagCount: state.vault?.interestTags?.length ?? 0,
     customFieldCount: state.vault?.customFieldDefs?.length ?? 0
   };
@@ -4426,6 +4590,7 @@ function normalizeVault(vault) {
     schemaVersion: vault.schemaVersion ?? 1,
     vaultId: vault.vaultId ?? `vault-import-${crypto.randomUUID()}`,
     people: (vault.people ?? []).map(normalizeDraft),
+    personGroupTags: vault.personGroupTags ?? DEFAULT_PERSON_GROUP_TAGS.map((tag) => ({ ...tag })),
     interestTags: (vault.interestTags ?? []).map((tag) => {
       if (!tag.emoji) return tag;
       const name = tag.name.startsWith(tag.emoji) ? tag.name : `${tag.emoji} ${tag.name}`;
@@ -4454,6 +4619,7 @@ function normalizeDraft(draft) {
     birthDate: draft.birthDate ?? "",
     phones: draft.phones?.length ? draft.phones : [],
     addresses: draft.addresses?.length ? draft.addresses : [],
+    personGroupTagIds: draft.personGroupTagIds ?? [],
     interestTagIds: draft.interestTagIds ?? [],
     favoriteItems: draft.favoriteItems ?? [],
     familyMembers: draft.familyMembers ?? [],

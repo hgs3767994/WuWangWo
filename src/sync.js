@@ -37,11 +37,11 @@ function isTombstoned(tombstones, type, id) {
   return tombstones.some((item) => item.type === type && item.id === id);
 }
 
-function mergeInterestTags(localVault, remoteVault) {
-  const tagsById = byId(localVault.interestTags ?? []);
+function mergeNamedTags(localItems = [], remoteItems = []) {
+  const tagsById = byId(localItems);
   const idRedirects = new Map();
 
-  for (const remote of remoteVault.interestTags ?? []) {
+  for (const remote of remoteItems) {
     const sameId = tagsById.get(remote.id);
     if (sameId) {
       tagsById.set(remote.id, newer(sameId, remote));
@@ -61,7 +61,17 @@ function mergeInterestTags(localVault, remoteVault) {
     tagsById.set(remote.id, remote);
   }
 
-  return { interestTags: [...tagsById.values()], idRedirects };
+  return { tags: [...tagsById.values()], idRedirects };
+}
+
+function mergeInterestTags(localVault, remoteVault) {
+  const { tags, idRedirects } = mergeNamedTags(localVault.interestTags ?? [], remoteVault.interestTags ?? []);
+  return { interestTags: tags, idRedirects };
+}
+
+function mergePersonGroupTags(localVault, remoteVault) {
+  const { tags, idRedirects } = mergeNamedTags(localVault.personGroupTags ?? [], remoteVault.personGroupTags ?? []);
+  return { personGroupTags: tags, groupIdRedirects: idRedirects };
 }
 
 function rewriteInterestIds(person, redirects) {
@@ -72,6 +82,20 @@ function rewriteInterestIds(person, redirects) {
       (item) => item.id
     ).map((item) => item.id)
   };
+}
+
+function rewritePersonGroupIds(person, redirects) {
+  return {
+    ...person,
+    personGroupTagIds: uniqueBy(
+      (person.personGroupTagIds ?? []).map((id) => redirects.get(id) ?? id).map((id) => ({ id })),
+      (item) => item.id
+    ).map((item) => item.id)
+  };
+}
+
+function rewritePersonTagIds(person, interestRedirects, groupRedirects) {
+  return rewritePersonGroupIds(rewriteInterestIds(person, interestRedirects), groupRedirects);
 }
 
 function mergeMultiValueItems(localItems = [], remoteItems = []) {
@@ -111,6 +135,7 @@ function mergePerson(localPerson, remotePerson, conflicts) {
     ...base,
     phones: mergeMultiValueItems(localPerson.phones, remotePerson.phones),
     addresses: mergeMultiValueItems(localPerson.addresses, remotePerson.addresses),
+    personGroupTagIds: [...new Set([...(localPerson.personGroupTagIds ?? []), ...(remotePerson.personGroupTagIds ?? [])])],
     interestTagIds: [...new Set([...(localPerson.interestTagIds ?? []), ...(remotePerson.interestTagIds ?? [])])],
     favoriteItems: mergeMultiValueItems(localPerson.favoriteItems, remotePerson.favoriteItems),
     familyMembers: mergeById(localPerson.familyMembers ?? [], remotePerson.familyMembers ?? []),
@@ -145,10 +170,11 @@ export function mergeVaults(localVault, remoteVault, deviceId) {
   const tombstones = mergeTombstones(localVault, remoteVault);
   const deletedItems = mergeDeletedItems(localVault, remoteVault);
   const { interestTags, idRedirects } = mergeInterestTags(localVault, remoteVault);
-  const people = byId((localVault.people ?? []).map((person) => rewriteInterestIds(person, idRedirects)));
+  const { personGroupTags, groupIdRedirects } = mergePersonGroupTags(localVault, remoteVault);
+  const people = byId((localVault.people ?? []).map((person) => rewritePersonTagIds(person, idRedirects, groupIdRedirects)));
 
   for (const remotePersonRaw of remoteVault.people ?? []) {
-    const remotePerson = rewriteInterestIds(remotePersonRaw, idRedirects);
+    const remotePerson = rewritePersonTagIds(remotePersonRaw, idRedirects, groupIdRedirects);
     const localPerson = people.get(remotePerson.id);
     if (localPerson) people.set(remotePerson.id, mergePerson(localPerson, remotePerson, conflicts));
     else people.set(remotePerson.id, remotePerson);
@@ -161,7 +187,8 @@ export function mergeVaults(localVault, remoteVault, deviceId) {
     vault: {
       ...localVault,
       people: filteredPeople,
-      interestTags,
+      personGroupTags: personGroupTags.filter((tag) => !isTombstoned(tombstones, "personGroupTag", tag.id)),
+      interestTags: interestTags.filter((tag) => !isTombstoned(tombstones, "interestTag", tag.id)),
       customFieldDefs: mergeById(localVault.customFieldDefs ?? [], remoteVault.customFieldDefs ?? []),
       deletedItems,
       tombstones,

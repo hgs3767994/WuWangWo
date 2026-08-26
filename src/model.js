@@ -23,6 +23,22 @@ export const DEFAULT_INTEREST_TAGS = [
   updatedByDeviceId: "system"
 }));
 
+export const DEFAULT_PERSON_GROUP_TAGS = [
+  ["important-family", "重要家人"],
+  ["close-friend", "摯友"],
+  ["club-member", "社團成員"],
+  ["car-friend", "車友"],
+  ["classmate", "同學"],
+  ["client", "客戶"]
+].map(([slug, name]) => ({
+  id: `default-group-${slug}`,
+  name,
+  isDefault: true,
+  createdAt: "2026-08-26T00:00:00.000Z",
+  updatedAt: "2026-08-26T00:00:00.000Z",
+  updatedByDeviceId: "system"
+}));
+
 export function createDeviceId() {
   return `device-${crypto.randomUUID()}`;
 }
@@ -33,6 +49,7 @@ export function createEmptyVault(deviceId) {
     schemaVersion: 1,
     vaultId: `vault-${crypto.randomUUID()}`,
     people: [],
+    personGroupTags: DEFAULT_PERSON_GROUP_TAGS.map((tag) => ({ ...tag })),
     interestTags: DEFAULT_INTEREST_TAGS.map((tag) => ({ ...tag })),
     customFieldDefs: [],
     deletedItems: [],
@@ -54,6 +71,7 @@ export function createPerson(deviceId, input) {
     birthDate: input.birthDate || "",
     phones: input.phones ?? [],
     addresses: input.addresses ?? [],
+    personGroupTagIds: input.personGroupTagIds ?? [],
     interestTagIds: input.interestTagIds ?? [],
     favoriteItems: input.favoriteItems ?? [],
     familyMembers: input.familyMembers ?? [],

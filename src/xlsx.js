@@ -14,8 +14,10 @@ export function buildVaultXlsx(vault, exportedAt) {
 
 function buildSheets(vault) {
   const people = vault.people ?? [];
+  const groupTags = vault.personGroupTags ?? [];
   const tags = vault.interestTags ?? [];
   const customFields = vault.customFieldDefs ?? [];
+  const groupName = (id) => groupTags.find((tag) => tag.id === id)?.name ?? id;
   const tagName = (id) => tags.find((tag) => tag.id === id)?.name ?? id;
   const fieldName = (id) => customFields.find((field) => field.id === id)?.name ?? id;
   const personName = (id) => people.find((person) => person.id === id)?.name ?? "";
@@ -24,13 +26,14 @@ function buildSheets(vault) {
     {
       name: "人物",
       rows: [
-        ["人物ID", "姓名", "生日", "主要電話", "主要地址", "興趣喜好", "是否封存", "其它備註", "建立時間", "更新時間"],
+        ["人物ID", "姓名", "生日", "主要電話", "主要地址", "人物群組", "興趣喜好", "是否封存", "其它備註", "建立時間", "更新時間"],
         ...people.map((person) => [
           person.id,
           person.name,
           person.birthDate,
           defaultValue(person.phones),
           defaultValue(person.addresses),
+          (person.personGroupTagIds ?? []).map(groupName).join("、"),
           (person.interestTagIds ?? []).map(tagName).join("、"),
           person.archivedAt ? "是" : "",
           person.note,
@@ -67,6 +70,20 @@ function buildSheets(vault) {
           address.createdAt,
           address.updatedAt
         ]))
+      ]
+    },
+    {
+      name: "人物群組",
+      rows: [
+        ["人物群組ID", "名稱", "是否預設", "建立時間", "更新時間"],
+        ...groupTags.map((tag) => [tag.id, tag.name, tag.isDefault ? "是" : "", tag.createdAt, tag.updatedAt])
+      ]
+    },
+    {
+      name: "人物所屬群組",
+      rows: [
+        ["人物ID", "姓名", "人物群組ID", "人物群組"],
+        ...people.flatMap((person) => (person.personGroupTagIds ?? []).map((id) => [person.id, person.name, id, groupName(id)]))
       ]
     },
     {
