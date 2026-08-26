@@ -491,7 +491,7 @@ textarea {
   display: grid;
   justify-items: center;
   gap: 3px;
-  max-width: calc(100% - 190px);
+  max-width: calc(100% - 150px);
   text-align: center;
   transform: translateX(-50%);
 }
@@ -507,6 +507,7 @@ textarea {
   color: var(--text-tertiary);
   font-size: 13px;
   line-height: 1.35;
+  white-space: nowrap;
 }
 
 .detail-edit-button {
