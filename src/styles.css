@@ -383,7 +383,7 @@ textarea {
 }
 
 .route-detail {
-  background: linear-gradient(180deg, #ffffff 0, #ffffff 118px, var(--bg) 270px);
+  background: linear-gradient(180deg, #ffffff 0, #ffffff 66px, var(--bg) 150px);
 }
 
 .page-transition-forward {
@@ -508,6 +508,10 @@ textarea {
   font-size: 13px;
   line-height: 1.35;
   white-space: nowrap;
+}
+
+.detail-title-block .detail-date-meta:first-of-type {
+  margin-top: 16px;
 }
 
 .detail-edit-button {
