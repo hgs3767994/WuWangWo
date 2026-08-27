@@ -2647,7 +2647,6 @@ function personCard(person) {
   return `
     <button class="person-card" data-detail="${person.id}">
       <span class="name">${escapeHtml(person.name)}</span>
-      <span aria-hidden="true">›</span>
       <span class="phone">${phone ? `${escapeHtml(phone.label)} ${escapeHtml(phone.value)}` : "尚未設定電話"}</span>
       <span class="card-updated">最近修改：${escapeHtml(formatDateOnly(person.updatedAt))}</span>
     </button>
