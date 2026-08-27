@@ -696,8 +696,16 @@ button:focus-visible,
 }
 
 .person-card .phone {
-  grid-column: 1 / -1;
+  grid-column: 1;
   color: var(--text-tertiary);
+}
+
+.person-card .card-updated {
+  justify-self: end;
+  align-self: end;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .bottom-nav {
@@ -857,6 +865,7 @@ button:focus-visible,
 }
 
 .address-list-top-row,
+.address-region-row,
 .address-list-bottom-row {
   align-items: stretch;
 }
@@ -871,6 +880,12 @@ button:focus-visible,
 
 .address-list-bottom-row input {
   flex: 1 1 auto;
+}
+
+.address-city-select,
+.address-district-select {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .address-list-bottom-row .danger {
@@ -912,6 +927,7 @@ button:focus-visible,
 
 .life-event-textarea {
   min-height: 64px;
+  overflow: hidden;
   resize: vertical;
 }
 
@@ -1494,9 +1510,10 @@ code {
   .name-check-row,
   .birthday-search-row,
   .compact-editor-row,
-  .interest-manage-row,
-  .address-list-top-row,
-  .address-list-bottom-row,
+    .interest-manage-row,
+    .address-list-top-row,
+    .address-region-row,
+    .address-list-bottom-row,
   .custom-option-row {
     flex-direction: row;
   }
