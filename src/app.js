@@ -4697,7 +4697,7 @@ function normalizeVault(vault) {
     schemaVersion: vault.schemaVersion ?? 1,
     vaultId: vault.vaultId ?? `vault-import-${crypto.randomUUID()}`,
     people: (vault.people ?? []).map(normalizeDraft),
-    personGroupTags: vault.personGroupTags ?? DEFAULT_PERSON_GROUP_TAGS.map((tag) => ({ ...tag })),
+    personGroupTags: normalizePersonGroupTags(vault.personGroupTags, now),
     interestTags: (vault.interestTags ?? []).map((tag) => {
       if (!tag.emoji) return tag;
       const name = tag.name.startsWith(tag.emoji) ? tag.name : `${tag.emoji} ${tag.name}`;
@@ -4717,6 +4717,22 @@ function normalizeVault(vault) {
 
 function getPerson(id) {
   return state.vault.people.find((person) => person.id === id);
+}
+
+function normalizePersonGroupTags(tags, updatedAt) {
+  if (!tags) return DEFAULT_PERSON_GROUP_TAGS.map((tag) => ({ ...tag }));
+  const defaults = new Map(DEFAULT_PERSON_GROUP_TAGS.map((tag) => [tag.id, tag]));
+  return tags.map((tag) => {
+    const canonical = defaults.get(tag.id);
+    if (!canonical || tag.name === canonical.name) return tag;
+    return {
+      ...tag,
+      name: canonical.name,
+      isDefault: true,
+      updatedAt,
+      updatedByDeviceId: tag.updatedByDeviceId ?? "system"
+    };
+  });
 }
 
 function normalizeDraft(draft) {

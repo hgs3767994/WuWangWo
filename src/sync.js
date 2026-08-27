@@ -1,3 +1,5 @@
+import { DEFAULT_PERSON_GROUP_TAGS } from "./model.js";
+
 function byId(items) {
   return new Map(items.map((item) => [item.id, item]));
 }
@@ -72,6 +74,21 @@ function mergeInterestTags(localVault, remoteVault) {
 function mergePersonGroupTags(localVault, remoteVault) {
   const { tags, idRedirects } = mergeNamedTags(localVault.personGroupTags ?? [], remoteVault.personGroupTags ?? []);
   return { personGroupTags: tags, groupIdRedirects: idRedirects };
+}
+
+function canonicalPersonGroupTags(tags, deviceId, updatedAt) {
+  const defaults = new Map(DEFAULT_PERSON_GROUP_TAGS.map((tag) => [tag.id, tag]));
+  return tags.map((tag) => {
+    const canonical = defaults.get(tag.id);
+    if (!canonical || tag.name === canonical.name) return tag;
+    return {
+      ...tag,
+      name: canonical.name,
+      isDefault: true,
+      updatedAt,
+      updatedByDeviceId: deviceId
+    };
+  });
 }
 
 function rewriteInterestIds(person, redirects) {
@@ -187,7 +204,7 @@ export function mergeVaults(localVault, remoteVault, deviceId) {
     vault: {
       ...localVault,
       people: filteredPeople,
-      personGroupTags: personGroupTags.filter((tag) => !isTombstoned(tombstones, "personGroupTag", tag.id)),
+      personGroupTags: canonicalPersonGroupTags(personGroupTags, deviceId, now).filter((tag) => !isTombstoned(tombstones, "personGroupTag", tag.id)),
       interestTags: interestTags.filter((tag) => !isTombstoned(tombstones, "interestTag", tag.id)),
       customFieldDefs: mergeById(localVault.customFieldDefs ?? [], remoteVault.customFieldDefs ?? []),
       deletedItems,
