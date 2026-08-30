@@ -32,7 +32,7 @@ function testSyncMerge() {
         id: "p1",
         name: "王小明",
         phones: [{ id: "phone-local", label: "手機", value: "0911", isDefault: true }],
-        interestTagIds: ["tag-local"],
+        interestTagIds: ["tag-local", "interest-missing"],
         nationalId: "A123456789",
         birthDate: "2000-01-01",
         note: "本機備註",

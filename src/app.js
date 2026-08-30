@@ -729,7 +729,7 @@ async function saveLocalSnapshots(snapshots) {
 
 async function commitVault(vault, options = {}) {
   await createLocalSnapshot("修改前自動快照");
-  state.vault = touchVault(vault, state.appState.deviceId);
+  state.vault = touchVault(normalizeVault(vault), state.appState.deviceId);
   markLocalVaultChanged();
   await save();
   if (options.render !== false) render();
@@ -2150,11 +2150,12 @@ function personFormView(person = null) {
 
 function detailView(person) {
   if (!person) return notFoundView();
-  const groupTags = (person.personGroupTagIds ?? []).map((id) => state.vault.personGroupTags.find((tag) => tag.id === id)).filter(Boolean);
+  person = normalizeDraft(person);
+  const groupTags = person.personGroupTagIds.map((id) => state.vault.personGroupTags.find((tag) => tag.id === id)).filter(Boolean);
   const tags = person.interestTagIds.map((id) => state.vault.interestTags.find((tag) => tag.id === id)).filter(Boolean);
-  const favoriteItems = person.favoriteItems ?? [];
-  const familyMembers = sortFamilyMembers(person.familyMembers ?? []);
-  const lifeEvents = sortLifeEvents(person.lifeEvents ?? []);
+  const favoriteItems = person.favoriteItems;
+  const familyMembers = sortFamilyMembers(person.familyMembers);
+  const lifeEvents = sortLifeEvents(person.lifeEvents);
   const visibleLifeEvents = lifeEvents.slice(0, 3);
   const moreLifeEventsButton = lifeEvents.length > 3
     ? `<button type="button" class="action-quiet section-header-button" data-nav="importantNotes" data-id="${escapeAttr(person.id)}">顯示更多重要記事</button>`
@@ -3024,6 +3025,7 @@ function deletedView() {
 }
 
 function personCard(person) {
+  person = normalizeDraft(person);
   const phone = sortDefaultFirst(person.phones)[0];
   return `
     <button class="person-card" data-detail="${person.id}">
@@ -5318,11 +5320,15 @@ function normalizeVault(vault) {
   });
   const normalizedPersonGroups = normalizeTagCollection(vault.personGroupTags, DEFAULT_PERSON_GROUP_TAGS, tombstones, "personGroupTag", now);
   const normalizedInterests = normalizeTagCollection(normalizedInterestTags, DEFAULT_INTEREST_TAGS, tombstones, "interestTag", now);
+  const validPersonGroupIds = new Set(normalizedPersonGroups.tags.map((tag) => tag.id));
+  const validInterestIds = new Set(normalizedInterests.tags.map((tag) => tag.id));
   return {
     ...vault,
     schemaVersion: vault.schemaVersion ?? 1,
     vaultId: vault.vaultId ?? `vault-import-${crypto.randomUUID()}`,
-    people: (vault.people ?? []).map((person) => rewritePersonTagIds(normalizeDraft(person), normalizedPersonGroups.redirects, normalizedInterests.redirects)),
+    people: asArray(vault.people).map((person) =>
+      rewritePersonTagIds(normalizeDraft(person), normalizedPersonGroups.redirects, normalizedInterests.redirects, validPersonGroupIds, validInterestIds)
+    ),
     personGroupTags: normalizedPersonGroups.tags,
     interestTags: normalizedInterests.tags,
     customFieldDefs: vault.customFieldDefs ?? [],
@@ -5385,11 +5391,13 @@ function isTagTombstoned(tombstones, type, id) {
   return tombstones.some((item) => item.type === type && item.id === id);
 }
 
-function rewritePersonTagIds(person, groupRedirects, interestRedirects) {
+function rewritePersonTagIds(person, groupRedirects, interestRedirects, validGroupIds = null, validInterestIds = null) {
+  const groupIds = uniqueIds(person.personGroupTagIds.map((id) => groupRedirects.get(id) ?? id));
+  const interestIds = uniqueIds(person.interestTagIds.map((id) => interestRedirects.get(id) ?? id));
   return {
     ...person,
-    personGroupTagIds: uniqueIds((person.personGroupTagIds ?? []).map((id) => groupRedirects.get(id) ?? id)),
-    interestTagIds: uniqueIds((person.interestTagIds ?? []).map((id) => interestRedirects.get(id) ?? id))
+    personGroupTagIds: validGroupIds ? groupIds.filter((id) => validGroupIds.has(id)) : groupIds,
+    interestTagIds: validInterestIds ? interestIds.filter((id) => validInterestIds.has(id)) : interestIds
   };
 }
 
@@ -5397,22 +5405,167 @@ function uniqueIds(ids) {
   return [...new Set(ids)];
 }
 
-function normalizeDraft(draft) {
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function asString(value) {
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function asStringArray(value) {
+  return asArray(value).map(asString).filter(Boolean);
+}
+
+function normalizeTimestamp(value, fallback = new Date().toISOString()) {
+  const text = asString(value);
+  return Number.isNaN(new Date(text).getTime()) ? fallback : text;
+}
+
+function normalizeListRows(rows, defaultLabel = "") {
+  return asArray(rows).map((row, index) => {
+    const source = row && typeof row === "object" ? row : { value: row };
+    const now = new Date().toISOString();
+    return {
+      ...source,
+      id: asString(source.id) || `list-${crypto.randomUUID()}`,
+      label: asString(source.label) || defaultLabel,
+      value: asString(source.value),
+      isDefault: Boolean(source.isDefault),
+      createdAt: normalizeTimestamp(source.createdAt, now),
+      updatedAt: normalizeTimestamp(source.updatedAt, now)
+    };
+  });
+}
+
+function normalizeAddressRows(rows) {
+  return normalizeListRows(rows, "住家").map((row) => ({
+    ...row,
+    city: asString(row.city),
+    district: asString(row.district),
+    detail: asString(row.detail) || legacyAddressDetail(row)
+  }));
+}
+
+function legacyAddressDetail(row) {
+  const value = asString(row.value);
+  if (!value) return "";
+  const prefix = `${asString(row.city)}${asString(row.district)}`;
+  return prefix && value.startsWith(prefix) ? value.slice(prefix.length) : value;
+}
+
+function normalizeTextRows(rows, prefix) {
+  return asArray(rows).map((row) => {
+    const source = row && typeof row === "object" ? row : { value: row };
+    const now = new Date().toISOString();
+    return {
+      ...source,
+      id: asString(source.id) || `${prefix}-${crypto.randomUUID()}`,
+      value: asString(source.value),
+      createdAt: normalizeTimestamp(source.createdAt, now),
+      updatedAt: normalizeTimestamp(source.updatedAt, now)
+    };
+  });
+}
+
+function normalizeFamilyRows(rows) {
+  return asArray(rows).map((row) => {
+    const source = row && typeof row === "object" ? row : { name: row };
+    const now = new Date().toISOString();
+    return {
+      ...source,
+      id: asString(source.id) || `family-${crypto.randomUUID()}`,
+      relationship: asString(source.relationship || source.customRelationship),
+      customRelationship: asString(source.customRelationship),
+      name: asString(source.name),
+      personId: asString(source.personId),
+      createdAt: normalizeTimestamp(source.createdAt, now),
+      updatedAt: normalizeTimestamp(source.updatedAt, now)
+    };
+  });
+}
+
+function normalizeLifeEventRows(rows) {
+  return asArray(rows).map((row) => {
+    const source = row && typeof row === "object" ? row : { text: row };
+    const now = new Date().toISOString();
+    return {
+      ...source,
+      id: asString(source.id) || `event-${crypto.randomUUID()}`,
+      date: asString(source.date),
+      text: asString(source.text ?? source.value),
+      createdAt: normalizeTimestamp(source.createdAt, now),
+      updatedAt: normalizeTimestamp(source.updatedAt, now)
+    };
+  });
+}
+
+function normalizeCustomValueRows(values) {
+  if (Array.isArray(values)) {
+    return values
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        return {
+          ...item,
+          fieldId: asString(item.fieldId),
+          value: normalizeCustomStoredValue(item.value),
+          updatedAt: normalizeTimestamp(item.updatedAt),
+          updatedByDeviceId: asString(item.updatedByDeviceId)
+        };
+      })
+      .filter((item) => item?.fieldId);
+  }
+  if (values && typeof values === "object") {
+    return Object.entries(values).map(([fieldId, value]) => ({
+      fieldId,
+      value: normalizeCustomStoredValue(value),
+      updatedAt: new Date().toISOString(),
+      updatedByDeviceId: state.appState?.deviceId ?? "imported"
+    }));
+  }
+  return [];
+}
+
+function normalizeCustomStoredValue(value) {
+  if (Array.isArray(value)) return value.map((item) => (item && typeof item === "object" ? normalizeDateRangeRow(item) : asString(item)));
+  if (value && typeof value === "object") return normalizeDateRangeRow(value);
+  return asString(value);
+}
+
+function normalizeDateRangeRow(row) {
+  const now = new Date().toISOString();
+  return {
+    ...row,
+    id: asString(row.id) || `date-range-${crypto.randomUUID()}`,
+    startDate: asString(row.startDate),
+    endDate: asString(row.endDate),
+    text: asString(row.text ?? row.value),
+    createdAt: normalizeTimestamp(row.createdAt, now),
+    updatedAt: normalizeTimestamp(row.updatedAt, now)
+  };
+}
+
+function normalizeDraft(draft = {}) {
   return {
     ...draft,
-    nationalId: draft.nationalId ?? "",
-    nickname: draft.nickname ?? "",
-    birthDate: draft.birthDate ?? "",
-    phones: draft.phones?.length ? draft.phones : [],
-    addresses: draft.addresses?.length ? draft.addresses : [],
-    personGroupTagIds: draft.personGroupTagIds ?? [],
-    interestTagIds: draft.interestTagIds ?? [],
-    favoriteItems: draft.favoriteItems ?? [],
-    familyMembers: draft.familyMembers ?? [],
-    lifeEvents: draft.lifeEvents ?? [],
-    customValues: draft.customValues ?? [],
-    archivedAt: draft.archivedAt ?? "",
-    note: draft.note ?? ""
+    id: asString(draft.id) || `person-${crypto.randomUUID()}`,
+    name: asString(draft.name),
+    nationalId: asString(draft.nationalId),
+    nickname: asString(draft.nickname),
+    birthDate: asString(draft.birthDate),
+    phones: normalizeListRows(draft.phones, "手機"),
+    addresses: normalizeAddressRows(draft.addresses),
+    personGroupTagIds: asStringArray(draft.personGroupTagIds),
+    interestTagIds: asStringArray(draft.interestTagIds),
+    favoriteItems: normalizeTextRows(draft.favoriteItems, "favorite"),
+    familyMembers: normalizeFamilyRows(draft.familyMembers),
+    lifeEvents: normalizeLifeEventRows(draft.lifeEvents),
+    customValues: normalizeCustomValueRows(draft.customValues),
+    archivedAt: asString(draft.archivedAt),
+    note: asString(draft.note),
+    createdAt: normalizeTimestamp(draft.createdAt),
+    updatedAt: normalizeTimestamp(draft.updatedAt),
+    updatedByDeviceId: asString(draft.updatedByDeviceId)
   };
 }
 
@@ -5530,14 +5683,14 @@ function setCustomValue(person, fieldId, value) {
 }
 
 function dateRangeRows(value, includeBlank = false) {
-  const rows = Array.isArray(value) ? value : [];
+  const rows = Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
   const normalized = rows.map((row) => ({
-    id: row.id ?? `date-range-${crypto.randomUUID()}`,
-    startDate: row.startDate ?? "",
-    endDate: row.endDate ?? "",
-    text: row.text ?? "",
-    createdAt: row.createdAt ?? new Date().toISOString(),
-    updatedAt: row.updatedAt ?? new Date().toISOString()
+    id: asString(row.id) || `date-range-${crypto.randomUUID()}`,
+    startDate: asString(row.startDate),
+    endDate: asString(row.endDate),
+    text: asString(row.text ?? row.value),
+    createdAt: normalizeTimestamp(row.createdAt),
+    updatedAt: normalizeTimestamp(row.updatedAt)
   }));
   return normalized.length || !includeBlank
     ? normalized

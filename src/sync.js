@@ -117,23 +117,25 @@ function canonicalDefaultTags(tags, defaultTags, tombstones, tombstoneType, devi
   return { tags: output, redirects };
 }
 
-function rewriteInterestIds(person, redirects) {
+function rewriteInterestIds(person, redirects, validIds = null) {
+  const ids = uniqueBy(
+    (person.interestTagIds ?? []).map((id) => resolveRedirect(id, redirects)).map((id) => ({ id })),
+    (item) => item.id
+  ).map((item) => item.id);
   return {
     ...person,
-    interestTagIds: uniqueBy(
-      (person.interestTagIds ?? []).map((id) => resolveRedirect(id, redirects)).map((id) => ({ id })),
-      (item) => item.id
-    ).map((item) => item.id)
+    interestTagIds: validIds ? ids.filter((id) => validIds.has(id)) : ids
   };
 }
 
-function rewritePersonGroupIds(person, redirects) {
+function rewritePersonGroupIds(person, redirects, validIds = null) {
+  const ids = uniqueBy(
+    (person.personGroupTagIds ?? []).map((id) => resolveRedirect(id, redirects)).map((id) => ({ id })),
+    (item) => item.id
+  ).map((item) => item.id);
   return {
     ...person,
-    personGroupTagIds: uniqueBy(
-      (person.personGroupTagIds ?? []).map((id) => resolveRedirect(id, redirects)).map((id) => ({ id })),
-      (item) => item.id
-    ).map((item) => item.id)
+    personGroupTagIds: validIds ? ids.filter((id) => validIds.has(id)) : ids
   };
 }
 
@@ -147,8 +149,8 @@ function resolveRedirect(id, redirects) {
   return current;
 }
 
-function rewritePersonTagIds(person, interestRedirects, groupRedirects) {
-  return rewritePersonGroupIds(rewriteInterestIds(person, interestRedirects), groupRedirects);
+function rewritePersonTagIds(person, interestRedirects, groupRedirects, validInterestIds = null, validGroupIds = null) {
+  return rewritePersonGroupIds(rewriteInterestIds(person, interestRedirects, validInterestIds), groupRedirects, validGroupIds);
 }
 
 function mergeMultiValueItems(localItems = [], remoteItems = []) {
@@ -229,10 +231,12 @@ export function mergeVaults(localVault, remoteVault, deviceId) {
   const normalizedPersonGroups = canonicalDefaultTags(personGroupTags, DEFAULT_PERSON_GROUP_TAGS, tombstones, "personGroupTag", deviceId, now);
   const combinedInterestRedirects = new Map([...idRedirects, ...normalizedInterests.redirects]);
   const combinedGroupRedirects = new Map([...groupIdRedirects, ...normalizedPersonGroups.redirects]);
-  const people = byId((localVault.people ?? []).map((person) => rewritePersonTagIds(person, combinedInterestRedirects, combinedGroupRedirects)));
+  const validInterestIds = new Set(normalizedInterests.tags.map((tag) => tag.id));
+  const validGroupIds = new Set(normalizedPersonGroups.tags.map((tag) => tag.id));
+  const people = byId((localVault.people ?? []).map((person) => rewritePersonTagIds(person, combinedInterestRedirects, combinedGroupRedirects, validInterestIds, validGroupIds)));
 
   for (const remotePersonRaw of remoteVault.people ?? []) {
-    const remotePerson = rewritePersonTagIds(remotePersonRaw, combinedInterestRedirects, combinedGroupRedirects);
+    const remotePerson = rewritePersonTagIds(remotePersonRaw, combinedInterestRedirects, combinedGroupRedirects, validInterestIds, validGroupIds);
     const localPerson = people.get(remotePerson.id);
     if (localPerson) people.set(remotePerson.id, mergePerson(localPerson, remotePerson, conflicts));
     else people.set(remotePerson.id, remotePerson);
