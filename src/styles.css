@@ -236,7 +236,7 @@ body[data-theme="midnight-black"] {
   --action-soft-hover-bg: #334155;
   --action-soft-hover-text: #FFFFFF;
   --action-quiet-bg: #121826;
-  --action-quiet-border: #273449;
+  --action-quiet-border: #475569;
   --action-quiet-text: #CBD5E1;
   --action-quiet-hover-bg: #1F2937;
   --action-quiet-hover-text: #F8FAFC;
@@ -260,9 +260,9 @@ body[data-theme="midnight-black"] {
   --surface-section: #1A1A1A;
   --surface-muted: #1F2937;
   --surface-dark: #020617;
-  --line: #2A2A2A;
-  --line-soft: #1F1F1F;
-  --divider: #1F1F1F;
+  --line: #4B5563;
+  --line-soft: #374151;
+  --divider: #374151;
   --focus: #60A5FA;
   --disabled: #1F2937;
   --disabled-text: #64748B;

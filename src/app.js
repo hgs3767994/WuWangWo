@@ -2033,13 +2033,14 @@ function installPromptCard(location) {
 
 function installSettingsSection() {
   const installed = isPwaInstalled();
+  if (installed) return "";
   const canPrompt = Boolean(state.installPromptEvent);
   return `
     <section class="panel stack">
       <h2 class="section-title">安裝到裝置</h2>
-      <p>狀態：${installed ? "已使用 App 模式開啟" : "尚未以 App 模式開啟"}</p>
-      <p class="muted">${installed ? "目前已像 App 一樣獨立開啟，不需要重複安裝。" : "建議安裝到手機主畫面，日後可以直接從主畫面開啟莫忘。"}</p>
-      ${installed ? "" : `<button type="button" class="action-quiet" data-action="${canPrompt ? "install-app" : "open-install-guide"}">${canPrompt ? "安裝到裝置" : "查看安裝方式"}</button>`}
+      <p>狀態：尚未以 App 模式開啟</p>
+      <p class="muted">建議安裝到手機主畫面，日後可以直接從主畫面開啟莫忘。</p>
+      <button type="button" class="action-quiet" data-action="${canPrompt ? "install-app" : "open-install-guide"}">${canPrompt ? "安裝到裝置" : "查看安裝方式"}</button>
     </section>
   `;
 }
@@ -3927,13 +3928,15 @@ async function deletePersonGroup(tag) {
 
 async function restoreDefaultPersonGroups() {
   const now = new Date().toISOString();
-  const existing = new Set(state.vault.personGroupTags.map((tag) => tag.id));
-  const missing = DEFAULT_PERSON_GROUP_TAGS.filter((tag) => !existing.has(tag.id)).map((tag) => ({ ...tag, updatedAt: now, updatedByDeviceId: state.appState.deviceId }));
-  if (!missing.length) {
+  const normalized = normalizeTagCollection(state.vault.personGroupTags, DEFAULT_PERSON_GROUP_TAGS, [], "personGroupTag", now);
+  const changed = JSON.stringify(state.vault.personGroupTags) !== JSON.stringify(normalized.tags);
+  if (!changed) {
     alert("預設人物群組都已存在");
     return;
   }
-  await commitVault({ ...state.vault, personGroupTags: [...state.vault.personGroupTags, ...missing] });
+  const people = state.vault.people.map((person) => rewritePersonTagIds(person, normalized.redirects, new Map()));
+  if (state.route.draft) state.route.draft = rewritePersonTagIds(state.route.draft, normalized.redirects, new Map());
+  await commitVault({ ...state.vault, people, personGroupTags: normalized.tags });
 }
 
 async function addInterest() {
@@ -3997,9 +4000,11 @@ async function deleteInterest(tag) {
 
 async function restoreDefaultInterests() {
   if (!confirm("確定要恢復預設興趣喜好嗎？\n這會重新加入缺少的預設項目，不會刪除你的自訂項目。")) return;
-  const existing = new Set(state.vault.interestTags.map((tag) => tag.id));
-  const missing = DEFAULT_INTEREST_TAGS.filter((tag) => !existing.has(tag.id));
-  await commitVault({ ...state.vault, interestTags: [...state.vault.interestTags, ...missing] });
+  const now = new Date().toISOString();
+  const normalized = normalizeTagCollection(state.vault.interestTags, DEFAULT_INTEREST_TAGS, [], "interestTag", now);
+  const people = state.vault.people.map((person) => rewritePersonTagIds(person, new Map(), normalized.redirects));
+  if (state.route.draft) state.route.draft = rewritePersonTagIds(state.route.draft, new Map(), normalized.redirects);
+  await commitVault({ ...state.vault, people, interestTags: normalized.tags });
 }
 
 function toggleCustomFieldAdd() {
@@ -4824,21 +4829,25 @@ function pruneDeleted(vault) {
 
 function normalizeVault(vault) {
   const now = new Date().toISOString();
+  const tombstones = vault.tombstones ?? [];
+  const normalizedInterestTags = (vault.interestTags ?? []).map((tag) => {
+    if (!tag.emoji) return tag;
+    const name = tag.name.startsWith(tag.emoji) ? tag.name : `${tag.emoji} ${tag.name}`;
+    const { emoji, ...rest } = tag;
+    return { ...rest, name };
+  });
+  const normalizedPersonGroups = normalizeTagCollection(vault.personGroupTags, DEFAULT_PERSON_GROUP_TAGS, tombstones, "personGroupTag", now);
+  const normalizedInterests = normalizeTagCollection(normalizedInterestTags, DEFAULT_INTEREST_TAGS, tombstones, "interestTag", now);
   return {
     ...vault,
     schemaVersion: vault.schemaVersion ?? 1,
     vaultId: vault.vaultId ?? `vault-import-${crypto.randomUUID()}`,
-    people: (vault.people ?? []).map(normalizeDraft),
-    personGroupTags: normalizePersonGroupTags(vault.personGroupTags, now),
-    interestTags: (vault.interestTags ?? []).map((tag) => {
-      if (!tag.emoji) return tag;
-      const name = tag.name.startsWith(tag.emoji) ? tag.name : `${tag.emoji} ${tag.name}`;
-      const { emoji, ...rest } = tag;
-      return { ...rest, name };
-    }),
+    people: (vault.people ?? []).map((person) => rewritePersonTagIds(normalizeDraft(person), normalizedPersonGroups.redirects, normalizedInterests.redirects)),
+    personGroupTags: normalizedPersonGroups.tags,
+    interestTags: normalizedInterests.tags,
     customFieldDefs: vault.customFieldDefs ?? [],
     deletedItems: vault.deletedItems ?? [],
-    tombstones: vault.tombstones ?? [],
+    tombstones,
     syncMeta: {
       updatedAt: vault.syncMeta?.updatedAt ?? now,
       updatedByDeviceId: vault.syncMeta?.updatedByDeviceId ?? "imported",
@@ -4851,20 +4860,61 @@ function getPerson(id) {
   return state.vault.people.find((person) => person.id === id);
 }
 
-function normalizePersonGroupTags(tags, updatedAt) {
-  if (!tags) return DEFAULT_PERSON_GROUP_TAGS.map((tag) => ({ ...tag }));
-  const defaults = new Map(DEFAULT_PERSON_GROUP_TAGS.map((tag) => [tag.id, tag]));
-  return tags.map((tag) => {
-    const canonical = defaults.get(tag.id);
-    if (!canonical || tag.name === canonical.name) return tag;
-    return {
-      ...tag,
-      name: canonical.name,
+function normalizeTagCollection(tags, defaultTags, tombstones, tombstoneType, updatedAt) {
+  if (!tags) return { tags: defaultTags.map((tag) => ({ ...tag })), redirects: new Map() };
+  const redirects = new Map();
+  const defaultIds = new Set(defaultTags.map((tag) => tag.id));
+  const output = [];
+  const usedInputIds = new Set();
+
+  defaultTags.forEach((defaultTag) => {
+    if (isTagTombstoned(tombstones, tombstoneType, defaultTag.id)) return;
+    const sameId = tags.find((tag) => tag.id === defaultTag.id);
+    const sameName = tags.find((tag) => tag.id !== defaultTag.id && tag.name === defaultTag.name);
+    const source = sameId ?? sameName;
+
+    if (!source) {
+      output.push({ ...defaultTag });
+      return;
+    }
+
+    usedInputIds.add(source.id);
+    if (source.id !== defaultTag.id) redirects.set(source.id, defaultTag.id);
+    output.push({
+      ...source,
+      id: defaultTag.id,
+      name: defaultTag.name,
       isDefault: true,
-      updatedAt,
-      updatedByDeviceId: tag.updatedByDeviceId ?? "system"
-    };
+      updatedAt: source.id === defaultTag.id && source.name === defaultTag.name ? source.updatedAt : updatedAt,
+      updatedByDeviceId: source.updatedByDeviceId ?? "system"
+    });
   });
+
+  const activeDefaultNames = new Set(output.map((tag) => tag.name));
+  tags.forEach((tag) => {
+    if (usedInputIds.has(tag.id)) return;
+    if (defaultIds.has(tag.id)) return;
+    if (activeDefaultNames.has(tag.name)) return;
+    output.push({ ...tag, isDefault: false });
+  });
+
+  return { tags: output, redirects };
+}
+
+function isTagTombstoned(tombstones, type, id) {
+  return tombstones.some((item) => item.type === type && item.id === id);
+}
+
+function rewritePersonTagIds(person, groupRedirects, interestRedirects) {
+  return {
+    ...person,
+    personGroupTagIds: uniqueIds((person.personGroupTagIds ?? []).map((id) => groupRedirects.get(id) ?? id)),
+    interestTagIds: uniqueIds((person.interestTagIds ?? []).map((id) => interestRedirects.get(id) ?? id))
+  };
+}
+
+function uniqueIds(ids) {
+  return [...new Set(ids)];
 }
 
 function normalizeDraft(draft) {

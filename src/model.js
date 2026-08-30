@@ -29,7 +29,9 @@ export const DEFAULT_PERSON_GROUP_TAGS = [
   ["club-member", "👥社團成員"],
   ["car-friend", "🚗車友"],
   ["classmate", "🎓同學"],
-  ["client", "💼客戶"]
+  ["client", "💼客戶"],
+  ["male", "♂️男"],
+  ["female", "♀️女"]
 ].map(([slug, name]) => ({
   id: `default-group-${slug}`,
   name,
