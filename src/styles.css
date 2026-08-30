@@ -981,6 +981,21 @@ button:focus-visible,
   min-width: 0;
 }
 
+.custom-date-range-row {
+  display: grid;
+  gap: 8px;
+}
+
+.date-range-date-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: stretch;
+}
+
+.date-range-date-row input {
+  min-width: 0;
+}
+
 .input-status-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

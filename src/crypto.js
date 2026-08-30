@@ -92,6 +92,32 @@ export async function createTrustedSessionWithDek({ vaultId, deviceId, sessionEp
   };
 }
 
+export async function createLocalStorageKey() {
+  return crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+
+export async function encryptLocalEnvelope(payload, localStorageKey, fileType = "local-data") {
+  const nonce = randomBytes(12);
+  const plaintext = textBytes(JSON.stringify(payload));
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, localStorageKey, plaintext);
+  return {
+    fileType,
+    schemaVersion: 1,
+    nonce: bytesToBase64(nonce),
+    ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+export async function decryptLocalEnvelope(envelope, localStorageKey) {
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(envelope.nonce) },
+    localStorageKey,
+    base64ToBytes(envelope.ciphertext)
+  );
+  return JSON.parse(bytesText(new Uint8Array(plaintext)));
+}
+
 export async function restoreDekFromTrustedSession(trustedSession) {
   if (!trustedSession?.localDekWrapper || !trustedSession.localDeviceKey) {
     throw new Error("trusted-session-missing-local-key");

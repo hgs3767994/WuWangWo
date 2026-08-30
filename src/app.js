@@ -5,8 +5,11 @@ import { mergeVaults } from "./sync.js";
 import { buildVaultXlsx } from "./xlsx.js";
 import {
   createKeyPackage,
+  createLocalStorageKey,
+  decryptLocalEnvelope,
   createTrustedSessionWithDek,
   decryptVaultEnvelope,
+  encryptLocalEnvelope,
   encryptVaultEnvelope,
   generateRecoveryCode,
   normalizeRecoveryCode,
@@ -54,6 +57,9 @@ const ADDRESS_CITY_DISTRICTS = {
   連江縣: ["南竿鄉", "北竿鄉", "莒光鄉", "東引鄉"]
 };
 const ADDRESS_CITY_OPTIONS = [...Object.keys(ADDRESS_CITY_DISTRICTS), "其它/海外地址"];
+const IDLE_LOCK_MS = 5 * 60 * 1000;
+const AWAY_LOCK_MS = 15 * 60 * 1000;
+const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 const NO_SLIDE_ROUTE_NAMES = new Set([
   "loading",
   "welcome",
@@ -91,32 +97,38 @@ let state = {
   historyNavigationRegistered: false,
   ignoreNextPopstate: false,
   skipNextPopstateConfirm: false,
+  developerAccessGuardRegistered: false,
+  autoLockRegistered: false,
+  idleLockTimer: null,
+  lastSessionTouchAt: 0,
   installPromptEvent: null,
   installDismissed: localStorage.getItem("forget-me-not-install-dismissed") === "true",
   isInstalled: isPwaInstalled()
 };
 
 async function boot() {
+  registerDeveloperAccessGuard();
+  registerAutoLock();
   const appState = await getItem("appState");
-  const vault = await getItem("vault");
+  const vault = await loadLocalVault();
   const trustedSession = await getItem("trustedSession");
-  const localSnapshots = await getItem("localSnapshots") ?? [];
+  const localSnapshots = await loadLocalSnapshots();
   state = { ...state, localSnapshots };
   if (!appState || !vault) {
     state = { ...state, route: { name: "welcome" } };
   } else if (appState.mode === "driveSync" && !trustedSession) {
-    state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock" } };
+    state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock", allowBiometric: false } };
   } else {
     let dekBytes = null;
     if (appState.mode === "driveSync") {
       const sessionCheck = await checkTrustedSessionStillValid(appState, trustedSession);
       if (!sessionCheck.valid) {
-        await removeItem("trustedSession");
+        if (!sessionCheck.keepTrustedSession) await removeItem("trustedSession");
         state = {
           ...state,
           appState,
           vault: normalizeVault(pruneDeleted(vault)),
-          route: { name: "unlock", message: sessionCheck.message, showForgotPassword: true }
+          route: { name: "unlock", message: sessionCheck.message, showForgotPassword: true, allowBiometric: Boolean(sessionCheck.keepTrustedSession) }
         };
         render();
         registerHistoryNavigation();
@@ -128,7 +140,7 @@ async function boot() {
         dekBytes = await restoreDekFromTrustedSession(trustedSession);
       } catch {
         await removeItem("trustedSession");
-        state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock" } };
+        state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock", allowBiometric: false } };
         render();
         registerHistoryNavigation();
         registerServiceWorker();
@@ -146,8 +158,97 @@ async function boot() {
   registerInstallExperience();
 }
 
+function registerDeveloperAccessGuard() {
+  if (state.developerAccessGuardRegistered) return;
+  state.developerAccessGuardRegistered = true;
+  window.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+  });
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      const key = event.key.toLowerCase();
+      const blocked =
+        event.key === "F12" ||
+        (event.ctrlKey && event.shiftKey && ["i", "j", "c"].includes(key)) ||
+        (event.metaKey && event.altKey && ["i", "j", "c"].includes(key)) ||
+        (event.ctrlKey && key === "u");
+      if (!blocked) return;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    true
+  );
+}
+
+function registerAutoLock() {
+  if (state.autoLockRegistered) return;
+  state.autoLockRegistered = true;
+  ["pointerdown", "keydown", "touchstart", "scroll"].forEach((eventName) => {
+    window.addEventListener(eventName, () => recordUserActivity(), { passive: true });
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      void touchTrustedSessionNow({ force: true });
+    } else {
+      recordUserActivity();
+    }
+  });
+  window.addEventListener("pagehide", () => {
+    void touchTrustedSessionNow({ force: true });
+  });
+  resetIdleLockTimer();
+}
+
+function recordUserActivity() {
+  if (state.route?.name === "unlock") return;
+  resetIdleLockTimer();
+  void touchTrustedSessionNow();
+}
+
+function resetIdleLockTimer() {
+  if (state.idleLockTimer) window.clearTimeout(state.idleLockTimer);
+  if (!canAutoLock()) return;
+  state.idleLockTimer = window.setTimeout(() => {
+    void lockApp("已閒置超過 5 分鐘，請重新輸入密碼");
+  }, IDLE_LOCK_MS);
+}
+
+function canAutoLock() {
+  return Boolean(state.appState?.mode === "driveSync" && state.dekBytes && state.route?.name !== "unlock");
+}
+
+async function touchTrustedSessionNow(options = {}) {
+  if (!state.appState || state.route?.name === "unlock") return;
+  const nowMs = Date.now();
+  if (!options.force && nowMs - state.lastSessionTouchAt < SESSION_TOUCH_INTERVAL_MS) return;
+  const trustedSession = await getItem("trustedSession");
+  if (!trustedSession) return;
+  state.lastSessionTouchAt = nowMs;
+  await setItem("trustedSession", {
+    ...trustedSession,
+    lastUsedAt: new Date(nowMs).toISOString()
+  });
+}
+
+async function lockApp(message = "請重新輸入密碼以繼續使用") {
+  if (!state.appState || state.route?.name === "unlock") return;
+  if (state.idleLockTimer) {
+    window.clearTimeout(state.idleLockTimer);
+    state.idleLockTimer = null;
+  }
+  if (state.appState.mode !== "driveSync") return;
+  await touchTrustedSessionNow({ force: true });
+  state.dekBytes = null;
+  state.route = { name: "unlock", message, showForgotPassword: true, allowBiometric: true };
+  render();
+}
+
 async function checkTrustedSessionStillValid(appState, trustedSession) {
   if (!trustedSession) return { valid: false, message: "請輸入密碼以繼續使用" };
+  if (shouldLockForAwayTimeout(trustedSession)) {
+    return { valid: false, keepTrustedSession: true, message: "離開 App 時間較久，請重新輸入密碼" };
+  }
   const localKeyPackage = await getKeyPackage();
   let remoteKeyPackage = null;
   if (appState.googleDrive?.connected && driveAuthStatus().hasAccessToken) {
@@ -160,6 +261,168 @@ async function checkTrustedSessionStillValid(appState, trustedSession) {
   if ((keyPackage.securityMeta.sessionEpoch ?? 0) <= (trustedSession.sessionEpoch ?? 0)) return { valid: true };
   await setItem("keyPackage", keyPackage);
   return { valid: false, message: securityEventMessage(keyPackage.securityMeta) };
+}
+
+function shouldLockForAwayTimeout(trustedSession) {
+  if (!trustedSession?.lastUsedAt) return false;
+  return Date.now() - new Date(trustedSession.lastUsedAt).getTime() > AWAY_LOCK_MS;
+}
+
+function isBiometricUnlockEnabled() {
+  return Boolean(state.appState?.security?.biometricUnlockEnabled);
+}
+
+function webAuthnSupported() {
+  return Boolean(window.isSecureContext && window.PublicKeyCredential && navigator.credentials?.create && navigator.credentials?.get);
+}
+
+async function platformAuthenticatorAvailable() {
+  if (!webAuthnSupported()) return false;
+  try {
+    return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch {
+    return false;
+  }
+}
+
+function randomBuffer(length = 32) {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return bytes;
+}
+
+function bufferToBase64Url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const value = btoa(String.fromCharCode(...bytes));
+  return value.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
+function base64UrlToBuffer(value) {
+  const padded = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+}
+
+function relyingPartyId() {
+  return location.hostname || undefined;
+}
+
+async function enableBiometricUnlock() {
+  if (state.appState?.mode !== "driveSync") {
+    alert("請先啟用 Google Drive 同步並設定密碼後，再啟用生物辨識解鎖。");
+    return;
+  }
+  if (!state.dekBytes) {
+    alert("請先用密碼登入後，再啟用生物辨識解鎖。");
+    return;
+  }
+  if (!(await platformAuthenticatorAvailable())) {
+    alert("此瀏覽器或裝置目前不支援可驗證使用者的生物辨識／裝置解鎖。");
+    return;
+  }
+  const confirmed = confirm("啟用後，這台裝置可使用指紋、臉部辨識或螢幕鎖快速解鎖莫忘。\n\n密碼與救援碼仍會保留作為備援。是否啟用？");
+  if (!confirmed) return;
+  try {
+    const userId = randomBuffer(16);
+    const rp = { name: "莫忘" };
+    const rpId = relyingPartyId();
+    if (rpId) rp.id = rpId;
+    const credential = await navigator.credentials.create({
+      publicKey: {
+        challenge: randomBuffer(),
+        rp,
+        user: {
+          id: userId,
+          name: currentDriveAccountEmail() || "local-user",
+          displayName: currentDriveAccountEmail() || "莫忘使用者"
+        },
+        pubKeyCredParams: [
+          { type: "public-key", alg: -7 },
+          { type: "public-key", alg: -257 }
+        ],
+        authenticatorSelection: {
+          authenticatorAttachment: "platform",
+          residentKey: "preferred",
+          userVerification: "required"
+        },
+        timeout: 60000,
+        attestation: "none"
+      }
+    });
+    await setItem("biometricUnlock", {
+      schemaVersion: 1,
+      credentialId: credential.id,
+      rawId: bufferToBase64Url(credential.rawId),
+      userId: bufferToBase64Url(userId),
+      rpId,
+      createdAt: new Date().toISOString()
+    });
+    state.appState = {
+      ...state.appState,
+      security: {
+        ...(state.appState.security ?? {}),
+        biometricUnlockEnabled: true,
+        biometricUnlockUpdatedAt: new Date().toISOString()
+      }
+    };
+    await save();
+    alert("已啟用生物辨識解鎖");
+  } catch (error) {
+    alert(error?.name === "NotAllowedError" ? "未完成生物辨識設定。" : "生物辨識設定失敗，請確認裝置已設定螢幕鎖或生物辨識。");
+  }
+}
+
+async function disableBiometricUnlock() {
+  if (!(await verifySensitiveOperation("停用生物辨識解鎖"))) return;
+  await removeItem("biometricUnlock");
+  state.appState = {
+    ...state.appState,
+    security: {
+      ...(state.appState.security ?? {}),
+      biometricUnlockEnabled: false,
+      biometricUnlockUpdatedAt: new Date().toISOString()
+    }
+  };
+  await save();
+  alert("已停用生物辨識解鎖");
+}
+
+async function unlockWithBiometric() {
+  if (!webAuthnSupported()) {
+    alert("此瀏覽器目前不支援生物辨識解鎖。");
+    return;
+  }
+  const credentialRecord = await getItem("biometricUnlock");
+  const trustedSession = await getItem("trustedSession");
+  if (!isBiometricUnlockEnabled() || !credentialRecord || !trustedSession) {
+    alert("這台裝置尚未啟用生物辨識解鎖，請使用密碼登入。");
+    return;
+  }
+  if (credentialRecord.rpId && credentialRecord.rpId !== relyingPartyId()) {
+    alert("生物辨識解鎖是依照目前網址保存的。請在原本啟用的網址重新開啟，或使用密碼登入後重新啟用。");
+    return;
+  }
+  try {
+    const publicKey = {
+      challenge: randomBuffer(),
+      allowCredentials: [
+        {
+          id: base64UrlToBuffer(credentialRecord.rawId),
+          type: "public-key"
+        }
+      ],
+      userVerification: "required",
+      timeout: 60000
+    };
+    const rpId = relyingPartyId();
+    if (rpId) publicKey.rpId = rpId;
+    await navigator.credentials.get({ publicKey });
+    state.dekBytes = await restoreDekFromTrustedSession(trustedSession);
+    await touchTrustedSessionNow({ force: true });
+    navigate({ name: "home" }, { replace: true, force: true });
+    void resumeDriveSyncInBackground();
+  } catch {
+    alert("生物辨識解鎖未完成，請改用密碼登入。");
+  }
 }
 
 function registerServiceWorker() {
@@ -341,7 +604,8 @@ async function beginDriveSetup() {
       state.route = {
         name: "unlock",
         message: securityEventMessage(remoteKeyPackage.securityMeta),
-        showForgotPassword: true
+        showForgotPassword: true,
+        allowBiometric: false
       };
       render();
       return;
@@ -405,12 +669,62 @@ function cancelDriveSetup() {
 
 async function save() {
   await setItem("appState", state.appState);
-  await setItem("vault", state.vault);
+  await saveLocalVault(state.vault);
   try {
     await saveEncryptedVaultEnvelope();
   } catch (error) {
     markDriveSyncIssue(error);
   }
+}
+
+async function ensureLocalVaultStorageKey() {
+  let key = await getItem("localVaultStorageKey");
+  if (!key) {
+    key = await createLocalStorageKey();
+    await setItem("localVaultStorageKey", key);
+  }
+  return key;
+}
+
+async function loadLocalVault() {
+  const plaintextVault = await getItem("vault");
+  if (plaintextVault) {
+    await saveLocalVault(plaintextVault);
+    return plaintextVault;
+  }
+  const envelope = await getItem("localVaultEnvelope");
+  if (!envelope) return null;
+  const key = await getItem("localVaultStorageKey");
+  if (!key) throw new Error("local-vault-key-missing");
+  return decryptLocalEnvelope(envelope, key);
+}
+
+async function saveLocalVault(vault) {
+  if (!vault) return;
+  const key = await ensureLocalVaultStorageKey();
+  const envelope = await encryptLocalEnvelope(vault, key, "local-vault");
+  await setItem("localVaultEnvelope", envelope);
+  await removeItem("vault");
+}
+
+async function loadLocalSnapshots() {
+  const plaintextSnapshots = await getItem("localSnapshots");
+  if (plaintextSnapshots) {
+    await saveLocalSnapshots(plaintextSnapshots);
+    return plaintextSnapshots;
+  }
+  const envelope = await getItem("localSnapshotsEnvelope");
+  if (!envelope) return [];
+  const key = await getItem("localVaultStorageKey");
+  if (!key) return [];
+  return decryptLocalEnvelope(envelope, key);
+}
+
+async function saveLocalSnapshots(snapshots) {
+  const key = await ensureLocalVaultStorageKey();
+  const envelope = await encryptLocalEnvelope(snapshots ?? [], key, "local-snapshots");
+  await setItem("localSnapshotsEnvelope", envelope);
+  await removeItem("localSnapshots");
 }
 
 async function commitVault(vault, options = {}) {
@@ -525,6 +839,27 @@ async function saveEncryptedVaultEnvelope() {
   return envelope;
 }
 
+async function verifySensitiveOperation(actionLabel) {
+  let keyPackage = null;
+  try {
+    keyPackage = await getCurrentKeyPackage();
+  } catch {
+    keyPackage = await getKeyPackage();
+  }
+  if (!keyPackage?.masterPasswordWrapper) {
+    return confirm(`「${actionLabel}」屬於敏感操作，但此裝置尚未設定密碼，無法進行密碼驗證。\n\n若此裝置只有本機資料，請確認周遭環境安全後再繼續。`);
+  }
+  const password = prompt(`「${actionLabel}」屬於敏感操作，請輸入密碼以繼續。`);
+  if (password === null) return false;
+  try {
+    await unwrapCurrentDek(password);
+    return true;
+  } catch {
+    alert("密碼不正確，已取消操作。");
+    return false;
+  }
+}
+
 async function uploadKeyPackageToDrive() {
   if (!state.appState?.googleDrive?.connected) return;
   const keyPackage = await getKeyPackage();
@@ -568,7 +903,6 @@ async function unlockExistingDriveVault(event) {
     state.dekBytes = dekBytes;
     state.vault = normalizeVault(pruneDeleted(vault));
     await setItem("keyPackage", keyPackage);
-    await setItem("vault", state.vault);
     await setItem(
       "trustedSession",
       await createTrustedSessionWithDek({
@@ -683,7 +1017,7 @@ async function syncNow(options = {}) {
       const merged = mergeVaults(state.vault, remoteVault, state.appState.deviceId);
       state.vault = merged.vault;
       conflicts = merged.conflicts;
-      await setItem("vault", state.vault);
+      await saveLocalVault(state.vault);
     }
     const syncedAt = new Date().toISOString();
     await uploadKeyPackageToDrive();
@@ -763,6 +1097,7 @@ async function resumeDriveSyncInBackground() {
 
 async function exportData() {
   if (!state.vault) return;
+  if (!(await verifySensitiveOperation("匯出備份檔"))) return;
   const exportedAt = new Date().toISOString();
   const payload = buildExportPayload(exportedAt);
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -781,12 +1116,13 @@ async function createLocalSnapshot(reason) {
     vault: structuredClone(state.vault)
   };
   state.localSnapshots = [snapshot, ...(state.localSnapshots ?? [])].slice(0, 3);
-  await setItem("localSnapshots", state.localSnapshots);
+  await saveLocalSnapshots(state.localSnapshots);
 }
 
 async function restoreLocalSnapshot(id) {
   const snapshot = state.localSnapshots.find((item) => item.id === id);
   if (!snapshot) return;
+  if (!(await verifySensitiveOperation("還原本機資料快照"))) return;
   if (!confirm(`確定要還原 ${formatDateTime(snapshot.createdAt)} 的本機快照嗎？\n目前資料會先自動建立一份快照，再還原到該時間點。`)) return;
   await createLocalSnapshot("還原前自動快照");
   state.vault = normalizeVault(pruneDeleted(snapshot.vault));
@@ -799,14 +1135,16 @@ async function restoreLocalSnapshot(id) {
 async function deleteLocalSnapshot(id) {
   const snapshot = state.localSnapshots.find((item) => item.id === id);
   if (!snapshot || !confirm("確定要刪除這份本機快照嗎？")) return;
+  if (!(await verifySensitiveOperation("刪除本機資料快照"))) return;
   state.localSnapshots = state.localSnapshots.filter((item) => item.id !== id);
-  await setItem("localSnapshots", state.localSnapshots);
+  await saveLocalSnapshots(state.localSnapshots);
   render();
 }
 
-function downloadLocalSnapshot(id) {
+async function downloadLocalSnapshot(id) {
   const snapshot = state.localSnapshots.find((item) => item.id === id);
   if (!snapshot) return;
+  if (!(await verifySensitiveOperation("下載本機資料快照"))) return;
   const payload = {
     fileType: "forget-me-not-vault-export",
     schemaVersion: 1,
@@ -821,6 +1159,7 @@ function downloadLocalSnapshot(id) {
 
 async function exportExcel() {
   if (!state.vault) return;
+  if (!(await verifySensitiveOperation("匯出 Excel"))) return;
   const exportedAt = new Date().toISOString();
   const blob = buildVaultXlsx(state.vault, exportedAt);
   downloadBlob(blob, `莫忘-資料匯出-${fileDateTime(exportedAt)}.xlsx`);
@@ -854,6 +1193,7 @@ async function importDataFile(event) {
   const file = input.files?.[0];
   input.value = "";
   if (!file) return;
+  if (!(await verifySensitiveOperation("匯入資料"))) return;
   try {
     const payload = JSON.parse(await file.text());
     const importedVault = readImportVault(payload);
@@ -943,6 +1283,7 @@ async function unlockWithMasterPassword(event) {
       currentVaultId: keyPackage.vaultId
     };
     await save();
+    await touchTrustedSessionNow({ force: true });
     navigate({ name: "home" }, { replace: true, force: true });
     void resumeDriveSyncInBackground();
   } catch {
@@ -1078,7 +1419,6 @@ async function resetCloudPasswordWithRecovery(event) {
     }
   };
   await setItem("keyPackage", updated.keyPackage);
-  await setItem("vault", state.vault);
   await setItem(
     "trustedSession",
     await createTrustedSessionWithDek({
@@ -1219,7 +1559,6 @@ async function applyDriveRevisionRecovery() {
     }
   };
   await setItem("keyPackage", updated.keyPackage);
-  await setItem("vault", state.vault);
   await setItem(
     "trustedSession",
     await createTrustedSessionWithDek({
@@ -1269,7 +1608,7 @@ async function logoutAllDevices(event) {
     await setItem("keyPackage", updatedKeyPackage);
     await uploadKeyPackageToDrive();
     await removeItem("trustedSession");
-    navigate({ name: "unlock", message: "已從所有裝置登出，請重新輸入密碼", showForgotPassword: true }, { replace: true, force: true });
+    navigate({ name: "unlock", message: "已從所有裝置登出，請重新輸入密碼", showForgotPassword: true, allowBiometric: false }, { replace: true, force: true });
   } catch {
     alert("目前密碼不正確，請再試一次");
   }
@@ -1527,6 +1866,7 @@ function historyRouteSnapshot(route = {}) {
     prefillName: route.prefillName,
     message: route.message,
     showForgotPassword: route.showForgotPassword,
+    allowBiometric: route.allowBiometric,
     scrollY: Number.isFinite(route.scrollY) ? route.scrollY : 0,
     sourcePersonId: route.sourcePersonId,
     familyMemberId: route.familyMemberId,
@@ -1553,6 +1893,7 @@ function render(options = {}) {
   app.innerHTML = `<main class="app route-${escapeAttr(state.route.name)} ${transitionClass}">${view()}</main>${updatePromptView()}`;
   bind();
   if (options.restoreScroll) restoreRouteScroll(state.route);
+  resetIdleLockTimer();
 }
 
 function routeTransitionClass(direction, fromRoute, toRoute) {
@@ -1823,7 +2164,7 @@ function detailView(person) {
     .map((field) => {
       const value = person.customValues.find((item) => item.fieldId === field.id)?.value;
       if (isEmptyCustomValue(value)) return "";
-      return detailGroup(field.name, `<p class="detail-value">${escapeHtml(formatCustomValue(field, value))}</p>`, "custom-detail-section");
+      return detailGroup(field.name, customDetailContent(field, value), "custom-detail-section");
     })
     .filter(Boolean)
     .join("");
@@ -1939,7 +2280,7 @@ function settingsView() {
     </section>
     ${installSettingsSection()}
     ${themeSettingsSection()}
-    ${gd.connected ? `<section class="panel stack"><h2 class="section-title">安全性</h2><button class="action-quiet" data-nav="changePassword">更改密碼</button><button class="action-quiet" data-nav="forgotPassword">忘記密碼</button><button class="action-quiet" data-nav="regenerateRecovery">重新產生救援碼</button><button class="danger" data-nav="logoutAllDevices">登出所有裝置</button></section>` : ""}
+      ${gd.connected ? securitySettingsSection() : ""}
     <section class="panel stack">
       <h2 class="section-title">資料管理</h2>
       ${storageWarningView()}
@@ -1973,6 +2314,21 @@ function settingsView() {
       </div>
     </section>
     ${bottomNav("settings")}
+  `;
+}
+
+function securitySettingsSection() {
+  const biometricEnabled = isBiometricUnlockEnabled();
+  return `
+    <section class="panel stack">
+      <h2 class="section-title">安全性</h2>
+      <p class="muted">生物辨識解鎖只會啟用於這台裝置，可用指紋、臉部辨識或螢幕鎖快速解鎖。</p>
+      <button class="action-quiet" data-nav="changePassword">更改密碼</button>
+      <button class="action-quiet" data-nav="forgotPassword">忘記密碼</button>
+      <button class="action-quiet" data-nav="regenerateRecovery">重新產生救援碼</button>
+      <button class="action-quiet" data-action="${biometricEnabled ? "disable-biometric-unlock" : "enable-biometric-unlock"}">${biometricEnabled ? "停用生物辨識解鎖" : "啟用生物辨識解鎖"}</button>
+      <button class="danger" data-nav="logoutAllDevices">登出所有裝置</button>
+    </section>
   `;
 }
 
@@ -2556,6 +2912,7 @@ function showRecoveryCodeView() {
 function unlockView() {
   const message = state.route.message ?? "請輸入密碼以繼續使用";
   const forgotPasswordButton = state.route.showForgotPassword ? `<button type="button" class="secondary" data-nav="forgotPassword">忘記密碼</button>` : "";
+  const biometricButton = isBiometricUnlockEnabled() && state.route.allowBiometric !== false ? `<button type="button" class="action-quiet" data-action="biometric-unlock">使用生物辨識解鎖</button>` : "";
   return `
     <section class="welcome">
       <div>
@@ -2567,6 +2924,7 @@ function unlockView() {
           <label>密碼</label>
           <input type="password" data-security-draft="password" autocomplete="current-password" />
         </div>
+        ${biometricButton}
         <button type="submit">登入 App</button>
         ${forgotPasswordButton}
       </form>
@@ -3117,6 +3475,7 @@ function customFieldAddForm() {
           <option value="text" ${draft.type === "text" ? "selected" : ""}>文字</option>
           <option value="number" ${draft.type === "number" ? "selected" : ""}>數字</option>
           <option value="date" ${draft.type === "date" ? "selected" : ""}>日期</option>
+          <option value="dateRange" ${draft.type === "dateRange" ? "selected" : ""}>日期區間</option>
           <option value="single" ${draft.type === "single" ? "selected" : ""}>單選</option>
           <option value="multi" ${draft.type === "multi" ? "selected" : ""}>多選</option>
         </select>
@@ -3151,6 +3510,25 @@ function customFieldAddForm() {
 function customFieldInput(field, person) {
   const current = person.customValues.find((item) => item.fieldId === field.id)?.value ?? "";
   const editing = state.route.activeCustomFieldEditId === field.id;
+  if (field.type === "dateRange") {
+    return `
+      <div class="inline-item custom-field-card">
+        <div class="field custom-field-main">
+          <div class="custom-field-header">
+            <label>${escapeHtml(field.name)}</label>
+            <button type="button" class="action-quiet" data-action="toggle-custom-field-edit" data-id="${field.id}">${editing ? "完成編輯" : "編輯自訂欄位"}</button>
+          </div>
+          <div class="stack">
+            ${dateRangeRows(current, true).map((row, index) => dateRangeEditorRow(field.id, row, index)).join("")}
+          </div>
+          <div class="actions compact-actions">
+            <button type="button" class="action-soft" data-action="add-custom-date-range-row" data-field-id="${field.id}">＋ 新增一筆</button>
+          </div>
+        </div>
+        ${editing ? customFieldActions(field) : ""}
+      </div>
+    `;
+  }
   if (isChoiceField(field)) {
     return `
       <div class="inline-item custom-field-card">
@@ -3176,6 +3554,19 @@ function customFieldInput(field, person) {
         <input type="${type}" data-custom-value="${field.id}" value="${escapeAttr(current)}" />
       </div>
       ${editing ? customFieldActions(field) : ""}
+    </div>
+  `;
+}
+
+function dateRangeEditorRow(fieldId, row, index) {
+  return `
+    <div class="inline-item custom-date-range-row">
+      <div class="row date-range-date-row">
+        <input type="date" data-custom-date-range="${fieldId}" data-index="${index}" data-prop="startDate" value="${escapeAttr(row.startDate ?? "")}" aria-label="開始日期" />
+        <input type="date" data-custom-date-range="${fieldId}" data-index="${index}" data-prop="endDate" value="${escapeAttr(row.endDate ?? "")}" aria-label="結束日期" />
+        <button type="button" class="danger compact-row-button" data-action="remove-custom-date-range-row" data-field-id="${fieldId}" data-index="${index}">刪除</button>
+      </div>
+      <textarea class="life-event-textarea" rows="1" data-custom-date-range="${fieldId}" data-index="${index}" data-prop="text" placeholder="說明文字">${escapeHtml(row.text ?? "")}</textarea>
     </div>
   `;
 }
@@ -3224,6 +3615,28 @@ function customFieldOptionEditor(field) {
       </div>
     </div>
   `;
+}
+
+function customDetailContent(field, value) {
+  if (field.type === "dateRange") {
+    const rows = cleanDateRangeValues(value);
+    return rows.map((row) => dateRangeDetailLine(row)).join("");
+  }
+  return `<p class="detail-value">${escapeHtml(formatCustomValue(field, value))}</p>`;
+}
+
+function dateRangeDetailLine(row) {
+  const period = formatDateRangePeriod(row);
+  return detailLine(period || "未填日期", row.text ?? "");
+}
+
+function formatDateRangePeriod(row) {
+  const start = row.startDate ? formatCustomValue({ type: "date" }, row.startDate) : "";
+  const end = row.endDate ? formatCustomValue({ type: "date" }, row.endDate) : "";
+  if (start && end) return `${start} ～ ${end}`;
+  if (start) return `${start} 起`;
+  if (end) return `至 ${end}`;
+  return "";
 }
 
 function brandLogo(variant) {
@@ -3391,6 +3804,21 @@ function bind() {
       ];
     });
   });
+  app.querySelectorAll("[data-custom-date-range]").forEach((el) => {
+    if (el.classList.contains("life-event-textarea")) autoResizeTextarea(el);
+    const update = () => {
+      if (!state.route.draft) return;
+      const fieldId = el.dataset.customDateRange;
+      const rows = dateRangeRows(getCustomValue(state.route.draft, fieldId), true);
+      const row = rows[Number(el.dataset.index)];
+      if (!row) return;
+      row[el.dataset.prop] = el.value;
+      setCustomValue(state.route.draft, fieldId, cleanDateRangeValues(rows));
+      if (el.classList.contains("life-event-textarea")) autoResizeTextarea(el);
+    };
+    el.addEventListener("input", update);
+    el.addEventListener("change", update);
+  });
   app.querySelectorAll("[data-search]").forEach((el) => {
     const updateSearch = () => {
       const params = normalizeSearchParams(state.route.params);
@@ -3444,6 +3872,9 @@ async function handleAction(event, el) {
   if (action === "apply-update") return applyUpdate();
   if (action === "check-version-update") return checkVersionUpdate();
   if (action === "set-theme") return setTheme(el.dataset.themeId);
+  if (action === "enable-biometric-unlock") return enableBiometricUnlock();
+  if (action === "disable-biometric-unlock") return disableBiometricUnlock();
+  if (action === "biometric-unlock") return unlockWithBiometric();
   if (action === "install-app") return installApp();
   if (action === "open-install-guide") return navigate({ name: "installGuide" });
   if (action === "dismiss-install-tip") return dismissInstallTip();
@@ -3520,6 +3951,8 @@ async function handleAction(event, el) {
   if (action === "cancel-rename-custom-field") return cancelRenameCustomField();
   if (action === "delete-custom-field") return deleteCustomFieldById(el.dataset.id);
   if (action === "toggle-custom-choice") return toggleCustomChoice(el.dataset.fieldId, el.dataset.option);
+  if (action === "add-custom-date-range-row") return addCustomDateRangeRow(el.dataset.fieldId);
+  if (action === "remove-custom-date-range-row") return removeCustomDateRangeRow(el.dataset.fieldId, Number(el.dataset.index));
   if (action === "add-custom-option") return addCustomOption(el.dataset.fieldId);
   if (action === "rename-custom-option") return renameCustomOption(el.dataset.fieldId, el.dataset.option);
   if (action === "delete-custom-option") return deleteCustomOption(el.dataset.fieldId, el.dataset.option);
@@ -3792,25 +4225,45 @@ function toggleSearchTag(id) {
 }
 
 function togglePersonGroupManage() {
-  state.route.personGroupManage = !state.route.personGroupManage;
+  const next = !state.route.personGroupManage;
+  state.route.personGroupManage = next;
+  if (next) {
+    state.route.personGroupNameEditMode = false;
+    state.route.editingTagName = null;
+  }
   state.route.newPersonGroupName ??= "";
   render();
 }
 
 function togglePersonGroupNameEditMode() {
-  state.route.personGroupNameEditMode = !state.route.personGroupNameEditMode;
+  const next = !state.route.personGroupNameEditMode;
+  state.route.personGroupNameEditMode = next;
+  if (next) {
+    state.route.personGroupManage = false;
+    state.route.newPersonGroupName = "";
+  }
   state.route.editingTagName = null;
   render();
 }
 
 function toggleInterestManage() {
-  state.route.interestManage = !state.route.interestManage;
+  const next = !state.route.interestManage;
+  state.route.interestManage = next;
+  if (next) {
+    state.route.interestNameEditMode = false;
+    state.route.editingTagName = null;
+  }
   state.route.newInterestName ??= "";
   render();
 }
 
 function toggleInterestNameEditMode() {
-  state.route.interestNameEditMode = !state.route.interestNameEditMode;
+  const next = !state.route.interestNameEditMode;
+  state.route.interestNameEditMode = next;
+  if (next) {
+    state.route.interestManage = false;
+    state.route.newInterestName = "";
+  }
   state.route.editingTagName = null;
   render();
 }
@@ -4165,6 +4618,31 @@ function toggleCustomChoice(fieldId, option) {
     const next = values.includes(option) ? values.filter((item) => item !== option) : [...values, option];
     setCustomValue(state.route.draft, fieldId, next);
   }
+  render();
+}
+
+function addCustomDateRangeRow(fieldId) {
+  if (!state.route.draft) return;
+  const rows = dateRangeRows(getCustomValue(state.route.draft, fieldId), false);
+  setCustomValue(state.route.draft, fieldId, [
+    ...rows,
+    {
+      id: `date-range-${crypto.randomUUID()}`,
+      startDate: "",
+      endDate: "",
+      text: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+  ]);
+  render();
+}
+
+function removeCustomDateRangeRow(fieldId, index) {
+  if (!state.route.draft) return;
+  const rows = dateRangeRows(getCustomValue(state.route.draft, fieldId), true);
+  const next = rows.filter((_, i) => i !== index);
+  setCustomValue(state.route.draft, fieldId, cleanDateRangeValues(next));
   render();
 }
 
@@ -4558,7 +5036,8 @@ function birthDatePart(birthDate, part) {
 }
 
 function formatSearchValue(value) {
-  if (Array.isArray(value)) return value.join(" ");
+  if (Array.isArray(value)) return value.map(formatSearchValue).join(" ");
+  if (value && typeof value === "object") return [value.startDate, value.endDate, value.text].map(formatSearchValue).join(" ");
   return String(value ?? "");
 }
 
@@ -4652,6 +5131,7 @@ function customDefsForPerson(personId) {
 }
 
 function formatCustomValue(field, value) {
+  if (field.type === "dateRange") return cleanDateRangeValues(value).map((row) => [formatDateRangePeriod(row), row.text].filter(Boolean).join(" ")).join("、");
   if (Array.isArray(value)) return value.join("、");
   if (field.type === "date" && value) return String(value).replaceAll("-", "/");
   return String(value);
@@ -5021,7 +5501,11 @@ function cleanLifeEvents(rows = []) {
 
 function cleanCustomValues(values = []) {
   return values
-    .map((item) => ({ ...item, value: Array.isArray(item.value) ? item.value.filter(Boolean) : item.value }))
+    .map((item) => {
+      const field = state.vault.customFieldDefs.find((field) => field.id === item.fieldId);
+      if (field?.type === "dateRange") return { ...item, value: cleanDateRangeValues(item.value) };
+      return { ...item, value: Array.isArray(item.value) ? item.value.filter(Boolean) : item.value };
+    })
     .filter((item) => !isEmptyCustomValue(item.value));
 }
 
@@ -5043,6 +5527,53 @@ function setCustomValue(person, fieldId, value) {
     ...customValues,
     { fieldId, value, updatedAt: new Date().toISOString(), updatedByDeviceId: state.appState.deviceId }
   ];
+}
+
+function dateRangeRows(value, includeBlank = false) {
+  const rows = Array.isArray(value) ? value : [];
+  const normalized = rows.map((row) => ({
+    id: row.id ?? `date-range-${crypto.randomUUID()}`,
+    startDate: row.startDate ?? "",
+    endDate: row.endDate ?? "",
+    text: row.text ?? "",
+    createdAt: row.createdAt ?? new Date().toISOString(),
+    updatedAt: row.updatedAt ?? new Date().toISOString()
+  }));
+  return normalized.length || !includeBlank
+    ? normalized
+    : [
+        {
+          id: `date-range-${crypto.randomUUID()}`,
+          startDate: "",
+          endDate: "",
+          text: "",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ];
+}
+
+function cleanDateRangeValues(value = []) {
+  const now = new Date().toISOString();
+  return dateRangeRows(value, false)
+    .map((row) => ({
+      ...row,
+      startDate: row.startDate ?? "",
+      endDate: row.endDate ?? "",
+      text: row.text?.trim() ?? "",
+      updatedAt: now
+    }))
+    .filter((row) => row.startDate || row.endDate || row.text)
+    .sort(compareDateRangeRows);
+}
+
+function compareDateRangeRows(a, b) {
+  const aDate = a.startDate || a.endDate || "";
+  const bDate = b.startDate || b.endDate || "";
+  if (aDate && bDate && aDate !== bDate) return bDate.localeCompare(aDate);
+  if (aDate && !bDate) return -1;
+  if (!aDate && bDate) return 1;
+  return new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime();
 }
 
 function cleanCustomOptions(options = []) {

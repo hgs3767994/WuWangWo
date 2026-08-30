@@ -183,7 +183,13 @@ function defaultValue(items = []) {
 }
 
 function formatCellValue(value) {
-  if (Array.isArray(value)) return value.join("、");
+  if (Array.isArray(value)) return value.map(formatCellValue).filter(Boolean).join("、");
+  if (value && typeof value === "object") {
+    const start = value.startDate ? String(value.startDate).replaceAll("-", "/") : "";
+    const end = value.endDate ? String(value.endDate).replaceAll("-", "/") : "";
+    const period = start && end ? `${start} ～ ${end}` : start ? `${start} 起` : end ? `至 ${end}` : "";
+    return [period, value.text].filter(Boolean).join(" ");
+  }
   return value ?? "";
 }
 
