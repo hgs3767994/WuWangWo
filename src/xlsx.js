@@ -26,10 +26,11 @@ function buildSheets(vault) {
     {
       name: "人物",
       rows: [
-        ["人物ID", "姓名", "生日", "主要電話", "主要地址", "人物群組", "興趣喜好", "是否封存", "其它備註", "建立時間", "更新時間"],
+        ["人物ID", "姓名", "暱稱", "生日", "主要電話", "主要地址", "人物群組", "興趣喜好", "是否封存", "其它備註", "建立時間", "更新時間"],
         ...people.map((person) => [
           person.id,
           person.name,
+          person.nickname ?? "",
           person.birthDate,
           defaultValue(person.phones),
           defaultValue(person.addresses),
@@ -129,7 +130,7 @@ function buildSheets(vault) {
       ]
     },
     {
-      name: "重大事件",
+      name: "重要記事",
       rows: [
         ["人物ID", "姓名", "日期", "內容", "建立時間", "更新時間"],
         ...people.flatMap((person) => (person.lifeEvents ?? []).map((event) => [

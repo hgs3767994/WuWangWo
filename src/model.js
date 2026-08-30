@@ -67,6 +67,7 @@ export function createPerson(deviceId, input) {
   return {
     id: `person-${crypto.randomUUID()}`,
     name: input.name.trim(),
+    nickname: input.nickname?.trim() || "",
     nationalId: input.nationalId?.trim() || "",
     birthDate: input.birthDate || "",
     phones: input.phones ?? [],

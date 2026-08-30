@@ -76,7 +76,8 @@ const THEME_OPTIONS = [
   { id: "business-blue", name: "商務藍", colors: ["#1E293B", "#2563EB", "#F8FAFC"] },
   { id: "gentle-pink", name: "溫柔粉", colors: ["#8B5E83", "#D88FA3", "#FFF7F8"] },
   { id: "warm-amber", name: "暖琥珀", colors: ["#292D32", "#C58B3A", "#FFFFFF"] },
-  { id: "memory-paper", name: "回憶灰", colors: ["#667887", "#A77A52", "#F3EEE4"] }
+  { id: "memory-paper", name: "回憶灰", colors: ["#667887", "#A77A52", "#F3EEE4"] },
+  { id: "midnight-black", name: "深夜黑", colors: ["#E5E7EB", "#60A5FA", "#050505"] }
 ];
 let state = {
   appState: null,
@@ -1411,6 +1412,7 @@ function personDraftSignature(draft) {
   return JSON.stringify({
     id: normalized.id,
     name: normalized.name ?? "",
+    nickname: normalized.nickname ?? "",
     nationalId: normalized.nationalId ?? "",
     birthDate: normalized.birthDate ?? "",
     phones: normalized.phones ?? [],
@@ -1648,6 +1650,7 @@ function view() {
   if (state.route.name === "new") return personFormView();
   if (state.route.name === "edit") return personFormView(getPerson(state.route.id));
   if (state.route.name === "detail") return detailView(getPerson(state.route.id));
+  if (state.route.name === "importantNotes") return importantNotesView(getPerson(state.route.id));
   if (state.route.name === "selectFamilyMember") return selectFamilyMemberView();
   if (state.route.name === "settings") return settingsView();
   if (state.route.name === "syncConflicts") return syncConflictsView();
@@ -1720,7 +1723,7 @@ function searchView() {
     <section class="panel search-panel">
       <div class="field">
         <label>依輸入文字搜尋（可使用空格增加搜尋條件）</label>
-        <input data-search="text" placeholder="姓名、其它、嗜好品、重大事件、自訂欄位" value="${escapeAttr(params.text)}" />
+        <input data-search="text" placeholder="搜尋所有欄位、標籤、重要記事…" value="${escapeAttr(params.text)}" />
       </div>
       <div class="field">
         <label>依地址搜尋</label>
@@ -1811,6 +1814,10 @@ function detailView(person) {
   const favoriteItems = person.favoriteItems ?? [];
   const familyMembers = sortFamilyMembers(person.familyMembers ?? []);
   const lifeEvents = sortLifeEvents(person.lifeEvents ?? []);
+  const visibleLifeEvents = lifeEvents.slice(0, 3);
+  const moreLifeEventsButton = lifeEvents.length > 3
+    ? `<button type="button" class="action-quiet section-header-button" data-nav="importantNotes" data-id="${escapeAttr(person.id)}">顯示更多重要記事</button>`
+    : "";
   const basicLines = basicDetailLines(person);
   const customSections = customDefsForPerson(person.id)
     .map((field) => {
@@ -1826,7 +1833,7 @@ function detailView(person) {
     tags.length ? detailGroup("興趣喜好", `<div class="chip-list">${tags.map((tag) => `<span class="chip selected">${tagLabel(tag)}</span>`).join("")}</div>`) : "",
     favoriteItems.length ? detailGroup("嗜好品", `<div class="chip-list">${favoriteItems.map((item) => `<span class="chip selected">${escapeHtml(item.value)}</span>`).join("")}</div>`) : "",
     familyMembers.length ? detailGroup("家族成員", familyMembers.map((member) => familyMemberLine(person, member)).join("")) : "",
-    lifeEvents.length ? detailGroup("重大事件", lifeEvents.map(lifeEventLine).join("")) : "",
+    lifeEvents.length ? detailGroup("重要記事", visibleLifeEvents.map(lifeEventLine).join(""), "", moreLifeEventsButton) : "",
     customSections,
     person.note ? detailGroup("其它備註", `<p class="detail-value">${escapeHtml(person.note).replaceAll("\n", "<br>")}</p>`) : ""
   ].filter(Boolean).join("");
@@ -1857,6 +1864,21 @@ function detailView(person) {
       <button class="danger" data-action="delete-person" data-id="${person.id}">刪除人物</button>
       <button class="warning" data-action="archive-person" data-id="${person.id}" ${person.archivedAt ? "disabled" : ""}>封存</button>
     </div>
+  `;
+}
+
+function importantNotesView(person) {
+  if (!person) return notFoundView();
+  const lifeEvents = sortLifeEvents(person.lifeEvents ?? []);
+  return `
+    <header class="topbar topbar-centered">
+      <button class="secondary" data-action="important-notes-back">返回</button>
+      <h1 class="section-title">重要記事</h1>
+      <span></span>
+    </header>
+    <section class="panel section detail-panel">
+      ${lifeEvents.length ? detailGroup(person.name, lifeEvents.map(lifeEventLine).join("")) : `<p class="muted">尚未新增重要記事。</p>`}
+    </section>
   `;
 }
 
@@ -2669,6 +2691,7 @@ function familyMemberLine(sourcePerson, member) {
 
 function basicDetailLines(person) {
   return [
+    person.nickname ? detailLine("暱稱", person.nickname) : "",
     person.birthDate ? detailLine("生日", person.birthDate) : "",
     person.nationalId ? detailLine("身分證字號", person.nationalId, `<button class="action-quiet" data-copy="${escapeAttr(person.nationalId)}">複製</button>`) : "",
     ...((person.phones ?? []).length
@@ -2716,6 +2739,7 @@ function nameField(value) {
 function basicFieldsEditor(d) {
   const expanded = Boolean(state.route.moreBasicFieldsExpanded);
   const fields = [
+    { key: "nickname", filled: Boolean(d.nickname), html: inputField("暱稱", "nickname", d.nickname) },
     { key: "birthDate", filled: Boolean(d.birthDate), html: inputField("生日", "birthDate", d.birthDate, "date") },
     { key: "nationalId", filled: Boolean(d.nationalId), html: inputField("身分證字號", "nationalId", d.nationalId) },
     { key: "phones", filled: hasListValue(d.phones), html: listEditor("電話", "phones", d.phones, ["手機", "家裡", "公司", "其它"], "電話號碼") },
@@ -2867,13 +2891,15 @@ function addressDetailValue(row) {
 
 function personGroupEditor(selectedIds) {
   const managing = Boolean(state.route.personGroupManage);
+  const nameEditing = Boolean(state.route.personGroupNameEditMode);
   return `
     <section class="panel">
       <h2 class="section-title">人物群組</h2>
-      <div class="chip-list">${state.vault.personGroupTags.map((tag) => tagOption(tag, selectedIds.includes(tag.id), managing, "toggle-person-group", "remove-person-group")).join("")}</div>
+      <div class="chip-list">${state.vault.personGroupTags.map((tag) => nameEditing ? tagNameEditOption(tag, "personGroup") : tagOption(tag, selectedIds.includes(tag.id), managing, "toggle-person-group", "remove-person-group")).join("")}</div>
       ${managing ? personGroupManageForm() : ""}
       <div class="actions">
         <button type="button" class="action-soft" data-action="toggle-person-group-manage">${managing ? "完成編輯" : "新增/移除人物群組"}</button>
+        <button type="button" class="action-quiet" data-action="toggle-person-group-name-edit-mode">${nameEditing ? "完成名稱編輯" : "編輯標籤名稱"}</button>
         <button type="button" class="action-quiet" data-action="restore-default-person-groups">恢復預設人物群組</button>
       </div>
     </section>
@@ -2903,15 +2929,31 @@ function tagOption(tag, selected, managing, toggleAction, removeAction) {
   `;
 }
 
+function tagNameEditOption(tag, kind) {
+  const editing = state.route.editingTagName?.kind === kind && state.route.editingTagName.id === tag.id;
+  return `
+    <span class="tag-option tag-name-edit-option">
+      ${
+        editing
+          ? `<input class="tag-name-input" data-tag-rename="${kind}" data-id="${tag.id}" value="${escapeAttr(state.route.editingTagName.value ?? tag.name)}" />`
+          : `<span class="chip inert">${tagLabel(tag)}</span>`
+      }
+      ${tag.isDefault ? "" : `<button type="button" class="action-quiet mini" data-action="${editing ? `finish-${kind}-tag-rename` : `start-${kind}-tag-rename`}" data-id="${tag.id}">${editing ? "完成" : "編輯"}</button>`}
+    </span>
+  `;
+}
+
 function interestEditor(selectedIds) {
   const managing = Boolean(state.route.interestManage);
+  const nameEditing = Boolean(state.route.interestNameEditMode);
   return `
     <section class="panel">
       <h2 class="section-title">興趣喜好</h2>
-      <div class="chip-list">${state.vault.interestTags.map((tag) => interestOption(tag, selectedIds.includes(tag.id), managing)).join("")}</div>
+      <div class="chip-list">${state.vault.interestTags.map((tag) => nameEditing ? tagNameEditOption(tag, "interest") : interestOption(tag, selectedIds.includes(tag.id), managing)).join("")}</div>
       ${managing ? interestManageForm() : ""}
       <div class="actions">
         <button type="button" class="${managing ? "action-soft" : "action-soft"}" data-action="toggle-interest-manage">${managing ? "完成編輯" : "新增/移除興趣喜好"}</button>
+        <button type="button" class="action-quiet" data-action="toggle-interest-name-edit-mode">${nameEditing ? "完成名稱編輯" : "編輯標籤名稱"}</button>
         <button type="button" class="action-quiet" data-action="restore-default-interests">恢復預設興趣喜好</button>
       </div>
     </section>
@@ -3010,20 +3052,20 @@ function lifeEventsEditor(rows) {
   const deleting = Boolean(state.route.lifeEventDeleteMode);
   return `
     <section class="panel">
-      <h2 class="section-title">重大事件</h2>
+      <h2 class="section-title">重要記事</h2>
       <div class="stack">
         ${rows.length ? rows.map((row, index) => `
           <div class="inline-item">
             <div class="row life-event-row ${deleting ? "has-delete" : ""}">
               <input class="date-input" type="date" data-life-event="${index}" data-prop="date" value="${escapeAttr(row.date)}" />
-              <textarea class="life-event-textarea" rows="2" data-life-event="${index}" data-prop="text" placeholder="事件內容">${escapeHtml(row.text)}</textarea>
+              <textarea class="life-event-textarea" rows="1" data-life-event="${index}" data-prop="text" placeholder="記事內容">${escapeHtml(row.text)}</textarea>
               ${deleting ? `<button type="button" class="danger compact-row-button" data-action="remove-life-event" data-index="${index}">刪除</button>` : ""}
             </div>
           </div>
-        `).join("") : `<p class="muted">尚未新增重大事件</p>`}
+        `).join("") : `<p class="muted">尚未新增重要記事</p>`}
       </div>
       <div class="actions">
-        <button type="button" class="action-soft" data-action="add-life-event">＋ 新增重大事件</button>
+        <button type="button" class="action-soft" data-action="add-life-event">＋ 新增重要記事</button>
         <button type="button" class="action-quiet" data-action="toggle-life-event-delete-mode">${deleting ? "完成編輯" : "刪除欄位"}</button>
       </div>
     </section>
@@ -3192,9 +3234,9 @@ function brandLogo(variant) {
   `;
 }
 
-function detailGroup(title, content, className = "") {
+function detailGroup(title, content, className = "", headerAction = "") {
   if (!content) return "";
-  return `<section class="detail-section ${className}"><h2 class="section-title">${escapeHtml(title)}</h2>${content}</section>`;
+  return `<section class="detail-section ${className}"><div class="detail-section-header"><h2 class="section-title">${escapeHtml(title)}</h2>${headerAction}</div>${content}</section>`;
 }
 
 function detailLine(label, value = "", action = "", className = "") {
@@ -3260,6 +3302,15 @@ function bind() {
   app.querySelectorAll("[data-route-field]").forEach((el) => {
     el.addEventListener("input", () => {
       state.route[el.dataset.routeField] = el.value;
+    });
+  });
+  app.querySelectorAll("[data-tag-rename]").forEach((el) => {
+    el.addEventListener("input", () => {
+      state.route.editingTagName = {
+        kind: el.dataset.tagRename,
+        id: el.dataset.id,
+        value: el.value
+      };
     });
   });
   app.querySelectorAll("[data-custom-draft]").forEach((el) => {
@@ -3411,6 +3462,7 @@ async function handleAction(event, el) {
   if (action === "download-local-snapshot") return downloadLocalSnapshot(el.dataset.id);
   if (action === "open-detail") return navigate(detailRoute(el.dataset.id));
   if (action === "detail-back") return navigateBackFromDetail();
+  if (action === "important-notes-back") return navigateBack(detailRoute(state.route.id));
   if (action === "cancel-form") return navigateBack(state.route.id ? detailRoute(state.route.id) : { name: "home" });
   if (action === "edit-person") return navigate({ name: "edit", id: el.dataset.id, returnTo: state.route.returnTo });
   if (action === "toggle-more-basic-fields") return toggleMoreBasicFields();
@@ -3443,6 +3495,9 @@ async function handleAction(event, el) {
   if (action === "confirm-add-person-group") return addPersonGroup();
   if (action === "remove-person-group") return removePersonGroup(el.dataset.id);
   if (action === "restore-default-person-groups") return restoreDefaultPersonGroups();
+  if (action === "toggle-person-group-name-edit-mode") return togglePersonGroupNameEditMode();
+  if (action === "start-personGroup-tag-rename") return startTagRename("personGroup", el.dataset.id);
+  if (action === "finish-personGroup-tag-rename") return finishTagRename("personGroup", el.dataset.id);
   if (action === "toggle-interest") return toggleInterest(el.dataset.id);
   if (action === "search-tag") return toggleSearchTag(el.dataset.id);
   if (action === "toggle-interest-manage") return toggleInterestManage();
@@ -3450,6 +3505,9 @@ async function handleAction(event, el) {
   if (action === "cancel-interest-manage") return cancelInterestManage();
   if (action === "remove-interest") return removeInterest(el.dataset.id);
   if (action === "restore-default-interests") return restoreDefaultInterests();
+  if (action === "toggle-interest-name-edit-mode") return toggleInterestNameEditMode();
+  if (action === "start-interest-tag-rename") return startTagRename("interest", el.dataset.id);
+  if (action === "finish-interest-tag-rename") return finishTagRename("interest", el.dataset.id);
   if (action === "toggle-custom-field-add") return toggleCustomFieldAdd();
   if (action === "toggle-custom-field-edit") return toggleCustomFieldEdit(el.dataset.id);
   if (action === "add-custom-field-draft-option") return addCustomFieldDraftOption();
@@ -3563,6 +3621,7 @@ async function savePersonForm(event) {
   const person = {
     ...draft,
     name: draft.name.trim(),
+    nickname: draft.nickname.trim(),
     nationalId: draft.nationalId.trim(),
     note: draft.note.trim(),
     phones: cleanList(draft.phones),
@@ -3737,9 +3796,21 @@ function togglePersonGroupManage() {
   render();
 }
 
+function togglePersonGroupNameEditMode() {
+  state.route.personGroupNameEditMode = !state.route.personGroupNameEditMode;
+  state.route.editingTagName = null;
+  render();
+}
+
 function toggleInterestManage() {
   state.route.interestManage = !state.route.interestManage;
   state.route.newInterestName ??= "";
+  render();
+}
+
+function toggleInterestNameEditMode() {
+  state.route.interestNameEditMode = !state.route.interestNameEditMode;
+  state.route.editingTagName = null;
   render();
 }
 
@@ -3747,6 +3818,48 @@ function cancelInterestManage() {
   state.route.interestManage = false;
   state.route.newInterestName = "";
   render();
+}
+
+function startTagRename(kind, id) {
+  const tag = findEditableTag(kind, id);
+  if (!tag) return;
+  state.route.editingTagName = { kind, id, value: tag.name };
+  render();
+}
+
+async function finishTagRename(kind, id) {
+  const tag = findEditableTag(kind, id);
+  if (!tag) return;
+  const cleanName = (state.route.editingTagName?.kind === kind && state.route.editingTagName?.id === id ? state.route.editingTagName.value : tag.name)?.trim() ?? "";
+  const label = kind === "personGroup" ? "人物群組" : "興趣喜好";
+  if (!cleanName) {
+    alert(`${label}名稱不可空白`);
+    return;
+  }
+  const tags = tagCollection(kind);
+  if (tags.some((item) => item.id !== id && item.name === cleanName)) {
+    alert(`同名${label}已存在`);
+    return;
+  }
+  const now = new Date().toISOString();
+  const key = kind === "personGroup" ? "personGroupTags" : "interestTags";
+  state.route.editingTagName = null;
+  await commitVault({
+    ...state.vault,
+    [key]: state.vault[key].map((item) =>
+      item.id === id ? { ...item, name: cleanName, updatedAt: now, updatedByDeviceId: state.appState.deviceId } : item
+    )
+  });
+}
+
+function findEditableTag(kind, id) {
+  const tag = tagCollection(kind).find((item) => item.id === id);
+  if (!tag || tag.isDefault) return null;
+  return tag;
+}
+
+function tagCollection(kind) {
+  return kind === "personGroup" ? state.vault.personGroupTags : state.vault.interestTags;
 }
 
 async function addPersonGroup() {
@@ -4341,15 +4454,7 @@ function searchPeople(params) {
   const birthYear = normalizedParams.birthYear;
   const birthMonth = normalizedParams.birthMonth;
   const matched = visiblePeople(state.vault.people).filter((person) => {
-    const searchableText = [
-      person.name,
-      person.note,
-      ...(person.favoriteItems ?? []).map((item) => item.value),
-      ...(person.lifeEvents ?? []).map((event) => event.text),
-      ...person.customValues.map((value) => formatSearchValue(value.value))
-    ]
-      .join(" ")
-      .toLowerCase();
+    const searchableText = searchablePersonText(person);
     const textMatch =
       !textTokens.length ||
       textTokens.every((token) => searchableText.includes(token));
@@ -4367,6 +4472,33 @@ function searchPeople(params) {
     if (aName !== bName) return aName ? -1 : 1;
     return sortPeople([a, b])[0].id === a.id ? -1 : 1;
   });
+}
+
+function searchablePersonText(person) {
+  const groupNames = (person.personGroupTagIds ?? []).map((id) => state.vault.personGroupTags.find((tag) => tag.id === id)?.name ?? "");
+  const interestNames = (person.interestTagIds ?? []).map((id) => state.vault.interestTags.find((tag) => tag.id === id)?.name ?? "");
+  const customFields = customDefsForPerson(person.id);
+  const customFieldText = (person.customValues ?? []).flatMap((value) => {
+    const field = customFields.find((item) => item.id === value.fieldId);
+    return [field?.name ?? "", formatSearchValue(value.value)];
+  });
+  return [
+    person.name,
+    person.nickname,
+    person.birthDate,
+    person.nationalId,
+    person.note,
+    ...(person.phones ?? []).flatMap((phone) => [phone.label, phone.value]),
+    ...(person.addresses ?? []).flatMap((address) => [address.label, address.city, address.district, address.detail, address.value]),
+    ...groupNames,
+    ...interestNames,
+    ...(person.favoriteItems ?? []).map((item) => item.value),
+    ...(person.familyMembers ?? []).flatMap((member) => [member.relationship, member.name]),
+    ...(person.lifeEvents ?? []).flatMap((event) => [event.date, event.text]),
+    ...customFieldText
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 function hasSearchCriteria(params) {
@@ -4739,6 +4871,7 @@ function normalizeDraft(draft) {
   return {
     ...draft,
     nationalId: draft.nationalId ?? "",
+    nickname: draft.nickname ?? "",
     birthDate: draft.birthDate ?? "",
     phones: draft.phones?.length ? draft.phones : [],
     addresses: draft.addresses?.length ? draft.addresses : [],
