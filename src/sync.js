@@ -1,7 +1,11 @@
 import { DEFAULT_INTEREST_TAGS, DEFAULT_PERSON_GROUP_TAGS } from "./model.js";
 
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function byId(items) {
-  return new Map(items.map((item) => [item.id, item]));
+  return new Map(asArray(items).filter((item) => item?.id).map((item) => [item.id, item]));
 }
 
 function newer(a, b) {
@@ -10,7 +14,7 @@ function newer(a, b) {
 
 function uniqueBy(items, keyFn) {
   const seen = new Set();
-  return items.filter((item) => {
+  return asArray(items).filter((item) => {
     const key = keyFn(item);
     if (seen.has(key)) return false;
     seen.add(key);
@@ -40,10 +44,10 @@ function isTombstoned(tombstones, type, id) {
 }
 
 function mergeNamedTags(localItems = [], remoteItems = []) {
-  const tagsById = byId(localItems);
+  const tagsById = byId(asArray(localItems));
   const idRedirects = new Map();
 
-  for (const remote of remoteItems) {
+  for (const remote of asArray(remoteItems).filter((tag) => tag?.id && tag?.name)) {
     const sameId = tagsById.get(remote.id);
     if (sameId) {
       tagsById.set(remote.id, newer(sameId, remote));
@@ -119,7 +123,7 @@ function canonicalDefaultTags(tags, defaultTags, tombstones, tombstoneType, devi
 
 function rewriteInterestIds(person, redirects, validIds = null) {
   const ids = uniqueBy(
-    (person.interestTagIds ?? []).map((id) => resolveRedirect(id, redirects)).map((id) => ({ id })),
+    asArray(person.interestTagIds).map((id) => resolveRedirect(id, redirects)).map((id) => ({ id })),
     (item) => item.id
   ).map((item) => item.id);
   return {
@@ -130,7 +134,7 @@ function rewriteInterestIds(person, redirects, validIds = null) {
 
 function rewritePersonGroupIds(person, redirects, validIds = null) {
   const ids = uniqueBy(
-    (person.personGroupTagIds ?? []).map((id) => resolveRedirect(id, redirects)).map((id) => ({ id })),
+    asArray(person.personGroupTagIds).map((id) => resolveRedirect(id, redirects)).map((id) => ({ id })),
     (item) => item.id
   ).map((item) => item.id);
   return {
@@ -164,8 +168,8 @@ function normalizeCustomValues(values = []) {
 }
 
 function mergeCustomValues(localValues = [], remoteValues = []) {
-  const localList = normalizeCustomValues(localValues);
-  const remoteList = normalizeCustomValues(remoteValues);
+  const localList = normalizeCustomValues(localValues).filter((item) => item?.fieldId);
+  const remoteList = normalizeCustomValues(remoteValues).filter((item) => item?.fieldId);
   const values = new Map(localList.map((item) => [item.fieldId, item]));
   remoteList.forEach((remote) => {
     const local = values.get(remote.fieldId);
@@ -233,9 +237,9 @@ export function mergeVaults(localVault, remoteVault, deviceId) {
   const combinedGroupRedirects = new Map([...groupIdRedirects, ...normalizedPersonGroups.redirects]);
   const validInterestIds = new Set(normalizedInterests.tags.map((tag) => tag.id));
   const validGroupIds = new Set(normalizedPersonGroups.tags.map((tag) => tag.id));
-  const people = byId((localVault.people ?? []).map((person) => rewritePersonTagIds(person, combinedInterestRedirects, combinedGroupRedirects, validInterestIds, validGroupIds)));
+  const people = byId(asArray(localVault.people).map((person) => rewritePersonTagIds(person, combinedInterestRedirects, combinedGroupRedirects, validInterestIds, validGroupIds)));
 
-  for (const remotePersonRaw of remoteVault.people ?? []) {
+  for (const remotePersonRaw of asArray(remoteVault.people)) {
     const remotePerson = rewritePersonTagIds(remotePersonRaw, combinedInterestRedirects, combinedGroupRedirects, validInterestIds, validGroupIds);
     const localPerson = people.get(remotePerson.id);
     if (localPerson) people.set(remotePerson.id, mergePerson(localPerson, remotePerson, conflicts));

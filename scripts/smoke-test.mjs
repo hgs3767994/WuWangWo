@@ -65,6 +65,7 @@ function testSyncMerge() {
   assert(result.vault.interestTags.filter((item) => item.name === "☕ 咖啡").length === 1, "same-name interest tags should merge");
   assert(result.vault.interestTags.find((item) => item.id === "default-coffee")?.isDefault, "same-name interest tag should be absorbed into the default tag");
   assert(result.vault.people[0].interestTagIds.length === 1 && result.vault.people[0].interestTagIds[0] === "default-coffee", "person interest ids should be redirected");
+  assert(!result.vault.people[0].interestTagIds.includes("interest-missing"), "missing interest ids should be removed");
   assert(result.conflicts.length === 1 && result.conflicts[0].field === "birthDate", "birthDate should be the remaining user-facing conflict");
   assert(result.vault.syncMeta.revision === 6, "revision should increment from max revision");
 }

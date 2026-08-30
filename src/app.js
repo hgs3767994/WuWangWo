@@ -728,8 +728,13 @@ async function saveLocalSnapshots(snapshots) {
 }
 
 async function commitVault(vault, options = {}) {
-  await createLocalSnapshot("修改前自動快照");
-  state.vault = touchVault(normalizeVault(vault), state.appState.deviceId);
+  const nextVault = normalizeVault(vault);
+  try {
+    await createLocalSnapshot("修改前自動快照");
+  } catch (error) {
+    console.warn("建立本機快照失敗，已略過此次快照。", error);
+  }
+  state.vault = touchVault(nextVault, state.appState.deviceId);
   markLocalVaultChanged();
   await save();
   if (options.render !== false) render();
@@ -1107,15 +1112,16 @@ async function exportData() {
 
 async function createLocalSnapshot(reason) {
   if (!state.vault) return;
+  const vault = normalizeVault(state.vault);
   const createdAt = new Date().toISOString();
   const snapshot = {
     id: `snapshot-${crypto.randomUUID()}`,
     reason,
     createdAt,
-    peopleCount: state.vault.people.length,
-    vault: structuredClone(state.vault)
+    peopleCount: vault.people.length,
+    vault: structuredClone(vault)
   };
-  state.localSnapshots = [snapshot, ...(state.localSnapshots ?? [])].slice(0, 3);
+  state.localSnapshots = [snapshot, ...asArray(state.localSnapshots)].slice(0, 3);
   await saveLocalSnapshots(state.localSnapshots);
 }
 
@@ -5309,10 +5315,10 @@ function pruneDeleted(vault) {
   };
 }
 
-function normalizeVault(vault) {
+function normalizeVault(vault = {}) {
   const now = new Date().toISOString();
-  const tombstones = vault.tombstones ?? [];
-  const normalizedInterestTags = (vault.interestTags ?? []).map((tag) => {
+  const tombstones = asArray(vault.tombstones);
+  const normalizedInterestTags = asArray(vault.interestTags).map((tag) => {
     if (!tag.emoji) return tag;
     const name = tag.name.startsWith(tag.emoji) ? tag.name : `${tag.emoji} ${tag.name}`;
     const { emoji, ...rest } = tag;
@@ -5331,8 +5337,8 @@ function normalizeVault(vault) {
     ),
     personGroupTags: normalizedPersonGroups.tags,
     interestTags: normalizedInterests.tags,
-    customFieldDefs: vault.customFieldDefs ?? [],
-    deletedItems: vault.deletedItems ?? [],
+    customFieldDefs: asArray(vault.customFieldDefs),
+    deletedItems: asArray(vault.deletedItems),
     tombstones,
     syncMeta: {
       updatedAt: vault.syncMeta?.updatedAt ?? now,
@@ -5348,6 +5354,9 @@ function getPerson(id) {
 
 function normalizeTagCollection(tags, defaultTags, tombstones, tombstoneType, updatedAt) {
   if (!tags) return { tags: defaultTags.map((tag) => ({ ...tag })), redirects: new Map() };
+  tags = asArray(tags)
+    .map((tag) => normalizeTag(tag, tombstoneType, updatedAt))
+    .filter((tag) => tag.id && tag.name);
   const redirects = new Map();
   const defaultIds = new Set(defaultTags.map((tag) => tag.id));
   const output = [];
@@ -5385,6 +5394,20 @@ function normalizeTagCollection(tags, defaultTags, tombstones, tombstoneType, up
   });
 
   return { tags: output, redirects };
+}
+
+function normalizeTag(tag, tombstoneType, fallbackTime) {
+  const source = tag && typeof tag === "object" ? tag : { name: tag };
+  const prefix = tombstoneType === "personGroupTag" ? "person-group" : "interest";
+  return {
+    ...source,
+    id: asString(source.id) || `${prefix}-${crypto.randomUUID()}`,
+    name: asString(source.name),
+    isDefault: Boolean(source.isDefault),
+    createdAt: normalizeTimestamp(source.createdAt, fallbackTime),
+    updatedAt: normalizeTimestamp(source.updatedAt, fallbackTime),
+    updatedByDeviceId: asString(source.updatedByDeviceId || "imported")
+  };
 }
 
 function isTagTombstoned(tombstones, type, id) {
