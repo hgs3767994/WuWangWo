@@ -3179,7 +3179,7 @@ function basicFieldsEditor(d) {
     { key: "phones", filled: hasListValue(d.phones), html: listEditor("電話", "phones", d.phones, ["手機", "家裡", "公司", "其它"], "電話號碼") },
     { key: "addresses", filled: hasListValue(d.addresses), html: listEditor("地址", "addresses", d.addresses, ["住家", "公司", "其它"], "地址") }
   ];
-  const visibleFields = expanded ? sortMoreBasicFields(fields) : fields.filter((field) => field.filled);
+  const visibleFields = expanded ? fields : fields.filter((field) => field.filled);
   return `
     <section class="more-fields-toggle">
       <span>${expanded ? "收起空白欄位" : "顯示更多欄位"}</span>
@@ -3191,10 +3191,6 @@ function basicFieldsEditor(d) {
 
 function hasListValue(rows = []) {
   return rows.some((row) => String(row.value ?? "").trim());
-}
-
-function sortMoreBasicFields(fields) {
-  return [...fields].sort((a, b) => Number(a.filled) - Number(b.filled));
 }
 
 function inputField(label, field, value, type = "text") {
