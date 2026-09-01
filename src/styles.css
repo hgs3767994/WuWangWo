@@ -344,6 +344,23 @@ button.action-quiet:active {
   filter: brightness(0.98);
 }
 
+button.biometric-button {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+button.biometric-button:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+
+button.biometric-button:active {
+  filter: brightness(0.96);
+}
+
 button.danger {
   background: var(--danger);
 }
@@ -791,6 +808,34 @@ button:focus-visible,
 .update-prompt button {
   background: var(--accent);
   color: var(--text-on-accent);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.modal-card {
+  width: min(100%, 420px);
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-strong);
+}
+
+.modal-actions {
+  justify-content: center;
+}
+
+.modal-actions button {
+  min-width: 112px;
 }
 
 .field {

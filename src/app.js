@@ -312,13 +312,14 @@ function relyingPartyId() {
 }
 
 async function enableBiometricUnlock() {
+  const enablingFromUnlock = state.route?.name === "unlock";
   if (state.appState?.mode !== "driveSync") {
     alert("請先啟用 Google Drive 同步並設定密碼後，再啟用生物辨識解鎖。");
     return;
   }
   if (!state.dekBytes) {
-    alert("請先用密碼登入後，再啟用生物辨識解鎖。");
-    return;
+    const verified = await verifySensitiveOperation("啟用生物辨識解鎖");
+    if (!verified || !state.dekBytes) return;
   }
   if (!(await platformAuthenticatorAvailable())) {
     alert("此瀏覽器或裝置目前不支援可驗證使用者的生物辨識／裝置解鎖。");
@@ -371,6 +372,12 @@ async function enableBiometricUnlock() {
     };
     await save();
     alert("已啟用生物辨識解鎖");
+    if (enablingFromUnlock) {
+      navigate({ name: "home" }, { replace: true, force: true });
+      void resumeDriveSyncInBackground();
+      return;
+    }
+    render();
   } catch (error) {
     alert(error?.name === "NotAllowedError" ? "未完成生物辨識設定。" : "生物辨識設定失敗，請確認裝置已設定螢幕鎖或生物辨識。");
   }
@@ -389,6 +396,7 @@ async function disableBiometricUnlock() {
   };
   await save();
   alert("已停用生物辨識解鎖");
+  render();
 }
 
 async function unlockWithBiometric(options = {}) {
@@ -871,7 +879,7 @@ async function verifySensitiveOperation(actionLabel) {
   if (!keyPackage?.masterPasswordWrapper) {
     return confirm(`「${actionLabel}」屬於敏感操作，但此裝置尚未設定密碼，無法進行密碼驗證。\n\n若此裝置只有本機資料，請確認周遭環境安全後再繼續。`);
   }
-  const password = prompt(`「${actionLabel}」屬於敏感操作，請輸入密碼以繼續。`);
+  const password = await passwordConfirmDialog(actionLabel);
   if (password === null) return false;
   try {
     await unwrapCurrentDek(password);
@@ -880,6 +888,41 @@ async function verifySensitiveOperation(actionLabel) {
     alert("密碼不正確，已取消操作。");
     return false;
   }
+}
+
+function passwordConfirmDialog(actionLabel) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop";
+    overlay.innerHTML = `
+      <form class="modal-card stack" data-sensitive-password-form>
+        <h2 class="section-title">密碼驗證</h2>
+        <p class="muted">「${escapeHtml(actionLabel)}」屬於敏感操作，請輸入密碼以繼續。</p>
+        <div class="field">
+          <label>密碼</label>
+          <input type="password" data-sensitive-password autocomplete="current-password" />
+        </div>
+        <div class="actions modal-actions">
+          <button type="submit">確認</button>
+          <button type="button" class="secondary" data-sensitive-password-cancel>取消</button>
+        </div>
+      </form>
+    `;
+    const cleanup = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) cleanup(null);
+    });
+    overlay.querySelector("[data-sensitive-password-cancel]").addEventListener("click", () => cleanup(null));
+    overlay.querySelector("[data-sensitive-password-form]").addEventListener("submit", (event) => {
+      event.preventDefault();
+      cleanup(overlay.querySelector("[data-sensitive-password]").value);
+    });
+    document.body.append(overlay);
+    overlay.querySelector("[data-sensitive-password]").focus();
+  });
 }
 
 async function uploadKeyPackageToDrive() {
@@ -2347,11 +2390,10 @@ function securitySettingsSection() {
   return `
     <section class="panel stack">
       <h2 class="section-title">安全性</h2>
-      <p class="muted">生物辨識解鎖只會啟用於這台裝置，可用指紋、臉部辨識或螢幕鎖快速解鎖。</p>
       <button class="action-quiet" data-nav="changePassword">更改密碼</button>
       <button class="action-quiet" data-nav="forgotPassword">忘記密碼</button>
       <button class="action-quiet" data-nav="regenerateRecovery">重新產生救援碼</button>
-      <button class="action-quiet" data-action="${biometricEnabled ? "disable-biometric-unlock" : "enable-biometric-unlock"}">${biometricEnabled ? "停用生物辨識解鎖" : "啟用生物辨識解鎖"}</button>
+      <button class="biometric-button" data-action="${biometricEnabled ? "disable-biometric-unlock" : "enable-biometric-unlock"}">${biometricEnabled ? "停用生物辨識解鎖" : "啟用生物辨識解鎖"}</button>
       <button class="danger" data-nav="logoutAllDevices">登出所有裝置</button>
     </section>
   `;
@@ -2431,7 +2473,6 @@ function themeSettingsSection() {
   return `
     <section class="panel stack">
       <h2 class="section-title">主題色系</h2>
-      <p class="muted">此設定只保存在本機裝置，不會同步到 Google Drive。</p>
       <div class="theme-options">
         ${THEME_OPTIONS.map((theme) => `
           <button type="button" class="theme-option ${theme.id === selected ? "selected" : ""}" data-action="set-theme" data-theme-id="${theme.id}" aria-pressed="${theme.id === selected}">
@@ -2937,7 +2978,7 @@ function showRecoveryCodeView() {
 function unlockView() {
   const message = state.route.message ?? "請輸入密碼以繼續使用";
   const forgotPasswordButton = state.route.showForgotPassword ? `<button type="button" class="secondary" data-nav="forgotPassword">忘記密碼</button>` : "";
-  const biometricButton = isBiometricUnlockEnabled() && state.route.allowBiometric !== false ? `<button type="button" class="action-quiet" data-action="biometric-unlock">使用生物辨識解鎖</button>` : "";
+  const biometricButton = biometricUnlockButtonForUnlockView();
   return `
     <section class="welcome">
       <div>
@@ -2949,12 +2990,20 @@ function unlockView() {
           <label>密碼</label>
           <input type="password" data-security-draft="password" autocomplete="current-password" />
         </div>
-        ${biometricButton}
         <button type="submit">登入 App</button>
+        ${biometricButton}
         ${forgotPasswordButton}
       </form>
     </section>
   `;
+}
+
+function biometricUnlockButtonForUnlockView() {
+  if (state.route.allowBiometric === false || !webAuthnSupported()) return "";
+  if (isBiometricUnlockEnabled()) {
+    return `<button type="button" class="biometric-button" data-action="biometric-unlock">使用生物辨識解鎖</button>`;
+  }
+  return `<button type="button" class="biometric-button" data-action="enable-biometric-unlock">啟用生物辨識解鎖</button>`;
 }
 
 function changePasswordView() {
