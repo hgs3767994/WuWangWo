@@ -61,6 +61,7 @@ const GENDER_OPTIONS = ["男", "女", "其它"];
 const IDLE_LOCK_MS = 3 * 60 * 1000;
 const AWAY_LOCK_MS = 2 * 60 * 1000;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
+const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
 const NO_SLIDE_ROUTE_NAMES = new Set([
   "loading",
   "welcome",
@@ -110,7 +111,9 @@ let state = {
 async function boot() {
   registerDeveloperAccessGuard();
   registerAutoLock();
-  const appState = await getItem("appState");
+  const storedAppState = await getItem("appState");
+  const appState = normalizeLoadedAppState(storedAppState);
+  if (storedAppState && appState !== storedAppState) await setItem("appState", appState);
   const vault = await loadLocalVault();
   const trustedSession = await getItem("trustedSession");
   const localSnapshots = await loadLocalSnapshots();
@@ -157,6 +160,20 @@ async function boot() {
   registerHistoryNavigation();
   registerServiceWorker();
   registerInstallExperience();
+}
+
+function normalizeLoadedAppState(appState) {
+  if (!appState?.googleDrive || appState.googleDrive.syncStatus !== "syncing") return appState;
+  if (isDriveSyncRecentlyStarted(appState.googleDrive)) return appState;
+  return {
+    ...appState,
+    googleDrive: {
+      ...appState.googleDrive,
+      syncStatus: syncStatusAfterLocalChange(appState.googleDrive),
+      syncStartedAt: "",
+      lastSyncError: appState.googleDrive.lastSyncError || "上次同步未正常完成，請再按「立即同步」。"
+    }
+  };
 }
 
 function registerDeveloperAccessGuard() {
@@ -1065,7 +1082,7 @@ async function mergeExistingDriveVault(event) {
 
 async function syncNow(options = {}) {
   if (!state.appState?.googleDrive?.connected) return;
-  if (state.appState.googleDrive.syncStatus === "syncing") return;
+  if (isDriveSyncRecentlyStarted(state.appState.googleDrive)) return;
   if (options.silent && !driveAuthStatus().hasAccessToken) return;
   const previousGoogleDrive = state.appState.googleDrive;
   state.appState = {
@@ -1073,6 +1090,7 @@ async function syncNow(options = {}) {
     googleDrive: {
       ...state.appState.googleDrive,
       syncStatus: "syncing",
+      syncStartedAt: new Date().toISOString(),
       lastSyncError: ""
     }
   };
@@ -1107,6 +1125,7 @@ async function syncNow(options = {}) {
         lastSyncSummary: buildSyncSummary({ localBeforeSync, remoteVault, mergedVault: state.vault, conflicts, syncedAt }),
         pendingConflicts: conflicts,
         simulated: isSimulatedDrive(),
+        syncStartedAt: "",
         lastSyncError: ""
       }
     };
@@ -1124,6 +1143,7 @@ async function syncNow(options = {}) {
         googleDrive: {
           ...previousGoogleDrive,
           syncStatus: previousGoogleDrive.syncStatus === "syncing" ? syncStatusAfterLocalChange(previousGoogleDrive) : previousGoogleDrive.syncStatus,
+          syncStartedAt: "",
           lastSyncError: "Google Drive 授權需要重新登入，請按「立即同步」完成授權。"
         }
       };
@@ -1136,6 +1156,7 @@ async function syncNow(options = {}) {
       googleDrive: {
         ...state.appState.googleDrive,
         syncStatus: "error",
+        syncStartedAt: "",
         lastSyncError: message
       }
     };
@@ -2355,7 +2376,7 @@ function settingsView() {
       ${syncSummaryView(gd.lastSyncSummary)}
       ${pendingConflicts.length ? `<button class="action-quiet" data-nav="syncConflicts">處理衝突資料</button>` : ""}
       <button class="action-quiet" data-nav="syncTroubleshooting">同步疑難排解</button>
-      ${gd.connected ? `<button class="action-quiet" data-action="sync-now" ${gd.syncStatus === "syncing" ? "disabled" : ""}>立即同步</button><button class="action-quiet" data-action="drive-logout">登出 Google Drive</button>` : `<button class="action-quiet" data-action="drive-placeholder">連結 Google Drive</button>`}
+      ${gd.connected ? `<button class="action-quiet" data-action="sync-now" ${isDriveSyncRecentlyStarted(gd) ? "disabled" : ""}>立即同步</button><button class="action-quiet" data-action="drive-logout">登出 Google Drive</button>` : `<button class="action-quiet" data-action="drive-placeholder">連結 Google Drive</button>`}
     </section>
     ${installSettingsSection()}
     ${themeSettingsSection()}
@@ -5256,6 +5277,12 @@ function syncStatusLabel(gd) {
   return gd.simulated ? `已同步（${driveProviderLabel()}）` : "已同步";
 }
 
+function isDriveSyncRecentlyStarted(gd) {
+  if (gd?.syncStatus !== "syncing") return false;
+  const startedAt = Date.parse(gd.syncStartedAt || "");
+  return Boolean(startedAt && Date.now() - startedAt < DRIVE_SYNC_STALE_MS);
+}
+
 function markLocalVaultChanged() {
   if (!state.appState?.googleDrive?.connected) return;
   const gd = state.appState.googleDrive;
@@ -5305,6 +5332,9 @@ function vaultDataSummary() {
 function driveErrorMessage(error, fallback) {
   const message = error?.message ?? "";
   if (message.includes("google-identity-services-load-failed")) return "無法載入 Google 登入服務，請確認網路連線後再試。";
+  if (message.includes("google-identity-services-load-timeout")) return "Google 登入服務載入逾時，請確認網路連線後再試。";
+  if (message.includes("google-drive-auth-timeout")) return "Google Drive 授權等待逾時，請再按一次「立即同步」。";
+  if (message.includes("google-drive-request-timeout")) return "Google Drive 連線逾時，請確認網路後再按「立即同步」。";
   if (message.includes("access_denied")) return "Google Drive 授權已取消，尚未完成連結。";
   if (message.includes("popup")) return "Google 授權視窗被阻擋，請允許彈出視窗後再試。";
   if (message.includes("google-drive-auth-required") || message.includes("interaction_required") || message.includes("login_required") || message.includes("consent_required")) {

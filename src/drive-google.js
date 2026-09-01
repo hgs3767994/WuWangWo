@@ -5,6 +5,9 @@ const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
 const USERINFO_API = "https://openidconnect.googleapis.com/v1/userinfo";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata openid email";
+const GIS_LOAD_TIMEOUT_MS = 15000;
+const GOOGLE_AUTH_TIMEOUT_MS = 25000;
+const GOOGLE_FETCH_TIMEOUT_MS = 30000;
 
 let gisLoadPromise = null;
 let tokenClient = null;
@@ -139,13 +142,26 @@ async function findGoogleDriveFile(name) {
 
 async function googleFetch(url, options = {}) {
   const token = await ensureGoogleAccessToken({ interactive: options.interactive === true });
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(options.headers ?? {})
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GOOGLE_FETCH_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(options.headers ?? {})
+      }
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("google-drive-request-timeout");
     }
-  });
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (response.status === 204) return null;
   if (!response.ok) {
     let details = "";
@@ -193,38 +209,76 @@ async function ensureGoogleAccessToken({ interactive = false, prompt = "" } = {}
     callback: () => {}
   });
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("google-drive-auth-timeout"));
+    }, GOOGLE_AUTH_TIMEOUT_MS);
+    const finishResolve = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      resolve(value);
+    };
+    const finishReject = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      reject(error);
+    };
     tokenClient.callback = (response) => {
       if (response.error) {
-        reject(new Error(response.error));
+        finishReject(new Error(response.error));
         return;
       }
       if (!response.access_token) {
-        reject(new Error("google-drive-auth-required"));
+        finishReject(new Error("google-drive-auth-required"));
         return;
       }
       accessToken = response.access_token;
       tokenExpiresAt = Date.now() + Number(response.expires_in ?? 3600) * 1000;
-      resolve(accessToken);
+      finishResolve(accessToken);
     };
-    tokenClient.requestAccessToken({ prompt });
+    try {
+      tokenClient.requestAccessToken({ prompt });
+    } catch (error) {
+      finishReject(error);
+    }
   });
 }
 
 function isGoogleInteractionRequired(error) {
   const message = error?.message ?? "";
-  return ["google-drive-auth-required", "interaction_required", "login_required", "consent_required"].some((text) => message.includes(text));
+  return ["google-drive-auth-required", "google-drive-auth-timeout", "interaction_required", "login_required", "consent_required"].some((text) => message.includes(text));
 }
 
 function loadGoogleIdentityServices() {
   if (globalThis.google?.accounts?.oauth2) return Promise.resolve();
   if (gisLoadPromise) return gisLoadPromise;
   gisLoadPromise = new Promise((resolve, reject) => {
+    let settled = false;
     const script = document.createElement("script");
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("google-identity-services-load-timeout"));
+    }, GIS_LOAD_TIMEOUT_MS);
     script.src = GIS_SCRIPT_URL;
     script.async = true;
     script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("google-identity-services-load-failed"));
+    script.onload = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      resolve();
+    };
+    script.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      reject(new Error("google-identity-services-load-failed"));
+    };
     document.head.append(script);
   });
   return gisLoadPromise;
