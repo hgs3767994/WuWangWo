@@ -1,4 +1,4 @@
-import { DEFAULT_INTEREST_TAGS, DEFAULT_PERSON_GROUP_TAGS } from "./model.js";
+import { DEFAULT_INTEREST_TAGS, DEFAULT_PERSON_GROUP_TAGS, RETIRED_PERSON_GROUP_TAG_IDS } from "./model.js";
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -43,11 +43,12 @@ function isTombstoned(tombstones, type, id) {
   return tombstones.some((item) => item.type === type && item.id === id);
 }
 
-function mergeNamedTags(localItems = [], remoteItems = []) {
-  const tagsById = byId(asArray(localItems));
+function mergeNamedTags(localItems = [], remoteItems = [], tombstones = [], tombstoneType = "") {
+  const deletedIds = new Set(asArray(tombstones).filter((item) => item.type === tombstoneType).map((item) => item.id));
+  const tagsById = byId(asArray(localItems).filter((item) => !deletedIds.has(item.id)));
   const idRedirects = new Map();
 
-  for (const remote of asArray(remoteItems).filter((tag) => tag?.id && tag?.name)) {
+  for (const remote of asArray(remoteItems).filter((tag) => tag?.id && tag?.name && !deletedIds.has(tag.id))) {
     const sameId = tagsById.get(remote.id);
     if (sameId) {
       tagsById.set(remote.id, newer(sameId, remote));
@@ -70,19 +71,20 @@ function mergeNamedTags(localItems = [], remoteItems = []) {
   return { tags: [...tagsById.values()], idRedirects };
 }
 
-function mergeInterestTags(localVault, remoteVault) {
-  const { tags, idRedirects } = mergeNamedTags(localVault.interestTags ?? [], remoteVault.interestTags ?? []);
+function mergeInterestTags(localVault, remoteVault, tombstones) {
+  const { tags, idRedirects } = mergeNamedTags(localVault.interestTags ?? [], remoteVault.interestTags ?? [], tombstones, "interestTag");
   return { interestTags: tags, idRedirects };
 }
 
-function mergePersonGroupTags(localVault, remoteVault) {
-  const { tags, idRedirects } = mergeNamedTags(localVault.personGroupTags ?? [], remoteVault.personGroupTags ?? []);
+function mergePersonGroupTags(localVault, remoteVault, tombstones) {
+  const { tags, idRedirects } = mergeNamedTags(localVault.personGroupTags ?? [], remoteVault.personGroupTags ?? [], tombstones, "personGroupTag");
   return { personGroupTags: tags, groupIdRedirects: idRedirects };
 }
 
 function canonicalDefaultTags(tags, defaultTags, tombstones, tombstoneType, deviceId, updatedAt) {
   const redirects = new Map();
   const defaultIds = new Set(defaultTags.map((tag) => tag.id));
+  const retiredIds = tombstoneType === "personGroupTag" ? new Set(RETIRED_PERSON_GROUP_TAG_IDS) : new Set();
   const output = [];
   const usedInputIds = new Set();
 
@@ -113,6 +115,7 @@ function canonicalDefaultTags(tags, defaultTags, tombstones, tombstoneType, devi
   tags.forEach((tag) => {
     if (usedInputIds.has(tag.id)) return;
     if (defaultIds.has(tag.id)) return;
+    if (retiredIds.has(tag.id)) return;
     if (isTombstoned(tombstones, tombstoneType, tag.id)) return;
     if (activeDefaultNames.has(tag.name)) return;
     output.push({ ...tag, isDefault: false });
@@ -228,8 +231,8 @@ export function mergeVaults(localVault, remoteVault, deviceId) {
   const conflicts = [];
   const tombstones = mergeTombstones(localVault, remoteVault);
   const deletedItems = mergeDeletedItems(localVault, remoteVault);
-  const { interestTags, idRedirects } = mergeInterestTags(localVault, remoteVault);
-  const { personGroupTags, groupIdRedirects } = mergePersonGroupTags(localVault, remoteVault);
+  const { interestTags, idRedirects } = mergeInterestTags(localVault, remoteVault, tombstones);
+  const { personGroupTags, groupIdRedirects } = mergePersonGroupTags(localVault, remoteVault, tombstones);
   const now = new Date().toISOString();
   const normalizedInterests = canonicalDefaultTags(interestTags, DEFAULT_INTEREST_TAGS, tombstones, "interestTag", deviceId, now);
   const normalizedPersonGroups = canonicalDefaultTags(personGroupTags, DEFAULT_PERSON_GROUP_TAGS, tombstones, "personGroupTag", deviceId, now);
@@ -237,6 +240,9 @@ export function mergeVaults(localVault, remoteVault, deviceId) {
   const combinedGroupRedirects = new Map([...groupIdRedirects, ...normalizedPersonGroups.redirects]);
   const validInterestIds = new Set(normalizedInterests.tags.map((tag) => tag.id));
   const validGroupIds = new Set(normalizedPersonGroups.tags.map((tag) => tag.id));
+  const customFieldDefs = mergeById(localVault.customFieldDefs ?? [], remoteVault.customFieldDefs ?? [])
+    .filter((field) => !isTombstoned(tombstones, "customField", field.id));
+  const validCustomFieldIds = new Set(customFieldDefs.map((field) => field.id));
   const people = byId(asArray(localVault.people).map((person) => rewritePersonTagIds(person, combinedInterestRedirects, combinedGroupRedirects, validInterestIds, validGroupIds)));
 
   for (const remotePersonRaw of asArray(remoteVault.people)) {
@@ -246,7 +252,12 @@ export function mergeVaults(localVault, remoteVault, deviceId) {
     else people.set(remotePerson.id, remotePerson);
   }
 
-  const filteredPeople = [...people.values()].filter((person) => !isTombstoned(tombstones, "person", person.id));
+  const filteredPeople = [...people.values()]
+    .filter((person) => !isTombstoned(tombstones, "person", person.id))
+    .map((person) => ({
+      ...person,
+      customValues: normalizeCustomValues(person.customValues).filter((item) => validCustomFieldIds.has(item.fieldId))
+    }));
 
   return {
     vault: {
@@ -254,7 +265,7 @@ export function mergeVaults(localVault, remoteVault, deviceId) {
       people: filteredPeople,
       personGroupTags: normalizedPersonGroups.tags,
       interestTags: normalizedInterests.tags,
-      customFieldDefs: mergeById(localVault.customFieldDefs ?? [], remoteVault.customFieldDefs ?? []),
+      customFieldDefs,
       deletedItems,
       tombstones,
       syncMeta: {

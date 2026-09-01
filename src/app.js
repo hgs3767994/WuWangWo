@@ -20,6 +20,7 @@ import {
 import {
   DEFAULT_INTEREST_TAGS,
   DEFAULT_PERSON_GROUP_TAGS,
+  RETIRED_PERSON_GROUP_TAG_IDS,
   createDeviceId,
   createEmptyVault,
   createPerson,
@@ -4500,6 +4501,7 @@ async function deletePersonGroup(tag) {
         id: tag.id,
         type: "personGroupTag",
         deletedAt: now,
+        expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
         updatedAt: now,
         updatedByDeviceId: state.appState.deviceId
       }
@@ -4573,6 +4575,7 @@ async function deleteInterest(tag) {
         id: tag.id,
         type: "interestTag",
         deletedAt: now,
+        updatedAt: now,
         expiresAt: new Date(Date.now() + 30 * 86400000).toISOString()
       }
     ]
@@ -5444,7 +5447,10 @@ function pruneDeleted(vault) {
   return {
     ...vault,
     deletedItems: (vault.deletedItems ?? []).filter((item) => new Date(item.restoreUntil).getTime() > now),
-    tombstones: (vault.tombstones ?? []).filter((item) => new Date(item.expiresAt).getTime() > now)
+    tombstones: (vault.tombstones ?? []).filter((item) => {
+      if (!item?.expiresAt) return true;
+      return new Date(item.expiresAt).getTime() > now;
+    })
   };
 }
 
@@ -5487,9 +5493,10 @@ function getPerson(id) {
 
 function normalizeTagCollection(tags, defaultTags, tombstones, tombstoneType, updatedAt) {
   if (!tags) return { tags: defaultTags.map((tag) => ({ ...tag })), redirects: new Map() };
+  const retiredIds = tombstoneType === "personGroupTag" ? new Set(RETIRED_PERSON_GROUP_TAG_IDS) : new Set();
   tags = asArray(tags)
     .map((tag) => normalizeTag(tag, tombstoneType, updatedAt))
-    .filter((tag) => tag.id && tag.name);
+    .filter((tag) => tag.id && tag.name && !retiredIds.has(tag.id));
   const redirects = new Map();
   const defaultIds = new Set(defaultTags.map((tag) => tag.id));
   const output = [];

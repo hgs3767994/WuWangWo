@@ -29,9 +29,7 @@ export const DEFAULT_PERSON_GROUP_TAGS = [
   ["club-member", "👥社團成員"],
   ["car-friend", "🚗車友"],
   ["classmate", "🎓同學"],
-  ["client", "💼客戶"],
-  ["male", "♂️男"],
-  ["female", "♀️女"]
+  ["client", "💼客戶"]
 ].map(([slug, name]) => ({
   id: `default-group-${slug}`,
   name,
@@ -40,6 +38,8 @@ export const DEFAULT_PERSON_GROUP_TAGS = [
   updatedAt: "2026-08-26T00:00:00.000Z",
   updatedByDeviceId: "system"
 }));
+
+export const RETIRED_PERSON_GROUP_TAG_IDS = ["default-group-male", "default-group-female"];
 
 export function createDeviceId() {
   return `device-${crypto.randomUUID()}`;
