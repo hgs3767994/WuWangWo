@@ -57,8 +57,8 @@ const ADDRESS_CITY_DISTRICTS = {
   連江縣: ["南竿鄉", "北竿鄉", "莒光鄉", "東引鄉"]
 };
 const ADDRESS_CITY_OPTIONS = [...Object.keys(ADDRESS_CITY_DISTRICTS), "其它/海外地址"];
-const IDLE_LOCK_MS = 5 * 60 * 1000;
-const AWAY_LOCK_MS = 15 * 60 * 1000;
+const IDLE_LOCK_MS = 3 * 60 * 1000;
+const AWAY_LOCK_MS = 2 * 60 * 1000;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 const NO_SLIDE_ROUTE_NAMES = new Set([
   "loading",
@@ -162,6 +162,7 @@ function registerDeveloperAccessGuard() {
   if (state.developerAccessGuardRegistered) return;
   state.developerAccessGuardRegistered = true;
   window.addEventListener("contextmenu", (event) => {
+    if (isTouchContextMenu(event)) return;
     event.preventDefault();
   });
   window.addEventListener(
@@ -179,6 +180,10 @@ function registerDeveloperAccessGuard() {
     },
     true
   );
+}
+
+function isTouchContextMenu(event) {
+  return event.pointerType === "touch" || event.pointerType === "pen" || event.sourceCapabilities?.firesTouchEvents;
 }
 
 function registerAutoLock() {
@@ -210,7 +215,7 @@ function resetIdleLockTimer() {
   if (state.idleLockTimer) window.clearTimeout(state.idleLockTimer);
   if (!canAutoLock()) return;
   state.idleLockTimer = window.setTimeout(() => {
-    void lockApp("已閒置超過 5 分鐘，請重新輸入密碼");
+    void lockApp("已閒置超過 3 分鐘，請重新輸入密碼");
   }, IDLE_LOCK_MS);
 }
 
@@ -386,19 +391,20 @@ async function disableBiometricUnlock() {
   alert("已停用生物辨識解鎖");
 }
 
-async function unlockWithBiometric() {
+async function unlockWithBiometric(options = {}) {
+  const silent = options.silent === true;
   if (!webAuthnSupported()) {
-    alert("此瀏覽器目前不支援生物辨識解鎖。");
+    if (!silent) alert("此瀏覽器目前不支援生物辨識解鎖。");
     return;
   }
   const credentialRecord = await getItem("biometricUnlock");
   const trustedSession = await getItem("trustedSession");
   if (!isBiometricUnlockEnabled() || !credentialRecord || !trustedSession) {
-    alert("這台裝置尚未啟用生物辨識解鎖，請使用密碼登入。");
+    if (!silent) alert("這台裝置尚未啟用生物辨識解鎖，請使用密碼登入。");
     return;
   }
   if (credentialRecord.rpId && credentialRecord.rpId !== relyingPartyId()) {
-    alert("生物辨識解鎖是依照目前網址保存的。請在原本啟用的網址重新開啟，或使用密碼登入後重新啟用。");
+    if (!silent) alert("生物辨識解鎖是依照目前網址保存的。請在原本啟用的網址重新開啟，或使用密碼登入後重新啟用。");
     return;
   }
   try {
@@ -421,8 +427,19 @@ async function unlockWithBiometric() {
     navigate({ name: "home" }, { replace: true, force: true });
     void resumeDriveSyncInBackground();
   } catch {
-    alert("生物辨識解鎖未完成，請改用密碼登入。");
+    if (!silent) alert("生物辨識解鎖未完成，請改用密碼登入。");
   }
+}
+
+function maybeAutoBiometricUnlock() {
+  if (state.route?.name !== "unlock") return;
+  if (state.route.allowBiometric === false || state.route.autoBiometricAttempted) return;
+  if (!isBiometricUnlockEnabled()) return;
+  state.route.autoBiometricAttempted = true;
+  window.setTimeout(() => {
+    if (state.route?.name !== "unlock") return;
+    void unlockWithBiometric({ silent: true });
+  }, 250);
 }
 
 function registerServiceWorker() {
@@ -1900,6 +1917,7 @@ function render(options = {}) {
   bind();
   if (options.restoreScroll) restoreRouteScroll(state.route);
   resetIdleLockTimer();
+  maybeAutoBiometricUnlock();
 }
 
 function routeTransitionClass(direction, fromRoute, toRoute) {
@@ -2039,7 +2057,7 @@ function welcomeView() {
 }
 
 function homeView() {
-  const people = visiblePeople(state.vault.people);
+  const people = homePeople(state.vault.people);
   return `
     <header class="home-header app-header">
       ${brandLogo("home")}
@@ -5848,6 +5866,16 @@ function sortLifeEvents(rows = []) {
 
 function visiblePeople(people = []) {
   return sortPeople(people.filter((person) => !person.archivedAt));
+}
+
+function homePeople(people = []) {
+  return people
+    .filter((person) => !person.archivedAt)
+    .sort((a, b) => {
+      const byUpdated = new Date(b.updatedAt ?? b.createdAt ?? 0).getTime() - new Date(a.updatedAt ?? a.createdAt ?? 0).getTime();
+      if (byUpdated !== 0) return byUpdated;
+      return sortPeople([a, b])[0].id === a.id ? -1 : 1;
+    });
 }
 
 function findUniqueVisiblePersonByName(name, excludeId = "") {

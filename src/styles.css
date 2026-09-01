@@ -763,6 +763,10 @@ button:focus-visible,
   transform: translateX(-50%);
 }
 
+.bottom-nav button {
+  min-width: 220px;
+}
+
 .update-prompt {
   position: fixed;
   right: 16px;
@@ -1419,6 +1423,27 @@ button:focus-visible,
 .storage-warning {
   background: #fff7ed;
   border-color: #fed7aa;
+  color: #7c2d12;
+}
+
+.storage-warning strong {
+  color: #7c2d12;
+}
+
+.storage-warning .muted {
+  color: #9a3412;
+}
+
+.detail-value,
+.detail-line,
+.detail-value-link,
+.recovery-code,
+.storage-warning,
+textarea,
+input {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 .data-summary {
@@ -1671,6 +1696,7 @@ code {
 
   .bottom-nav button {
     flex: 1;
+    min-width: 0;
   }
 
   .theme-options {
