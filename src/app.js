@@ -57,6 +57,7 @@ const ADDRESS_CITY_DISTRICTS = {
   連江縣: ["南竿鄉", "北竿鄉", "莒光鄉", "東引鄉"]
 };
 const ADDRESS_CITY_OPTIONS = [...Object.keys(ADDRESS_CITY_DISTRICTS), "其它/海外地址"];
+const GENDER_OPTIONS = ["男", "女", "其它"];
 const IDLE_LOCK_MS = 3 * 60 * 1000;
 const AWAY_LOCK_MS = 2 * 60 * 1000;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
@@ -1818,8 +1819,10 @@ function personDraftSignature(draft) {
     id: normalized.id,
     name: normalized.name ?? "",
     nickname: normalized.nickname ?? "",
+    gender: normalized.gender ?? "",
     nationalId: normalized.nationalId ?? "",
     birthDate: normalized.birthDate ?? "",
+    workInfo: normalized.workInfo ?? "",
     phones: normalized.phones ?? [],
     addresses: normalized.addresses ?? [],
     personGroupTagIds: normalized.personGroupTagIds ?? [],
@@ -3126,6 +3129,7 @@ function familyMemberLine(sourcePerson, member) {
 function basicDetailLines(person) {
   return [
     person.nickname ? detailLine("暱稱", person.nickname) : "",
+    person.gender ? detailLine("性別", person.gender) : "",
     person.birthDate ? detailLine("生日", person.birthDate) : "",
     person.nationalId ? detailLine("身分證字號", person.nationalId, `<button class="action-quiet" data-copy="${escapeAttr(person.nationalId)}">複製</button>`) : "",
     ...((person.phones ?? []).length
@@ -3146,7 +3150,8 @@ function basicDetailLines(person) {
             `<button class="action-quiet" data-copy="${escapeAttr(address.value)}">複製</button>`
           )
         )
-      : [])
+      : []),
+    person.workInfo ? detailLine("公司/工作內容", person.workInfo) : ""
   ]
     .flat()
     .filter(Boolean)
@@ -3174,10 +3179,12 @@ function basicFieldsEditor(d) {
   const expanded = Boolean(state.route.moreBasicFieldsExpanded);
   const fields = [
     { key: "nickname", filled: Boolean(d.nickname), html: inputField("暱稱", "nickname", d.nickname) },
+    { key: "gender", filled: Boolean(d.gender), html: genderField(d.gender) },
     { key: "birthDate", filled: Boolean(d.birthDate), html: inputField("生日", "birthDate", d.birthDate, "date") },
     { key: "nationalId", filled: Boolean(d.nationalId), html: inputField("身分證字號", "nationalId", d.nationalId) },
     { key: "phones", filled: hasListValue(d.phones), html: listEditor("電話", "phones", d.phones, ["手機", "家裡", "公司", "其它"], "電話號碼") },
-    { key: "addresses", filled: hasListValue(d.addresses), html: listEditor("地址", "addresses", d.addresses, ["住家", "公司", "其它"], "地址") }
+    { key: "addresses", filled: hasListValue(d.addresses), html: listEditor("地址", "addresses", d.addresses, ["住家", "公司", "其它"], "地址") },
+    { key: "workInfo", filled: Boolean(d.workInfo), html: inputField("公司/工作內容", "workInfo", d.workInfo) }
   ];
   const visibleFields = expanded ? fields : fields.filter((field) => field.filled);
   return `
@@ -3206,6 +3213,19 @@ function inputField(label, field, value, type = "text") {
     `;
   }
   return `<section class="panel"><h2 class="section-title">${label}</h2><input type="${type}" data-field="${field}" value="${escapeAttr(value)}" /></section>`;
+}
+
+function genderField(value) {
+  return `
+    <section class="panel">
+      <h2 class="section-title">性別</h2>
+      <div class="chip-list">
+        ${GENDER_OPTIONS.map((option) => `
+          <button type="button" class="chip ${value === option ? "selected" : ""}" data-action="set-gender" data-value="${escapeAttr(option)}">${value === option ? "✓ " : ""}${escapeHtml(option)}</button>
+        `).join("")}
+      </div>
+    </section>
+  `;
 }
 
 function listEditor(title, key, rows, labels, placeholder) {
@@ -3969,6 +3989,7 @@ async function handleAction(event, el) {
   if (action === "cancel-form") return navigateBack(state.route.id ? detailRoute(state.route.id) : { name: "home" });
   if (action === "edit-person") return navigate({ name: "edit", id: el.dataset.id, returnTo: state.route.returnTo });
   if (action === "toggle-more-basic-fields") return toggleMoreBasicFields();
+  if (action === "set-gender") return setGender(el.dataset.value);
   if (action === "check-duplicate-name") return checkDuplicateName();
   if (action === "open-family-member") return openFamilyMember(el.dataset.sourceId, el.dataset.memberId, el.dataset.name);
   if (action === "select-family-member-link") return linkFamilyMemberAndOpen(el.dataset.sourceId, el.dataset.memberId, el.dataset.targetId, { replace: true });
@@ -4038,6 +4059,12 @@ function toggleRouteFlag(key) {
 
 function toggleMoreBasicFields() {
   state.route.moreBasicFieldsExpanded = !state.route.moreBasicFieldsExpanded;
+  render();
+}
+
+function setGender(value) {
+  if (!state.route.draft) return;
+  state.route.draft.gender = state.route.draft.gender === value ? "" : value;
   render();
 }
 
@@ -4127,11 +4154,14 @@ async function savePersonForm(event) {
     ...draft,
     name: draft.name.trim(),
     nickname: draft.nickname.trim(),
+    gender: draft.gender.trim(),
     nationalId: draft.nationalId.trim(),
+    workInfo: draft.workInfo.trim(),
     note: draft.note.trim(),
     phones: cleanList(draft.phones),
     addresses: cleanAddressList(draft.addresses),
     personGroupTagIds: draft.personGroupTagIds ?? [],
+    interestTagIds: draft.interestTagIds ?? [],
     favoriteItems: cleanFavoriteItems(draft.favoriteItems),
     familyMembers: cleanFamilyMembers(draft.familyMembers, draft.id),
     lifeEvents: cleanLifeEvents(draft.lifeEvents),
@@ -5039,8 +5069,10 @@ function searchablePersonText(person) {
   return [
     person.name,
     person.nickname,
+    person.gender,
     person.birthDate,
     person.nationalId,
+    person.workInfo,
     person.note,
     ...(person.phones ?? []).flatMap((phone) => [phone.label, phone.value]),
     ...(person.addresses ?? []).flatMap((address) => [address.label, address.city, address.district, address.detail, address.value]),
@@ -5638,7 +5670,9 @@ function normalizeDraft(draft = {}) {
     name: asString(draft.name),
     nationalId: asString(draft.nationalId),
     nickname: asString(draft.nickname),
+    gender: asString(draft.gender),
     birthDate: asString(draft.birthDate),
+    workInfo: asString(draft.workInfo),
     phones: normalizeListRows(draft.phones, "手機"),
     addresses: normalizeAddressRows(draft.addresses),
     personGroupTagIds: asStringArray(draft.personGroupTagIds),

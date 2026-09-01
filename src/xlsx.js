@@ -26,14 +26,17 @@ function buildSheets(vault) {
     {
       name: "人物",
       rows: [
-        ["人物ID", "姓名", "暱稱", "生日", "主要電話", "主要地址", "人物群組", "興趣喜好", "是否封存", "其它備註", "建立時間", "更新時間"],
+        ["人物ID", "姓名", "暱稱", "性別", "生日", "身分證字號", "主要電話", "主要地址", "公司/工作內容", "人物群組", "興趣喜好", "是否封存", "其它備註", "建立時間", "更新時間"],
         ...people.map((person) => [
           person.id,
           person.name,
           person.nickname ?? "",
+          person.gender ?? "",
           person.birthDate,
+          person.nationalId ?? "",
           defaultValue(person.phones),
           defaultValue(person.addresses),
+          person.workInfo ?? "",
           (person.personGroupTagIds ?? []).map(groupName).join("、"),
           (person.interestTagIds ?? []).map(tagName).join("、"),
           person.archivedAt ? "是" : "",
