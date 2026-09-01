@@ -453,8 +453,13 @@ function maybeAutoBiometricUnlock() {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./service-worker.js").then((registration) => {
+    navigator.serviceWorker.register("./service-worker.js", { updateViaCache: "none" }).then((registration) => {
       state.serviceWorkerRegistration = registration;
+      if (registration.waiting && navigator.serviceWorker.controller) {
+        state.updateAvailable = true;
+        state.waitingServiceWorker = registration.waiting;
+        render();
+      }
       registration.addEventListener("updatefound", () => {
         const worker = registration.installing;
         if (!worker) return;
@@ -466,6 +471,9 @@ function registerServiceWorker() {
           }
         });
       });
+      window.setTimeout(() => {
+        void registration.update();
+      }, 1000);
     }).catch(() => {});
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       if (state.isReloadingForUpdate) return;
