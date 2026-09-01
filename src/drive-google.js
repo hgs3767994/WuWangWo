@@ -6,7 +6,7 @@ const DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
 const USERINFO_API = "https://openidconnect.googleapis.com/v1/userinfo";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata openid email";
 const GIS_LOAD_TIMEOUT_MS = 15000;
-const GOOGLE_AUTH_TIMEOUT_MS = 25000;
+const GOOGLE_AUTH_TIMEOUT_MS = 60000;
 const GOOGLE_FETCH_TIMEOUT_MS = 30000;
 
 let gisLoadPromise = null;
@@ -14,6 +14,7 @@ let tokenClient = null;
 let accessToken = "";
 let tokenExpiresAt = 0;
 let accountEmail = "";
+let authRequestPromise = null;
 
 export async function writeGoogleDriveFile(name, content) {
   const existing = await findGoogleDriveFile(name);
@@ -190,11 +191,22 @@ async function refreshGoogleAccountEmail() {
 async function connectGoogleAccessToken({ interactive = true } = {}) {
   if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
   if (!interactive) return ensureGoogleAccessToken({ interactive: false });
+  if (authRequestPromise) return authRequestPromise;
+  authRequestPromise = (async () => {
+    try {
+      return await ensureGoogleAccessToken({ interactive: true, prompt: "" });
+    } catch (error) {
+      // Only retry when Google explicitly says an interaction is required.
+      // A timeout means the original mobile authorization flow may still be
+      // open; opening a second flow causes Safari/iPad account prompts to loop.
+      if (!isGoogleInteractionRequired(error)) throw error;
+      return ensureGoogleAccessToken({ interactive: true, prompt: "consent" });
+    }
+  })();
   try {
-    return await ensureGoogleAccessToken({ interactive: true, prompt: "" });
-  } catch (error) {
-    if (!isGoogleInteractionRequired(error)) throw error;
-    return ensureGoogleAccessToken({ interactive: true, prompt: "consent" });
+    return await authRequestPromise;
+  } finally {
+    authRequestPromise = null;
   }
 }
 
@@ -250,7 +262,7 @@ async function ensureGoogleAccessToken({ interactive = false, prompt = "" } = {}
 
 function isGoogleInteractionRequired(error) {
   const message = error?.message ?? "";
-  return ["google-drive-auth-required", "google-drive-auth-timeout", "interaction_required", "login_required", "consent_required"].some((text) => message.includes(text));
+  return ["google-drive-auth-required", "interaction_required", "login_required", "consent_required"].some((text) => message.includes(text));
 }
 
 function loadGoogleIdentityServices() {
