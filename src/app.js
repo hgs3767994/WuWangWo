@@ -2193,6 +2193,10 @@ function searchView() {
         </select>
       </div>
       <div class="field">
+        <label>依性別搜尋</label>
+        <div class="chip-list">${GENDER_OPTIONS.map((gender) => interestChip({ id: gender, name: gender }, params.genderValues.includes(gender), "search-gender")).join("")}</div>
+      </div>
+      <div class="field">
         <label>依人物群組搜尋</label>
         <div class="chip-list">${state.vault.personGroupTags.map((tag) => interestChip(tag, params.groupIds.includes(tag.id), "search-group")).join("")}</div>
       </div>
@@ -4045,6 +4049,7 @@ async function handleAction(event, el) {
   if (action === "new-person-prefill") return navigate({ name: "new", prefillName: el.dataset.name });
   if (action === "toggle-person-group") return togglePersonGroup(el.dataset.id);
   if (action === "search-group") return toggleSearchGroup(el.dataset.id);
+  if (action === "search-gender") return toggleSearchGender(el.dataset.id);
   if (action === "toggle-person-group-manage") return togglePersonGroupManage();
   if (action === "confirm-add-person-group") return addPersonGroup();
   if (action === "remove-person-group") return removePersonGroup(el.dataset.id);
@@ -4344,6 +4349,15 @@ function togglePersonGroup(id) {
 function toggleSearchGroup(id) {
   const params = normalizeSearchParams(state.route.params);
   params.groupIds = params.groupIds.includes(id) ? params.groupIds.filter((item) => item !== id) : [...params.groupIds, id];
+  state.route.params = params;
+  render();
+}
+
+function toggleSearchGender(gender) {
+  const params = normalizeSearchParams(state.route.params);
+  params.genderValues = params.genderValues.includes(gender)
+    ? params.genderValues.filter((item) => item !== gender)
+    : [...params.genderValues, gender];
   state.route.params = params;
   render();
 }
@@ -5066,6 +5080,7 @@ function searchPeople(params) {
   const address = normalizedParams.address.trim().toLowerCase();
   const groupIds = normalizedParams.groupIds;
   const tagIds = normalizedParams.tagIds;
+  const genderValues = normalizedParams.genderValues;
   const birthdayMonths = Number(normalizedParams.birthdayWithinMonths || 0);
   const birthYear = normalizedParams.birthYear;
   const birthMonth = normalizedParams.birthMonth;
@@ -5077,10 +5092,11 @@ function searchPeople(params) {
     const addressMatch = !address || person.addresses.some((item) => item.value.toLowerCase().includes(address));
     const groupMatch = groupIds.every((id) => (person.personGroupTagIds ?? []).includes(id));
     const tagMatch = tagIds.every((id) => (person.interestTagIds ?? []).includes(id));
+    const genderMatch = genderValues.every((gender) => person.gender === gender);
     const birthdayMatch = !birthdayMonths || isBirthdayWithinMonths(person.birthDate, birthdayMonths);
     const birthYearMatch = !birthYear || birthDatePart(person.birthDate, "year") === birthYear;
     const birthMonthMatch = !birthMonth || birthDatePart(person.birthDate, "month") === birthMonth;
-    return textMatch && addressMatch && groupMatch && tagMatch && birthdayMatch && birthYearMatch && birthMonthMatch;
+    return textMatch && addressMatch && groupMatch && tagMatch && genderMatch && birthdayMatch && birthYearMatch && birthMonthMatch;
   });
   return matched.sort((a, b) => {
     const aName = textTokens.some((token) => a.name.toLowerCase().includes(token));
@@ -5126,6 +5142,7 @@ function hasSearchCriteria(params) {
       normalizedParams.address.trim() ||
       normalizedParams.groupIds.length ||
       normalizedParams.tagIds.length ||
+      normalizedParams.genderValues.length ||
       normalizedParams.birthdayWithinMonths ||
       normalizedParams.birthYear ||
       normalizedParams.birthMonth
@@ -5133,7 +5150,7 @@ function hasSearchCriteria(params) {
 }
 
 function emptySearchParams() {
-  return { text: "", address: "", groupIds: [], tagIds: [], birthdayWithinMonths: "", birthYear: "", birthMonth: "" };
+  return { text: "", address: "", groupIds: [], tagIds: [], genderValues: [], birthdayWithinMonths: "", birthYear: "", birthMonth: "" };
 }
 
 function normalizeSearchParams(params = {}) {
@@ -5142,6 +5159,7 @@ function normalizeSearchParams(params = {}) {
     address: params.address ?? "",
     groupIds: params.groupIds ?? [],
     tagIds: params.tagIds ?? [],
+    genderValues: params.genderValues ?? [],
     birthdayWithinMonths: params.birthdayWithinMonths ?? "",
     birthYear: params.birthYear ?? "",
     birthMonth: params.birthMonth ?? ""
