@@ -4355,9 +4355,7 @@ function toggleSearchGroup(id) {
 
 function toggleSearchGender(gender) {
   const params = normalizeSearchParams(state.route.params);
-  params.genderValues = params.genderValues.includes(gender)
-    ? params.genderValues.filter((item) => item !== gender)
-    : [...params.genderValues, gender];
+  params.genderValues = params.genderValues.includes(gender) ? [] : [gender];
   state.route.params = params;
   render();
 }
