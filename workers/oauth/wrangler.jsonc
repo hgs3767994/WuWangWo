@@ -1,0 +1,12 @@
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "forget-me-not-oauth",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-03",
+  "workers_dev": true,
+  "vars": {
+    "APP_ORIGINS": "",
+    "GOOGLE_WEB_CLIENT_ID": "",
+    "GOOGLE_OAUTH_REDIRECT_URI": ""
+  }
+}
