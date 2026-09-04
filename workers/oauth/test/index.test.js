@@ -22,14 +22,14 @@ test("health endpoint verifies an attached D1 database without writing data", as
       queries.push(query);
       return query === "SELECT 1 AS ready"
         ? { first: async () => ({ ready: 1 }) }
-        : { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }] }) };
+        : { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
     }
   };
   const response = await worker.fetch(new Request("https://example.test/health"), { OAUTH_DB: database });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).storageReady, true);
   assert.equal((await worker.fetch(new Request("https://example.test/health"), { OAUTH_DB: database })).status, 200);
-  assert.deepEqual(queries, ["SELECT 1 AS ready", "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('oauth_accounts', 'oauth_handoffs')", "SELECT 1 AS ready", "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('oauth_accounts', 'oauth_handoffs')"]);
+  assert.deepEqual(queries, ["SELECT 1 AS ready", "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('oauth_accounts', 'oauth_handoffs', 'oauth_sessions')", "SELECT 1 AS ready", "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('oauth_accounts', 'oauth_handoffs', 'oauth_sessions')"]);
 });
 
 test("configuration endpoint names missing values without exposing any secret", async () => {
