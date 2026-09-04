@@ -1,5 +1,6 @@
 import { getItem, removeItem, setItem } from "./db.js";
 import { connectDrive, disconnectDrive, driveAuthStatus, driveReadiness, listDriveFileRevisions, listDriveFiles, readDriveFile, readDriveFileRevision, writeDriveFile } from "./drive.js";
+import { completeGoogleOAuthHandoff } from "./drive-google.js";
 import { APP_CONFIG, driveFileName, driveProviderLabel } from "./config.js";
 import { mergeVaults } from "./sync.js";
 import { buildVaultXlsx } from "./xlsx.js";
@@ -112,6 +113,7 @@ let state = {
 async function boot() {
   registerDeveloperAccessGuard();
   registerAutoLock();
+  try { await completeGoogleOAuthHandoff(); } catch {}
   const storedAppState = await getItem("appState");
   const appState = normalizeLoadedAppState(storedAppState);
   if (storedAppState && appState !== storedAppState) await setItem("appState", appState);

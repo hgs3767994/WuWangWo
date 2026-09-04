@@ -3,7 +3,8 @@ import { join } from "node:path";
 
 const outputDir = "dist";
 const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
-const driveProvider = clientId ? "google" : "mock";
+const oauthApiUrl = process.env.GOOGLE_OAUTH_API_URL?.trim().replace(/\/$/, "") ?? "";
+const driveProvider = oauthApiUrl ? "google" : "mock";
 const entries = [
   "index.html",
   "privacy.html",
@@ -24,12 +25,12 @@ for (const entry of entries) {
 
 await writeFile(join(outputDir, ".nojekyll"), "");
 await writeFile(join(outputDir, "404.html"), redirectPage());
-await writeFile(join(outputDir, "src", "runtime-config.js"), runtimeConfigSource({ clientId, driveProvider }));
+await writeFile(join(outputDir, "src", "runtime-config.js"), runtimeConfigSource({ clientId, oauthApiUrl, driveProvider }));
 
 console.log(`GitHub Pages build ready in ${outputDir}/`);
-console.log(clientId ? "Google Drive mode: google" : "Google Drive mode: mock; set GOOGLE_OAUTH_CLIENT_ID to enable google mode.");
+console.log(oauthApiUrl ? "Google Drive mode: Worker proxy" : "Google Drive mode: mock; set GOOGLE_OAUTH_API_URL to enable the Worker proxy.");
 
-function runtimeConfigSource({ clientId, driveProvider }) {
+function runtimeConfigSource({ clientId, oauthApiUrl, driveProvider }) {
   return `// This file is generated during GitHub Pages deployment.
 // OAuth Client ID is public browser configuration. Do not put a client secret here.
 let localConfig = {};
@@ -40,11 +41,13 @@ try {
 window.FORGET_ME_NOT_CONFIG = {
   driveProvider: ${JSON.stringify(driveProvider)},
   googleDrive: {
-    clientId: ${JSON.stringify(clientId)}
+    clientId: ${JSON.stringify(clientId)},
+    oauthApiUrl: ${JSON.stringify(oauthApiUrl)}
   },
   ...localConfig,
   googleDrive: {
     clientId: ${JSON.stringify(clientId)},
+    oauthApiUrl: ${JSON.stringify(oauthApiUrl)},
     ...(localConfig.googleDrive ?? {})
   }
 };

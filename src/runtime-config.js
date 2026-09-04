@@ -4,7 +4,7 @@
 // window.FORGET_ME_NOT_CONFIG = {
 //   driveProvider: "google",
 //   googleDrive: {
-//     clientId: "YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com"
+//     oauthApiUrl: "https://YOUR-WORKER.workers.dev"
 //   }
 // };
 

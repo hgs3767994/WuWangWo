@@ -1,316 +1,84 @@
 import { APP_CONFIG, isGoogleDriveConfigured } from "./config.js";
 
-const GIS_SCRIPT_URL = "https://accounts.google.com/gsi/client";
-const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
-const DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
-const USERINFO_API = "https://openidconnect.googleapis.com/v1/userinfo";
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata openid email";
-const GIS_LOAD_TIMEOUT_MS = 15000;
-const GOOGLE_AUTH_TIMEOUT_MS = 60000;
-const GOOGLE_FETCH_TIMEOUT_MS = 30000;
+const SESSION_STORAGE_KEY = "forget-me-not-oauth-session";
 
-let gisLoadPromise = null;
-let tokenClient = null;
-let accessToken = "";
-let tokenExpiresAt = 0;
-let accountEmail = "";
-let authRequestPromise = null;
-
-export async function writeGoogleDriveFile(name, content) {
-  const existing = await findGoogleDriveFile(name);
-  const metadata = {
-    name,
-    mimeType: "application/json",
-    parents: existing ? undefined : ["appDataFolder"]
-  };
-  const body = multipartBody(metadata, JSON.stringify(content));
-  const path = existing
-    ? `${DRIVE_UPLOAD_BASE}/files/${encodeURIComponent(existing.id)}?uploadType=multipart`
-    : `${DRIVE_UPLOAD_BASE}/files?uploadType=multipart`;
-  await googleFetch(path, {
-    method: existing ? "PATCH" : "POST",
-    headers: {
-      "Content-Type": `multipart/related; boundary=${multipartBoundary()}`
-    },
-    body
-  });
-}
-
-export async function readGoogleDriveFile(name) {
-  const file = await findGoogleDriveFile(name);
-  if (!file) return null;
-  return googleFetch(`${DRIVE_API_BASE}/files/${encodeURIComponent(file.id)}?alt=media`);
-}
-
-export async function listGoogleDriveFileRevisions(name) {
-  const file = await findGoogleDriveFile(name);
-  if (!file) return { file: null, revisions: [] };
-  const revisions = [];
-  let pageToken = "";
-  do {
-    const query = new URLSearchParams({
-      pageSize: "1000",
-      fields: "nextPageToken,revisions(id,modifiedTime,keepForever,mimeType,size)"
-    });
-    if (pageToken) query.set("pageToken", pageToken);
-    const result = await googleFetch(`${DRIVE_API_BASE}/files/${encodeURIComponent(file.id)}/revisions?${query.toString()}`);
-    revisions.push(...(result.revisions ?? []));
-    pageToken = result.nextPageToken ?? "";
-  } while (pageToken);
-  return { file, revisions };
-}
-
-export async function readGoogleDriveFileRevision(name, revisionId) {
-  const file = await findGoogleDriveFile(name);
-  if (!file) return null;
-  return googleFetch(
-    `${DRIVE_API_BASE}/files/${encodeURIComponent(file.id)}/revisions/${encodeURIComponent(revisionId)}?alt=media&acknowledgeAbuse=true`
-  );
-}
-
-export async function removeGoogleDriveFile(name) {
-  const file = await findGoogleDriveFile(name);
-  if (!file) return;
-  await googleFetch(`${DRIVE_API_BASE}/files/${encodeURIComponent(file.id)}`, { method: "DELETE" });
-}
-
-export async function listGoogleDriveFiles() {
-  const [keyPackage, vault] = await Promise.all([
-    findGoogleDriveFile(APP_CONFIG.googleDrive.fileNames.keyPackage),
-    findGoogleDriveFile(APP_CONFIG.googleDrive.fileNames.vault)
-  ]);
-  return {
-    hasKeyPackage: Boolean(keyPackage),
-    hasVault: Boolean(vault)
-  };
-}
+export async function writeGoogleDriveFile(name, content) { await execute("write", { name, content }); }
+export async function readGoogleDriveFile(name) { return execute("read", { name }); }
+export async function removeGoogleDriveFile(name) { await execute("delete", { name }); }
+export async function listGoogleDriveFileRevisions(name) { return execute("revisions", { name }); }
+export async function readGoogleDriveFileRevision(name, revisionId) { return execute("readRevision", { name, revisionId }); }
+export async function listGoogleDriveFiles() { return execute("list"); }
 
 export async function testGoogleDriveConnection() {
-  const testFileName = `diagnostic-${crypto.randomUUID()}.json`;
-  const payload = {
-    fileType: "forget-me-not-drive-diagnostic",
-    createdAt: new Date().toISOString()
-  };
-  await connectGoogleDrive();
-  await writeGoogleDriveFile(testFileName, payload);
-  const loaded = await readGoogleDriveFile(testFileName);
-  await removeGoogleDriveFile(testFileName);
-  return {
-    ok: loaded?.fileType === payload.fileType,
-    fileName: testFileName
-  };
+  const fileName = `diagnostic-${crypto.randomUUID()}.json`;
+  const payload = { fileType: "forget-me-not-drive-diagnostic", createdAt: new Date().toISOString() };
+  await writeGoogleDriveFile(fileName, payload);
+  const loaded = await readGoogleDriveFile(fileName);
+  await removeGoogleDriveFile(fileName);
+  return { ok: loaded?.fileType === payload.fileType, fileName };
 }
 
-export async function connectGoogleDrive(options = {}) {
-  await connectGoogleAccessToken({ interactive: options.interactive !== false });
-  await refreshGoogleAccountEmail();
-  return { connected: true, accountEmail };
+export async function connectGoogleDrive({ interactive = true } = {}) {
+  const session = await completeGoogleOAuthHandoff();
+  if (session) return { connected: true, accountEmail: session.accountEmail };
+  const existing = readSession();
+  if (existing && Date.parse(existing.expiresAt) > Date.now() + 30_000) return { connected: true, accountEmail: existing.accountEmail ?? "" };
+  if (!interactive) throw new Error("google-drive-auth-required");
+  const returnTo = new URL(location.href);
+  returnTo.searchParams.delete("oauth_handoff");
+  location.assign(`${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ return_to: returnTo.toString() })}`);
+  return new Promise(() => {});
 }
 
-export function disconnectGoogleDrive() {
-  if (accessToken && globalThis.google?.accounts?.oauth2?.revoke) {
-    globalThis.google.accounts.oauth2.revoke(accessToken, () => {});
-  }
-  accessToken = "";
-  tokenExpiresAt = 0;
-  accountEmail = "";
-}
+export function disconnectGoogleDrive() { sessionStorage.removeItem(SESSION_STORAGE_KEY); }
 
 export function googleDriveAuthStatus() {
-  return {
-    hasAccessToken: Boolean(accessToken),
-    expiresAt: tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : "",
-    accountEmail
-  };
+  const session = readSession();
+  return { hasAccessToken: Boolean(session && Date.parse(session.expiresAt) > Date.now()), expiresAt: session?.expiresAt ?? "", accountEmail: session?.accountEmail ?? "" };
 }
 
 export function googleDriveReadiness() {
   if (isGoogleDriveConfigured()) return { ready: true, message: "" };
-  return {
-    ready: false,
-    message: "尚未設定 Google Drive OAuth Client ID，目前仍需使用本機模擬同步。"
-  };
+  return { ready: false, message: "尚未設定 Google Drive Worker API 網址，目前仍需使用本機模擬同步。" };
 }
 
-async function findGoogleDriveFile(name) {
-  const escapedName = name.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
-  const query = encodeURIComponent(`name = '${escapedName}' and trashed = false`);
-  const result = await googleFetch(
-    `${DRIVE_API_BASE}/files?spaces=appDataFolder&q=${query}&fields=files(id,name,modifiedTime)&pageSize=1`
-  );
-  return result.files?.[0] ?? null;
-}
-
-async function googleFetch(url, options = {}) {
-  const token = await ensureGoogleAccessToken({ interactive: options.interactive === true });
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), GOOGLE_FETCH_TIMEOUT_MS);
-  let response;
+export async function completeGoogleOAuthHandoff() {
+  const url = new URL(location.href);
+  const handoff = url.searchParams.get("oauth_handoff");
+  if (!handoff) return null;
   try {
-    response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(options.headers ?? {})
-      }
-    });
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      throw new Error("google-drive-request-timeout");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-  if (response.status === 204) return null;
-  if (!response.ok) {
-    let details = "";
-    try {
-      const payload = await response.clone().json();
-      const apiMessage = payload?.error?.message ?? payload?.error_description ?? "";
-      const apiStatus = payload?.error?.status ?? "";
-      details = [apiStatus, apiMessage].filter(Boolean).join(":");
-    } catch {}
-    throw new Error(`google-drive-request-failed:${response.status}${details ? `:${details}` : ""}`);
-  }
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) return response.json();
-  return response.text();
-}
-
-async function refreshGoogleAccountEmail() {
-  try {
-    const profile = await googleFetch(USERINFO_API);
-    accountEmail = profile?.email ?? "";
+    const response = await apiFetch("/v1/oauth/google/handoff/exchange", { handoff }, false);
+    const profile = await execute("profile", {}, response.sessionToken);
+    const session = { sessionToken: response.sessionToken, expiresAt: response.expiresAt, accountEmail: profile?.email ?? "" };
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    url.searchParams.delete("oauth_handoff");
+    history.replaceState(history.state, "", url);
+    return session;
   } catch {
-    accountEmail = "";
+    url.searchParams.delete("oauth_handoff");
+    history.replaceState(history.state, "", url);
+    throw new Error("google-drive-handoff-failed");
   }
 }
 
-async function connectGoogleAccessToken({ interactive = true } = {}) {
-  if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
-  if (!interactive) return ensureGoogleAccessToken({ interactive: false });
-  if (authRequestPromise) return authRequestPromise;
-  authRequestPromise = (async () => {
-    try {
-      return await ensureGoogleAccessToken({ interactive: true, prompt: "" });
-    } catch (error) {
-      // Only retry when Google explicitly says an interaction is required.
-      // A timeout means the original mobile authorization flow may still be
-      // open; opening a second flow causes Safari/iPad account prompts to loop.
-      if (!isGoogleInteractionRequired(error)) throw error;
-      return ensureGoogleAccessToken({ interactive: true, prompt: "consent" });
-    }
-  })();
-  try {
-    return await authRequestPromise;
-  } finally {
-    authRequestPromise = null;
-  }
+async function execute(operation, values = {}, overrideToken = "") {
+  const session = overrideToken ? { sessionToken: overrideToken } : readSession();
+  if (!session?.sessionToken) throw new Error("google-drive-auth-required");
+  const response = await apiFetch("/v1/drive/execute", { operation, ...values }, session.sessionToken);
+  return response.result;
 }
 
-async function ensureGoogleAccessToken({ interactive = false, prompt = "" } = {}) {
-  if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
+async function apiFetch(path, body, sessionToken) {
   if (!isGoogleDriveConfigured()) throw new Error(googleDriveReadiness().message);
-  if (!interactive) throw new Error("google-drive-auth-required");
-  await loadGoogleIdentityServices();
-  tokenClient ??= globalThis.google.accounts.oauth2.initTokenClient({
-    client_id: APP_CONFIG.googleDrive.clientId,
-    scope: DRIVE_SCOPE,
-    callback: () => {}
+  const response = await fetch(`${apiUrl()}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}) },
+    body: JSON.stringify(body)
   });
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const timeoutId = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new Error("google-drive-auth-timeout"));
-    }, GOOGLE_AUTH_TIMEOUT_MS);
-    const finishResolve = (value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
-      resolve(value);
-    };
-    const finishReject = (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
-      reject(error);
-    };
-    tokenClient.callback = (response) => {
-      if (response.error) {
-        finishReject(new Error(response.error));
-        return;
-      }
-      if (!response.access_token) {
-        finishReject(new Error("google-drive-auth-required"));
-        return;
-      }
-      accessToken = response.access_token;
-      tokenExpiresAt = Date.now() + Number(response.expires_in ?? 3600) * 1000;
-      finishResolve(accessToken);
-    };
-    try {
-      tokenClient.requestAccessToken({ prompt });
-    } catch (error) {
-      finishReject(error);
-    }
-  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error ?? "google-drive-request-failed");
+  return payload;
 }
 
-function isGoogleInteractionRequired(error) {
-  const message = error?.message ?? "";
-  return ["google-drive-auth-required", "interaction_required", "login_required", "consent_required"].some((text) => message.includes(text));
-}
-
-function loadGoogleIdentityServices() {
-  if (globalThis.google?.accounts?.oauth2) return Promise.resolve();
-  if (gisLoadPromise) return gisLoadPromise;
-  gisLoadPromise = new Promise((resolve, reject) => {
-    let settled = false;
-    const script = document.createElement("script");
-    const timeoutId = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new Error("google-identity-services-load-timeout"));
-    }, GIS_LOAD_TIMEOUT_MS);
-    script.src = GIS_SCRIPT_URL;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
-      resolve();
-    };
-    script.onerror = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
-      reject(new Error("google-identity-services-load-failed"));
-    };
-    document.head.append(script);
-  });
-  return gisLoadPromise;
-}
-
-function multipartBoundary() {
-  return "forget_me_not_boundary";
-}
-
-function multipartBody(metadata, content) {
-  const boundary = multipartBoundary();
-  return [
-    `--${boundary}`,
-    "Content-Type: application/json; charset=UTF-8",
-    "",
-    JSON.stringify(metadata),
-    `--${boundary}`,
-    "Content-Type: application/json; charset=UTF-8",
-    "",
-    content,
-    `--${boundary}--`
-  ].join("\r\n");
-}
+function apiUrl() { return String(APP_CONFIG.googleDrive.oauthApiUrl).replace(/\/$/, ""); }
+function readSession() { try { return JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEY) ?? "null"); } catch { return null; } }

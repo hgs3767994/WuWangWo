@@ -2,10 +2,11 @@ const userConfig = globalThis.window?.FORGET_ME_NOT_CONFIG ?? {};
 
 export const APP_CONFIG = {
   appVersion: "0.1.0",
-  cacheName: "forget-me-not-v116",
+  cacheName: "forget-me-not-v117",
   driveProvider: "mock",
   googleDrive: {
     clientId: "",
+    oauthApiUrl: "",
     appFolderName: "勿忘我",
     fileNames: {
       keyPackage: "key-package.enc",
@@ -15,6 +16,7 @@ export const APP_CONFIG = {
   ...userConfig,
   googleDrive: {
     clientId: "",
+    oauthApiUrl: "",
     appFolderName: "勿忘我",
     fileNames: {
       keyPackage: "key-package.enc",
@@ -34,7 +36,7 @@ export function isMockDrive() {
 }
 
 export function isGoogleDriveConfigured() {
-  return APP_CONFIG.driveProvider === "google" && Boolean(APP_CONFIG.googleDrive?.clientId);
+  return APP_CONFIG.driveProvider === "google" && Boolean(APP_CONFIG.googleDrive?.oauthApiUrl);
 }
 
 export function driveProviderLabel() {

@@ -1,8 +1,9 @@
-import { authorizationUrl, exchangeCode, googleProfile } from "./google-oauth.js";
+import { authorizationUrl, exchangeCode, googleProfile, refreshAccessToken } from "./google-oauth.js";
 import { createOAuthState } from "./oauth-state.js";
 import { verifyOAuthState } from "./oauth-state.js";
-import { encryptTokenEnvelope } from "./token-envelope.js";
-import { consumeHandoff, createHandoff, createSession, saveAccount } from "./oauth-store.js";
+import { decryptTokenEnvelope, encryptTokenEnvelope } from "./token-envelope.js";
+import { consumeHandoff, createHandoff, createSession, saveAccount, sessionAccount } from "./oauth-store.js";
+import { executeDriveOperation } from "./drive-proxy.js";
 
 const SERVICE_NAME = "forget-me-not-oauth";
 const REQUIRED_SECRETS = ["GOOGLE_WEB_CLIENT_SECRET", "OAUTH_STATE_SIGNING_KEY", "TOKEN_ENCRYPTION_KEY"];
@@ -18,6 +19,7 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/v1/oauth/google/start") {
       if (!hasRequiredConfiguration(env)) return json({ error: "oauth-not-configured" }, 503);
+      if (!(await databaseStatus(env.OAUTH_DB)).schemaReady) return json({ error: "storage-not-ready" }, 503);
       const returnTo = url.searchParams.get("return_to") ?? "";
       if (!allowedReturnTo(returnTo, env.APP_ORIGINS)) return json({ error: "invalid-return-to" }, 400);
       const nonce = crypto.randomUUID();
@@ -68,6 +70,29 @@ export default {
       }
     }
 
+    if (request.method === "POST" && url.pathname === "/v1/drive/execute") {
+      const origin = request.headers.get("Origin");
+      if (!isAllowedOrigin(origin, env.APP_ORIGINS)) return json({ error: "origin-not-allowed" }, 403);
+      if (!hasRequiredConfiguration(env)) return json({ error: "oauth-not-configured" }, 503, corsHeaders(origin));
+      const storage = await databaseStatus(env.OAUTH_DB);
+      if (!storage.schemaReady) return json({ error: "storage-not-ready" }, 503, corsHeaders(origin));
+      try {
+        const token = bearerToken(request.headers.get("Authorization"));
+        if (!token) return json({ error: "session-required" }, 401, corsHeaders(origin));
+        const now = new Date().toISOString();
+        const account = await sessionAccount(env.OAUTH_DB, { token, now });
+        if (!account) return json({ error: "session-expired" }, 401, corsHeaders(origin));
+        const accessToken = await currentAccessToken(env, account, now);
+        const body = await request.json();
+        const result = await executeDriveOperation({ ...body, accessToken });
+        return json({ result }, 200, corsHeaders(origin));
+      } catch (error) {
+        const message = String(error?.message ?? "");
+        const status = message.startsWith("drive-") ? 400 : message.includes("google-token") ? 401 : 502;
+        return json({ error: message.startsWith("drive-") || message.includes("google-token") ? message : "drive-request-failed" }, status, corsHeaders(origin));
+      }
+    }
+
     if (request.method === "GET" && url.pathname === "/health") {
       const storage = await databaseStatus(env?.OAUTH_DB);
       return json({
@@ -86,7 +111,7 @@ export default {
         oauthReady: hasRequiredConfiguration(env),
         missing: missingConfiguration(env),
         storageReady: storage.ready,
-        message: "OAuth code exchange is intentionally disabled until the Google clients, callback URL, and Worker secrets are configured."
+        message: "OAuth、短效 session 與受限 Drive proxy 只會在 Google 設定、Worker secrets 與 D1 schema 都完整時啟用。"
       });
     }
 
@@ -103,6 +128,7 @@ function allowedReturnTo(value, origins) {
 }
 function isAllowedOrigin(origin, origins) { return Boolean(origin) && String(origins ?? "").split(",").map((item) => item.trim()).includes(origin); }
 function cookie(header, name) { return String(header ?? "").split(";").map((item) => item.trim()).find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1) ?? ""; }
+function bearerToken(header) { const match = /^Bearer\s+(.+)$/i.exec(String(header ?? "")); return match?.[1] ?? ""; }
 
 function missingConfiguration(env) {
   return [...REQUIRED_PUBLIC_VALUES, ...REQUIRED_SECRETS].filter((name) => !String(env?.[name] ?? "").trim());
@@ -122,7 +148,24 @@ async function databaseStatus(database) {
   }
 }
 
-function corsHeaders(origin) { return { "access-control-allow-origin": origin, "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "content-type", vary: "Origin" }; }
+function corsHeaders(origin) { return { "access-control-allow-origin": origin, "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "content-type, authorization", vary: "Origin" }; }
+
+async function currentAccessToken(env, account, now) {
+  const tokens = await decryptTokenEnvelope({ ciphertext: account.token_ciphertext, iv: account.token_iv }, env.TOKEN_ENCRYPTION_KEY);
+  const expiresAt = Date.parse(account.token_expires_at ?? "");
+  if (tokens.access_token && Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000) return tokens.access_token;
+  const refreshed = await refreshAccessToken({ refreshToken: tokens.refresh_token, clientId: env.GOOGLE_WEB_CLIENT_ID, clientSecret: env.GOOGLE_WEB_CLIENT_SECRET });
+  const nextTokens = { ...tokens, ...refreshed, refresh_token: refreshed.refresh_token ?? tokens.refresh_token };
+  await saveAccount(env.OAUTH_DB, {
+    subject: account.google_subject,
+    envelope: await encryptTokenEnvelope(nextTokens, env.TOKEN_ENCRYPTION_KEY),
+    scopes: account.scopes,
+    expiresAt: refreshed.expires_in ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString() : null,
+    refreshTokenPresent: Boolean(nextTokens.refresh_token),
+    now
+  });
+  return nextTokens.access_token;
+}
 
 function json(payload, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(payload), {

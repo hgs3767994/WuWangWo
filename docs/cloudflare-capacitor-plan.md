@@ -20,11 +20,11 @@
 
 目前版本的 `recoveryCodeWrapper` 可解開 DEK，與 Recovery v2 不相容。遷移時必須在使用者仍能以主密碼或既有 trusted session 解開 DEK 的情況下，將它替換為只可驗證救援碼的 `recoveryAuthorizationVerifier`，再上傳新的 key package。未完成遷移的舊 key package 必須在 UI 清楚標為「舊式救援碼仍可解密資料」，不可默默宣稱已符合新政策。
 
-## Workers 第一階段
+## Workers OAuth 與同步 API
 
-`workers/oauth/` 現階段只提供不含機密的 health 與設定完整性端點。health endpoint 會以 `SELECT 1` 確認 `OAUTH_DB` 綁定可用，但不會寫入任何資料。它**不會**開始 OAuth、交換 authorization code、儲存 token 或接受同步資料。
+`workers/oauth/` 提供 health、Google OAuth callback、一次性 handoff 與受限的 Drive proxy。health endpoint 會以 `SELECT 1` 確認 `OAUTH_DB` 綁定可用；Google refresh token 只以加密 envelope 存於 D1。Worker 只接受 `key-package.enc`、`vault.enc` 與短暫診斷檔，不能存取 Drive 其他檔案，也不會解密 vault、DEK、主密碼或救援碼。
 
-在啟用 OAuth 前，先由 D1 Console 執行 `workers/oauth/schema.sql`。schema 只建立加密 token envelope 的 metadata 與一次性 handoff 雜湊；不存 vault、DEK、主密碼、救援碼、access token 明文或 refresh token 明文。執行成功後 health endpoint 會回傳 `schemaReady: true`。
+在啟用 OAuth 前，先由 D1 Console 執行 `workers/oauth/schema.sql`；既有資料庫還必須補執行 `workers/oauth/migrations/0002-sessions.sql`。schema 只建立加密 token envelope 的 metadata、一次性 handoff 雜湊與短效 session 雜湊；不存 vault、DEK、主密碼、救援碼、access token 明文或 refresh token 明文。執行成功後 health endpoint 會回傳 `schemaReady: true`。
 
 部署前必須由管理者設定：
 

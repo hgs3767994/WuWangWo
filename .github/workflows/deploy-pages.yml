@@ -40,6 +40,7 @@ jobs:
         run: npm run build:pages
         env:
           GOOGLE_OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_API_URL: ${{ vars.GOOGLE_OAUTH_API_URL }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

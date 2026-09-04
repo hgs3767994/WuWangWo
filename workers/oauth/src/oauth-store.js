@@ -31,4 +31,14 @@ export async function createSession(database, { token, subject, now }) {
   return { expiresAt };
 }
 
+export async function sessionAccount(database, { token, now }) {
+  const hash = await sha256(token);
+  return database
+    .prepare(`SELECT a.google_subject, a.token_ciphertext, a.token_iv, a.scopes, a.token_expires_at
+      FROM oauth_sessions s JOIN oauth_accounts a ON a.google_subject = s.google_subject
+      WHERE s.session_hash = ? AND s.expires_at > ? AND s.revoked_at IS NULL AND a.revoked_at IS NULL`)
+    .bind(hash, now)
+    .first();
+}
+
 async function sha256(value) { const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))); return btoa(String.fromCharCode(...bytes)); }
