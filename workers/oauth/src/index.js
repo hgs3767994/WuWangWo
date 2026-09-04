@@ -1,10 +1,21 @@
 const SERVICE_NAME = "forget-me-not-oauth";
+import { authorizationUrl } from "./google-oauth.js";
+import { createOAuthState } from "./oauth-state.js";
 const REQUIRED_SECRETS = ["GOOGLE_WEB_CLIENT_SECRET", "OAUTH_STATE_SIGNING_KEY", "TOKEN_ENCRYPTION_KEY"];
 const REQUIRED_PUBLIC_VALUES = ["APP_ORIGINS", "GOOGLE_WEB_CLIENT_ID", "GOOGLE_OAUTH_REDIRECT_URI"];
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (request.method === "GET" && url.pathname === "/v1/oauth/google/start") {
+      if (!hasRequiredConfiguration(env)) return json({ error: "oauth-not-configured" }, 503);
+      const returnTo = url.searchParams.get("return_to") ?? "";
+      if (!allowedReturnTo(returnTo, env.APP_ORIGINS)) return json({ error: "invalid-return-to" }, 400);
+      const nonce = crypto.randomUUID();
+      const state = await createOAuthState({ returnTo, nonce, secret: env.OAUTH_STATE_SIGNING_KEY });
+      return Response.redirect(authorizationUrl({ clientId: env.GOOGLE_WEB_CLIENT_ID, redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI, state }), 302);
+    }
 
     if (request.method === "GET" && url.pathname === "/health") {
       const storage = await databaseStatus(env?.OAUTH_DB);
@@ -34,6 +45,10 @@ export default {
 
 function hasRequiredConfiguration(env) {
   return missingConfiguration(env).length === 0;
+}
+
+function allowedReturnTo(value, origins) {
+  try { return String(origins).split(",").map((item) => item.trim()).includes(new URL(value).origin); } catch { return false; }
 }
 
 function missingConfiguration(env) {

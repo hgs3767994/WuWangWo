@@ -47,8 +47,8 @@ test("configuration endpoint names missing values without exposing any secret", 
   assert(!JSON.stringify(body).includes("public-client-id"));
 });
 
-test("unknown endpoints do not accidentally begin an OAuth flow", async () => {
+test("OAuth start remains unavailable without complete configuration", async () => {
   const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/start"), {});
-  assert.equal(response.status, 404);
-  assert.deepEqual(await response.json(), { error: "not-found" });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "oauth-not-configured" });
 });
