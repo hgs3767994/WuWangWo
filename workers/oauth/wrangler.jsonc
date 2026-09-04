@@ -4,9 +4,19 @@
   "main": "src/index.js",
   "compatibility_date": "2026-09-03",
   "workers_dev": true,
-  "vars": {
-    "APP_ORIGINS": "",
-    "GOOGLE_WEB_CLIENT_ID": "",
-    "GOOGLE_OAUTH_REDIRECT_URI": ""
+  "keep_vars": true,
+  "d1_databases": [
+    {
+      "binding": "OAUTH_DB",
+      "database_name": "forget-me-not-oauth-dev",
+      "database_id": "783c5b9d-de32-4c04-a85b-adcef8635446"
+    }
+  ],
+  "secrets": {
+    "required": [
+      "GOOGLE_WEB_CLIENT_SECRET",
+      "OAUTH_STATE_SIGNING_KEY",
+      "TOKEN_ENCRYPTION_KEY"
+    ]
   }
 }
