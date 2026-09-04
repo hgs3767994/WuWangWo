@@ -22,7 +22,9 @@
 
 ## Workers 第一階段
 
-`workers/oauth/` 現階段只提供不含機密的 health 與設定完整性端點。它**不會**開始 OAuth、交換 authorization code、儲存 token 或接受同步資料。
+`workers/oauth/` 現階段只提供不含機密的 health 與設定完整性端點。health endpoint 會以 `SELECT 1` 確認 `OAUTH_DB` 綁定可用，但不會寫入任何資料。它**不會**開始 OAuth、交換 authorization code、儲存 token 或接受同步資料。
+
+在啟用 OAuth 前，先由 D1 Console 執行 `workers/oauth/schema.sql`。schema 只建立加密 token envelope 的 metadata 與一次性 handoff 雜湊；不存 vault、DEK、主密碼、救援碼、access token 明文或 refresh token 明文。執行成功後 health endpoint 會回傳 `schemaReady: true`。
 
 部署前必須由管理者設定：
 

@@ -17,3 +17,4 @@
 工程設定、GitHub Pages 部署、Google OAuth、快取版本與安全備註請見：
 
 - [開發設定.md](開發設定.md)
+- [Cloudflare Workers 與 Capacitor 前置設計](docs/cloudflare-capacitor-plan.md)
