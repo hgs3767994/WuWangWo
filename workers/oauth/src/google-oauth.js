@@ -1,0 +1,5 @@
+const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const TOKEN_URL = "https://oauth2.googleapis.com/token";
+export const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.appdata openid email";
+export function authorizationUrl({ clientId, redirectUri, state }) { const url = new URL(AUTH_URL); Object.entries({ client_id: clientId, redirect_uri: redirectUri, response_type: "code", scope: GOOGLE_SCOPES, access_type: "offline", include_granted_scopes: "true", state }).forEach(([key, value]) => url.searchParams.set(key, value)); return url.toString(); }
+export async function exchangeCode({ code, clientId, clientSecret, redirectUri, fetchImpl = fetch }) { const response = await fetchImpl(TOKEN_URL, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: "authorization_code" }) }); if (!response.ok) throw new Error("google-token-exchange-failed"); return response.json(); }
