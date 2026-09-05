@@ -114,7 +114,8 @@ async function boot() {
   registerDeveloperAccessGuard();
   registerAutoLock();
   let oauthHandoffCompleted = false;
-  try { oauthHandoffCompleted = Boolean(await completeGoogleOAuthHandoff()); } catch {}
+  let oauthHandoffError = null;
+  try { oauthHandoffCompleted = Boolean(await completeGoogleOAuthHandoff()); } catch (error) { oauthHandoffError = error; }
   const storedAppState = await getItem("appState");
   let appState = normalizeLoadedAppState(storedAppState);
   if (oauthHandoffCompleted && appState?.googleDrive?.syncStatus === "syncing") {
@@ -125,6 +126,17 @@ async function boot() {
         syncStatus: syncStatusAfterLocalChange(appState.googleDrive),
         syncStartedAt: "",
         lastSyncError: ""
+      }
+    };
+  }
+  if (oauthHandoffError && appState?.googleDrive) {
+    appState = {
+      ...appState,
+      googleDrive: {
+        ...appState.googleDrive,
+        syncStatus: "error",
+        syncStartedAt: "",
+        lastSyncError: driveErrorMessage(oauthHandoffError, "Google Drive OAuth 回跳失敗，請再試一次。")
       }
     };
   }
@@ -175,6 +187,7 @@ async function boot() {
   registerHistoryNavigation();
   registerServiceWorker();
   registerInstallExperience();
+  if (oauthHandoffError) alert(driveErrorMessage(oauthHandoffError, "Google Drive OAuth 回跳失敗，請再試一次。"));
 }
 
 function normalizeLoadedAppState(appState) {
@@ -5367,6 +5380,10 @@ function driveErrorMessage(error, fallback) {
   if (message.includes("google-identity-services-load-timeout")) return "Google 登入服務載入逾時，請確認網路連線後再試。";
   if (message.includes("google-drive-auth-timeout")) return "Google Drive 授權等待逾時，請再按一次「立即同步」。";
   if (message.includes("google-drive-request-timeout")) return "Google Drive 連線逾時，請確認網路後再按「立即同步」。";
+  if (message.includes("google-drive-handoff-failed:origin-not-allowed")) return "OAuth Worker 拒絕目前網站來源，請檢查 Cloudflare 的 APP_ORIGINS 設定。";
+  if (message.includes("google-drive-handoff-failed:handoff-invalid-or-expired")) return "Google OAuth 回跳已逾時，請重新按「立即同步」。";
+  if (message.includes("google-drive-handoff-failed:handoff-exchange-failed")) return "OAuth Worker 無法建立同步 session，請查看 Cloudflare Worker Logs。";
+  if (message.includes("google-drive-handoff-failed:drive-request-failed")) return "OAuth Worker 無法讀取 Google 帳號資料，請查看 Cloudflare Worker Logs。";
   if (message.includes("access_denied")) return "Google Drive 授權已取消，尚未完成連結。";
   if (message.includes("popup")) return "Google 授權視窗被阻擋，請允許彈出視窗後再試。";
   if (message.includes("google-drive-auth-required") || message.includes("interaction_required") || message.includes("login_required") || message.includes("consent_required")) {

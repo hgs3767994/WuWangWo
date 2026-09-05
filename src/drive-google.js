@@ -54,10 +54,10 @@ export async function completeGoogleOAuthHandoff() {
     url.searchParams.delete("oauth_handoff");
     history.replaceState(history.state, "", url);
     return session;
-  } catch {
+  } catch (error) {
     url.searchParams.delete("oauth_handoff");
     history.replaceState(history.state, "", url);
-    throw new Error("google-drive-handoff-failed");
+    throw new Error(`google-drive-handoff-failed:${error?.message ?? "unknown"}`);
   }
 }
 
