@@ -56,6 +56,27 @@ async function wrapDek(dekBytes, secret, iterations = DEFAULT_ITERATIONS) {
   };
 }
 
+async function recoveryVerifierBytes(recoveryCode, salt, iterations) {
+  const baseKey = await crypto.subtle.importKey("raw", textBytes(recoveryCode), "PBKDF2", false, ["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, baseKey, 256));
+}
+
+export async function createRecoveryAuthorizationVerifier(recoveryCode, iterations = DEFAULT_ITERATIONS) {
+  const salt = randomBytes(16);
+  const verifier = await recoveryVerifierBytes(recoveryCode, salt, iterations);
+  return { version: 2, kdf: "PBKDF2", hash: "SHA-256", iterations, salt: bytesToBase64(salt), verifier: bytesToBase64(verifier), updatedAt: new Date().toISOString() };
+}
+
+export async function verifyRecoveryAuthorizationVerifier(record, recoveryCode) {
+  if (!record || record.version !== 2 || !recoveryCode) return false;
+  const actual = await recoveryVerifierBytes(recoveryCode, base64ToBytes(record.salt), record.iterations ?? DEFAULT_ITERATIONS);
+  const expected = base64ToBytes(record.verifier);
+  if (actual.length !== expected.length) return false;
+  let difference = 0;
+  for (let index = 0; index < actual.length; index += 1) difference |= actual[index] ^ expected[index];
+  return difference === 0;
+}
+
 export async function wrapDekForSecret(dekBytes, secret, iterations = DEFAULT_ITERATIONS) {
   return wrapDek(dekBytes, secret, iterations);
 }
@@ -145,7 +166,7 @@ export async function createKeyPackage({ vaultId, deviceId, masterPassword }) {
   const recoveryCode = generateRecoveryCode();
   const now = new Date().toISOString();
   const masterPasswordWrapper = await wrapDek(dekBytes, masterPassword);
-  const recoveryCodeWrapper = await wrapDek(dekBytes, recoveryCode);
+  const recoveryAuthorizationVerifier = await createRecoveryAuthorizationVerifier(recoveryCode);
 
   return {
     dekBytes,
@@ -164,8 +185,8 @@ export async function createKeyPackage({ vaultId, deviceId, masterPassword }) {
         ...masterPasswordWrapper,
         updatedByDeviceId: deviceId
       },
-      recoveryCodeWrapper: {
-        ...recoveryCodeWrapper,
+      recoveryAuthorizationVerifier: {
+        ...recoveryAuthorizationVerifier,
         recoveryCodeVersion: 1,
         updatedByDeviceId: deviceId
       },

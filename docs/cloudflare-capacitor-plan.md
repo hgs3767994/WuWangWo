@@ -16,9 +16,13 @@
 4. 舊裝置用其已解開的 DEK 建立新的 `masterPasswordWrapper`，更新 key package，並提高 `sessionEpoch` 使其他舊 session 失效。
 5. 新裝置以新密碼解開同一把 DEK；舊 vault 不被重新加密，資料得以保留。
 
+新密碼不會被放進 recovery request，也不會由一台裝置傳給另一台。使用者在新裝置先設定新密碼，再於核准頁核對兩端顯示的配對碼，最後在舊裝置手動輸入相同的新密碼。舊裝置會產生新的救援碼，必須另行保存。
+
 ### 從現有格式遷移
 
 目前版本的 `recoveryCodeWrapper` 可解開 DEK，與 Recovery v2 不相容。遷移時必須在使用者仍能以主密碼或既有 trusted session 解開 DEK 的情況下，將它替換為只可驗證救援碼的 `recoveryAuthorizationVerifier`，再上傳新的 key package。未完成遷移的舊 key package 必須在 UI 清楚標為「舊式救援碼仍可解密資料」，不可默默宣稱已符合新政策。
+
+目前實作會在新建 vault、既有 v1 vault 成功重設密碼、或使用者於已解鎖裝置「重新產生救援碼」時，寫入 v2 verifier 並移除 `recoveryCodeWrapper`。單純更改主密碼不會暗中變更救援碼權限。
 
 ## Workers OAuth 與同步 API
 

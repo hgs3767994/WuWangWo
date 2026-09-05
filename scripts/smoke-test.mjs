@@ -1,12 +1,14 @@
 import { APP_CONFIG, driveFileName, driveProviderLabel, isGoogleDriveConfigured, isMockDrive } from "../src/config.js";
 import { mergeVaults } from "../src/sync.js";
 import { buildVaultXlsx } from "../src/xlsx.js";
+import { createKeyPackage, verifyRecoveryAuthorizationVerifier } from "../src/crypto.js";
 
 const tests = [
   ["config defaults stay safe", testConfigDefaults],
   ["sync merge combines duplicate interest names and detects conflicts", testSyncMerge],
   ["sync merge supports legacy customValues object", testLegacyCustomValues],
   ["xlsx export produces an Excel workbook blob", testXlsxExport]
+  ,["Recovery v2 verifier cannot unwrap a DEK", testRecoveryV2Verifier]
 ];
 
 for (const [name, test] of tests) {
@@ -107,6 +109,13 @@ async function testXlsxExport() {
 
   assert(blob.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "wrong xlsx mime type");
   assert(blob.size > 1000, "xlsx blob is unexpectedly small");
+}
+
+async function testRecoveryV2Verifier() {
+  const result = await createKeyPackage({ vaultId: "vault-test", deviceId: "device-test", masterPassword: "password-test" });
+  assert(!result.keyPackage.recoveryCodeWrapper, "new key package must not include a recovery DEK wrapper");
+  assert(await verifyRecoveryAuthorizationVerifier(result.keyPackage.recoveryAuthorizationVerifier, result.recoveryCode), "recovery verifier should accept its code");
+  assert(!(await verifyRecoveryAuthorizationVerifier(result.keyPackage.recoveryAuthorizationVerifier, "WRONG-CODE")), "recovery verifier should reject a wrong code");
 }
 
 function vault({ people = [], interestTags = [], customFieldDefs = [], revision = 1 }) {

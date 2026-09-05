@@ -1,5 +1,5 @@
 import { isMockDrive } from "./config.js";
-import { connectGoogleDrive, disconnectGoogleDrive, googleDriveAuthStatus, googleDriveReadiness, listGoogleDriveFileRevisions, listGoogleDriveFiles, readGoogleDriveFile, readGoogleDriveFileRevision, removeGoogleDriveFile, testGoogleDriveConnection, writeGoogleDriveFile } from "./drive-google.js";
+import { approveGoogleRecoveryRequest, connectGoogleDrive, createGoogleRecoveryRequest, disconnectGoogleDrive, getGoogleRecoveryRequest, googleDriveAuthStatus, googleDriveReadiness, listGoogleDriveFileRevisions, listGoogleDriveFiles, listGoogleRecoveryRequests, readGoogleDriveFile, readGoogleDriveFileRevision, removeGoogleDriveFile, testGoogleDriveConnection, writeGoogleDriveFile } from "./drive-google.js";
 import { listMockDriveFileRevisions, listMockDriveFiles, readMockDriveFile, readMockDriveFileRevision, removeMockDriveFile, writeMockDriveFile } from "./drive-mock.js";
 
 export async function writeDriveFile(name, content) {
@@ -71,6 +71,11 @@ export function driveReadiness() {
   if (isMockDrive()) return { ready: true, message: "" };
   return googleDriveReadiness();
 }
+
+export async function createDriveRecoveryRequest(values) { assertGoogleDriveReady(); return createGoogleRecoveryRequest(values); }
+export async function listDriveRecoveryRequests() { assertGoogleDriveReady(); return listGoogleRecoveryRequests(); }
+export async function getDriveRecoveryRequest(requestId) { assertGoogleDriveReady(); return getGoogleRecoveryRequest(requestId); }
+export async function approveDriveRecoveryRequest(requestId, values) { assertGoogleDriveReady(); return approveGoogleRecoveryRequest(requestId, values); }
 
 function assertGoogleDriveReady() {
   const readiness = googleDriveReadiness();

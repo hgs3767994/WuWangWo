@@ -18,6 +18,11 @@ export async function testGoogleDriveConnection() {
   return { ok: loaded?.fileType === payload.fileType, fileName };
 }
 
+export async function createGoogleRecoveryRequest(values) { return workerApiFetch("/v1/recovery/requests", values); }
+export async function listGoogleRecoveryRequests() { return workerApiFetch("/v1/recovery/requests", undefined, "GET"); }
+export async function getGoogleRecoveryRequest(requestId) { return workerApiFetch(`/v1/recovery/requests/${encodeURIComponent(requestId)}`, undefined, "GET"); }
+export async function approveGoogleRecoveryRequest(requestId, values) { return workerApiFetch(`/v1/recovery/requests/${encodeURIComponent(requestId)}/approve`, values); }
+
 export async function connectGoogleDrive({ interactive = true } = {}) {
   const session = await completeGoogleOAuthHandoff();
   if (session) return { connected: true, accountEmail: session.accountEmail };
@@ -81,6 +86,20 @@ async function apiFetch(path, body, sessionToken) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error ?? "google-drive-request-failed");
+  return payload;
+}
+
+async function workerApiFetch(path, body, method = "POST") {
+  const session = readSession();
+  if (!session?.sessionToken) throw new Error("google-drive-auth-required");
+  if (!isGoogleDriveConfigured()) throw new Error(googleDriveReadiness().message);
+  const response = await fetch(`${apiUrl()}${path}`, {
+    method,
+    headers: { "content-type": "application/json", Authorization: `Bearer ${session.sessionToken}` },
+    ...(method === "GET" ? {} : { body: JSON.stringify(body ?? {}) })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error ?? "recovery-request-failed");
   return payload;
 }
 

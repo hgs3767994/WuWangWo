@@ -1,11 +1,12 @@
 import { getItem, removeItem, setItem } from "./db.js";
-import { connectDrive, disconnectDrive, driveAuthStatus, driveReadiness, listDriveFileRevisions, listDriveFiles, readDriveFile, readDriveFileRevision, writeDriveFile } from "./drive.js";
+import { approveDriveRecoveryRequest, connectDrive, createDriveRecoveryRequest, disconnectDrive, driveAuthStatus, driveReadiness, getDriveRecoveryRequest, listDriveFileRevisions, listDriveFiles, listDriveRecoveryRequests, readDriveFile, readDriveFileRevision, writeDriveFile } from "./drive.js";
 import { completeGoogleOAuthHandoff } from "./drive-google.js";
 import { APP_CONFIG, driveFileName, driveProviderLabel } from "./config.js";
 import { mergeVaults } from "./sync.js";
 import { buildVaultXlsx } from "./xlsx.js";
 import {
   createKeyPackage,
+  createRecoveryAuthorizationVerifier,
   createLocalStorageKey,
   decryptLocalEnvelope,
   createTrustedSessionWithDek,
@@ -16,6 +17,7 @@ import {
   normalizeRecoveryCode,
   restoreDekFromTrustedSession,
   unwrapDek,
+  verifyRecoveryAuthorizationVerifier,
   wrapDekForSecret
 } from "./crypto.js";
 import {
@@ -1465,6 +1467,11 @@ async function resetForgottenPassword(event) {
   if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
   try {
     const recoveryCode = normalizeRecoveryCode(draft.recoveryCode ?? "");
+    const currentKeyPackage = await getCurrentKeyPackage();
+    if (isRecoveryV2(currentKeyPackage)) {
+      alert("此 vault 已使用 Recovery v2。請在新裝置連結相同的 Google Drive 後，從「忘記密碼」建立舊裝置核准請求。");
+      return;
+    }
     const { keyPackage, dekBytes } = await unwrapCurrentDek(recoveryCode, "recoveryCodeWrapper");
     const updated = await replaceMasterPasswordAndRecovery(keyPackage, dekBytes, draft.newPassword, true);
     await uploadKeyPackageToDrive();
@@ -1489,6 +1496,21 @@ async function resetCloudPasswordWithRecovery(event) {
     vaultEnvelope = await readDriveFile(driveFileName("vault"));
     if (!keyPackage || !vaultEnvelope) {
       alert("尚未找到既有同步資料");
+      return;
+    }
+    if (isRecoveryV2(keyPackage)) {
+      if (!(await verifyRecoveryAuthorizationVerifier(keyPackage.recoveryAuthorizationVerifier, recoveryCode))) {
+        alert("救援碼不正確，請確認後再試一次");
+        return;
+      }
+      const pairingCode = recoveryPairingCode();
+      const request = await createDriveRecoveryRequest({
+        vaultId: keyPackage.vaultId,
+        requesterDeviceId: state.appState?.deviceId ?? createDeviceId(),
+        pairingCode
+      });
+      state.route = { name: "recoveryPending", recoveryRequestId: request.requestId, pairingCode, mode };
+      render();
       return;
     }
     dekBytes = await unwrapDek(keyPackage.recoveryCodeWrapper, recoveryCode, keyPackage.crypto.iterations);
@@ -1564,6 +1586,78 @@ async function resetCloudPasswordWithRecovery(event) {
     returnTo: conflicts.length ? { name: "syncConflicts" } : { name: "home" }
   });
 }
+
+async function checkRecoveryRequest() {
+  try {
+    const result = await getDriveRecoveryRequest(state.route.recoveryRequestId);
+    if (result.request?.status === "approved") {
+      state.route = { name: "recoveryComplete", mode: state.route.mode };
+      render();
+      return;
+    }
+    if (result.request?.status === "expired") alert("此救援請求已逾時，請重新開始。");
+    else alert("舊裝置尚未核准此請求。");
+  } catch (error) { alert(driveErrorMessage(error, "無法讀取救援請求狀態。")); }
+}
+
+async function completeRecoveryV2(event) {
+  event.preventDefault();
+  const draft = state.route.securityDraft ?? {};
+  const mode = state.route.mode === "merge" ? "merge" : "existing";
+  if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
+  try {
+    const keyPackage = await readDriveFile(driveFileName("keyPackage"));
+    const vaultEnvelope = await readDriveFile(driveFileName("vault"));
+    const dekBytes = await unwrapDek(keyPackage.masterPasswordWrapper, draft.newPassword, keyPackage.crypto.iterations);
+    const remoteVault = normalizeVault(pruneDeleted(await decryptVaultEnvelope(vaultEnvelope, dekBytes)));
+    const deviceId = state.appState?.deviceId ?? createDeviceId();
+    const localBeforeSync = mode === "merge" && state.vault ? structuredClone(state.vault) : null;
+    const merged = localBeforeSync ? mergeVaults(localBeforeSync, remoteVault, deviceId) : null;
+    const finalVault = merged ? { ...merged.vault, vaultId: remoteVault.vaultId } : remoteVault;
+    const conflicts = merged?.conflicts ?? [];
+    state.dekBytes = dekBytes;
+    state.vault = normalizeVault(pruneDeleted(finalVault));
+    state.appState = {
+      schemaVersion: 1, mode: "driveSync", deviceId, currentVaultId: remoteVault.vaultId,
+      ui: { themeId: currentThemeId() }, ...(state.appState ?? {}), mode: "driveSync", deviceId, currentVaultId: remoteVault.vaultId,
+      googleDrive: { ...(state.appState?.googleDrive ?? {}), connected: true, syncStatus: conflicts.length ? "needsResolution" : "synced", lastSyncAt: new Date().toISOString(), lastLocalChangeAt: "", lastSyncError: "", accountEmail: currentDriveAccountEmail(), pendingConflicts: conflicts, simulated: isSimulatedDrive() }
+    };
+    await setItem("keyPackage", keyPackage);
+    await setItem("trustedSession", await createTrustedSessionWithDek({ vaultId: keyPackage.vaultId, deviceId, sessionEpoch: keyPackage.securityMeta.sessionEpoch, dekBytes }));
+    await save();
+    if (merged) await uploadCurrentVaultToDrive();
+    navigate(conflicts.length ? { name: "syncConflicts" } : { name: "home" }, { replace: true, force: true });
+  } catch { alert("舊裝置尚未用相同的新密碼完成核准，或新密碼不正確。"); }
+}
+
+async function refreshRecoveryRequests() {
+  try {
+    const result = await listDriveRecoveryRequests();
+    state.route = { name: "recoveryRequests", requests: result.requests ?? [] };
+    render();
+  } catch (error) { alert(driveErrorMessage(error, "無法讀取救援請求。")); }
+}
+
+async function approveRecoveryRequest(requestId, pairingCode) {
+  if (!state.dekBytes) { alert("此裝置必須維持已解鎖狀態才能核准救援。 "); return; }
+  if (!confirm(`請確認新裝置顯示的配對碼也是「${pairingCode}」。核准後請在此裝置輸入新裝置設定的相同新密碼。`)) return;
+  const newPassword = prompt("請輸入新裝置設定的新密碼（不會傳送到網路）：");
+  if (newPassword === null) return;
+  const confirmation = prompt("再次輸入相同的新密碼：");
+  if (!validateNewPassword(newPassword, confirmation)) return;
+  try {
+    const keyPackage = await getCurrentKeyPackage();
+    const updated = await buildReplacedMasterPasswordAndRecovery({ keyPackage, dekBytes: state.dekBytes, newPassword, deviceId: state.appState.deviceId, bumpSession: true });
+    await setItem("keyPackage", updated.keyPackage);
+    await uploadKeyPackageToDrive();
+    await approveDriveRecoveryRequest(requestId, { approverDeviceId: state.appState.deviceId, sessionEpoch: updated.keyPackage.securityMeta.sessionEpoch });
+    await setItem("trustedSession", await createTrustedSessionWithDek({ vaultId: updated.keyPackage.vaultId, deviceId: state.appState.deviceId, sessionEpoch: updated.keyPackage.securityMeta.sessionEpoch, dekBytes: state.dekBytes }));
+    showRecoveryCodeRoute(updated.recoveryCode, { oldInvalid: true, returnTo: { name: "settings" } });
+  } catch (error) { alert(driveErrorMessage(error, "無法核准救援請求，請稍後再試。")); }
+}
+
+function isRecoveryV2(keyPackage) { return keyPackage?.recoveryAuthorizationVerifier?.version === 2; }
+function recoveryPairingCode() { return crypto.randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase(); }
 
 async function scanDriveRevisionRecovery(event) {
   event.preventDefault();
@@ -1769,7 +1863,7 @@ async function replaceMasterPasswordAndRecovery(keyPackage, dekBytes, newPasswor
     await createTrustedSessionWithDek({
       vaultId: updatedKeyPackage.vaultId,
       deviceId: state.appState.deviceId,
-      sessionEpoch,
+      sessionEpoch: updatedKeyPackage.securityMeta.sessionEpoch,
       dekBytes
     })
   );
@@ -1780,19 +1874,20 @@ async function buildReplacedMasterPasswordAndRecovery({ keyPackage, dekBytes, ne
   const now = new Date().toISOString();
   const recoveryCode = generateRecoveryCode();
   const masterPasswordWrapper = await wrapDekForSecret(dekBytes, newPassword, keyPackage.crypto.iterations);
-  const recoveryCodeWrapper = await wrapDekForSecret(dekBytes, recoveryCode, keyPackage.crypto.iterations);
+  const recoveryAuthorizationVerifier = await createRecoveryAuthorizationVerifier(recoveryCode, keyPackage.crypto.iterations);
   const sessionEpoch = bumpSession ? (keyPackage.securityMeta?.sessionEpoch ?? 1) + 1 : (keyPackage.securityMeta?.sessionEpoch ?? 1);
-  const recoveryCodeVersion = keyPackage.recoveryCodeWrapper?.recoveryCodeVersion ?? 1;
+  const recoveryCodeVersion = keyPackage.recoveryAuthorizationVerifier?.recoveryCodeVersion ?? keyPackage.recoveryCodeWrapper?.recoveryCodeVersion ?? 1;
+  const { recoveryCodeWrapper, ...withoutLegacyRecoveryWrapper } = keyPackage;
   return {
     recoveryCode,
     keyPackage: {
-      ...keyPackage,
+      ...withoutLegacyRecoveryWrapper,
       masterPasswordWrapper: {
         ...masterPasswordWrapper,
         updatedByDeviceId: deviceId
       },
-      recoveryCodeWrapper: {
-        ...recoveryCodeWrapper,
+      recoveryAuthorizationVerifier: {
+        ...recoveryAuthorizationVerifier,
         recoveryCodeVersion: recoveryCodeVersion + 1,
         updatedByDeviceId: deviceId
       },
@@ -1810,12 +1905,13 @@ async function buildReplacedMasterPasswordAndRecovery({ keyPackage, dekBytes, ne
 async function replaceRecoveryCode(keyPackage, dekBytes) {
   const recoveryCode = generateRecoveryCode();
   const now = new Date().toISOString();
-  const recoveryCodeWrapper = await wrapDekForSecret(dekBytes, recoveryCode, keyPackage.crypto.iterations);
+  const recoveryAuthorizationVerifier = await createRecoveryAuthorizationVerifier(recoveryCode, keyPackage.crypto.iterations);
+  const { recoveryCodeWrapper, ...withoutLegacyRecoveryWrapper } = keyPackage;
   const updatedKeyPackage = {
-    ...keyPackage,
-    recoveryCodeWrapper: {
-      ...recoveryCodeWrapper,
-      recoveryCodeVersion: keyPackage.recoveryCodeWrapper.recoveryCodeVersion + 1,
+    ...withoutLegacyRecoveryWrapper,
+    recoveryAuthorizationVerifier: {
+      ...recoveryAuthorizationVerifier,
+      recoveryCodeVersion: (keyPackage.recoveryAuthorizationVerifier?.recoveryCodeVersion ?? keyPackage.recoveryCodeWrapper?.recoveryCodeVersion ?? 1) + 1,
       updatedByDeviceId: state.appState.deviceId
     },
     securityMeta: {
@@ -2138,6 +2234,9 @@ function view() {
   if (state.route.name === "driveMergeUnlock") return driveMergeUnlockView();
   if (state.route.name === "driveExistingUnlock") return driveExistingUnlockView();
   if (state.route.name === "driveRecoveryReset") return driveRecoveryResetView();
+  if (state.route.name === "recoveryPending") return recoveryPendingView();
+  if (state.route.name === "recoveryComplete") return recoveryCompleteView();
+  if (state.route.name === "recoveryRequests") return recoveryRequestsView();
   if (state.route.name === "setupMasterPassword") return setupMasterPasswordView();
   if (state.route.name === "showRecoveryCode") return showRecoveryCodeView();
   if (state.route.name === "unlock") return unlockView();
@@ -2461,6 +2560,8 @@ function securitySettingsSection() {
       <button class="action-quiet" data-nav="changePassword">更改密碼</button>
       <button class="action-quiet" data-nav="forgotPassword">忘記密碼</button>
       <button class="action-quiet" data-nav="regenerateRecovery">重新產生救援碼</button>
+      <button class="action-quiet" data-action="refresh-recovery-requests">查看舊裝置救援核准請求</button>
+      <p class="muted">重新產生救援碼後會升級為 Recovery v2；v2 救援碼只能啟動舊裝置核准，不能解密資料。</p>
       <button class="biometric-button" data-action="${biometricEnabled ? "disable-biometric-unlock" : "enable-biometric-unlock"}">${biometricEnabled ? "停用生物辨識解鎖" : "啟用生物辨識解鎖"}</button>
       <button class="danger" data-nav="logoutAllDevices">登出所有裝置</button>
     </section>
@@ -3001,6 +3102,42 @@ function driveRecoveryResetView() {
     ],
     submit: "重設密碼"
   });
+}
+
+function recoveryPendingView() {
+  return `
+    <header class="topbar topbar-centered"><button class="secondary" data-nav="driveExistingUnlock">返回</button><h1 class="section-title">等待舊裝置核准</h1><span></span></header>
+    <section class="panel stack">
+      <p>請在已登入的舊裝置開啟「設定 → 查看舊裝置救援核准請求」。</p>
+      <p>兩台裝置都必須顯示相同配對碼：</p>
+      <p class="recovery-code">${escapeHtml(state.route.pairingCode)}</p>
+      <p class="muted">舊裝置核准時會由使用者在該裝置手動輸入相同的新密碼；新密碼、救援碼與資料金鑰不會傳送到 Worker。</p>
+      <button data-action="check-recovery-request">我已完成舊裝置核准</button>
+    </section>
+  `;
+}
+
+function recoveryCompleteView() {
+  return securityFormView({
+    title: "完成密碼重設",
+    form: "recovery-v2-complete",
+    intro: "舊裝置已核准。請再次輸入剛才設定的新密碼以開啟既有加密資料。",
+    fields: [["newPassword", "新密碼", "new-password"], ["confirmPassword", "再次輸入新密碼", "new-password"]],
+    submit: "開啟資料",
+    backRoute: "driveExistingUnlock"
+  });
+}
+
+function recoveryRequestsView() {
+  const requests = state.route.requests ?? [];
+  return `
+    <header class="topbar topbar-centered"><button class="secondary" data-nav="settings">返回</button><h1 class="section-title">救援核准請求</h1><span></span></header>
+    <section class="panel stack">
+      <p class="muted">只核准你親自發起且已核對配對碼的請求。核准會使其他裝置的 trusted session 失效。</p>
+      ${requests.length ? requests.map((request) => `<div class="inline-item stack"><strong>新裝置：${escapeHtml(request.requester_device_id)}</strong><span>配對碼：${escapeHtml(request.pairing_code)}</span><span class="muted">到期：${escapeHtml(formatDateTime(request.expires_at))}</span><button data-action="approve-recovery-request" data-request-id="${escapeAttr(request.request_id)}" data-pairing-code="${escapeAttr(request.pairing_code)}">核准並重設密碼</button></div>`).join("") : `<p class="muted">目前沒有等待核准的請求。</p>`}
+      <button class="secondary" data-action="refresh-recovery-requests">重新整理</button>
+    </section>
+  `;
 }
 
 function setupMasterPasswordView() {
@@ -4010,6 +4147,7 @@ function bindSecurityForms() {
     "drive-existing-unlock": unlockExistingDriveVault,
     "drive-merge-unlock": mergeExistingDriveVault,
     "drive-recovery-reset": resetCloudPasswordWithRecovery,
+    "recovery-v2-complete": completeRecoveryV2,
     "drive-revision-recovery": scanDriveRevisionRecovery,
     "change-password": changeMasterPassword,
     "forgot-password": resetForgottenPassword,
@@ -4041,6 +4179,9 @@ async function handleAction(event, el) {
   if (action === "sync-now") return syncNow();
   if (action === "resolve-sync-conflict") return resolveSyncConflict(Number(el.dataset.index), el.dataset.source);
   if (action === "drive-logout") return logoutGoogleDrive();
+  if (action === "refresh-recovery-requests") return refreshRecoveryRequests();
+  if (action === "check-recovery-request") return checkRecoveryRequest();
+  if (action === "approve-recovery-request") return approveRecoveryRequest(el.dataset.requestId, el.dataset.pairingCode);
   if (action === "apply-drive-revision-recovery") return applyDriveRevisionRecovery();
   if (action === "export-data") return exportData();
   if (action === "export-excel") return exportExcel();
