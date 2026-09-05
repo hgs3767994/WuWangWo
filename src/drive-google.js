@@ -31,7 +31,9 @@ export async function connectGoogleDrive({ interactive = true } = {}) {
   if (!interactive) throw new Error("google-drive-auth-required");
   const returnTo = new URL(location.href);
   returnTo.searchParams.delete("oauth_handoff");
-  location.assign(`${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ return_to: returnTo.toString() })}`);
+  // Replace the current app entry so Google authorization pages are never part
+  // of the user's in-app back stack after the callback returns.
+  location.replace(`${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ return_to: returnTo.toString() })}`);
   return new Promise(() => {});
 }
 

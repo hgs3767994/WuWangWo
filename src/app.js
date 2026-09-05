@@ -584,6 +584,12 @@ function registerHistoryNavigation() {
       history.back();
       return;
     }
+    // Settings is a checkpoint. Returning to it completes/cancels the current
+    // settings workflow; Back must skip all of that workflow and reach Home.
+    if (fromRoute.name === "settings" && nextRoute.name !== "home") {
+      history.back();
+      return;
+    }
     if (state.skipNextPopstateConfirm) {
       state.skipNextPopstateConfirm = false;
     } else if (!confirmBeforeLeavingCurrentRoute(nextRoute, { viaHistory: true })) {
