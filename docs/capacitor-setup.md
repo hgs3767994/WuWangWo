@@ -23,6 +23,6 @@
 
 ## 尚待建立前的外部設定
 
-- Android：建立 release keystore，取得 SHA-1，再在 Google Cloud 建立 Android OAuth client。
-- iOS：登入 Apple Developer、註冊 bundle ID，建立 iOS OAuth client。
+- Android：Google 已停止支援 Android custom URI scheme OAuth 回跳。必須先有自有 HTTPS 網域，建立並驗證 Android App Link，才可安全完成系統瀏覽器 + PKCE；不能以目前的 `workers.dev` 或自訂 scheme 冒充正式回跳。
+- iOS：登入 Apple Developer、註冊 bundle ID，建立 iOS OAuth client；其回跳設定要與日後 Android 的正式 HTTPS callback 策略一併確認。
 - Google Cloud：原生 client callback 與 Worker PKCE exchange 設計完成後才新增，不把 web client secret 複製到原生端。

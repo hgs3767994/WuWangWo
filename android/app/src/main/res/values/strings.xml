@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">莫忘</string>
+    <string name="title_activity_main">莫忘</string>
+    <string name="package_name">io.github.hgs3767994.wuwangwo</string>
+    <string name="custom_url_scheme">io.github.hgs3767994.wuwangwo</string>
+</resources>
