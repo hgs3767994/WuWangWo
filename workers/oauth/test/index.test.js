@@ -66,3 +66,23 @@ test("OAuth start refuses to begin before the D1 session schema is ready", async
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: "storage-not-ready" });
 });
+
+test("OAuth start redirects with a nonce cookie instead of throwing", async () => {
+  const database = {
+    prepare: (query) => query === "SELECT 1 AS ready"
+      ? { first: async () => ({ ready: 1 }) }
+      : { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) }
+  };
+  const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/start?return_to=https://example.test/app"), {
+    APP_ORIGINS: "https://example.test",
+    GOOGLE_WEB_CLIENT_ID: "public-client-id",
+    GOOGLE_OAUTH_REDIRECT_URI: "https://example.test/callback",
+    GOOGLE_WEB_CLIENT_SECRET: "secret",
+    OAUTH_STATE_SIGNING_KEY: "state-key",
+    TOKEN_ENCRYPTION_KEY: "encryption-key",
+    OAUTH_DB: database
+  });
+  assert.equal(response.status, 302);
+  assert.equal(new URL(response.headers.get("location")).origin, "https://accounts.google.com");
+  assert.match(response.headers.get("set-cookie"), /^forget_me_not_oauth_nonce=/);
+});

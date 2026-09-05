@@ -24,9 +24,7 @@ export default {
       if (!allowedReturnTo(returnTo, env.APP_ORIGINS)) return json({ error: "invalid-return-to" }, 400);
       const nonce = crypto.randomUUID();
       const state = await createOAuthState({ returnTo, nonce, secret: env.OAUTH_STATE_SIGNING_KEY });
-      const response = Response.redirect(authorizationUrl({ clientId: env.GOOGLE_WEB_CLIENT_ID, redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI, state }), 302);
-      response.headers.set("Set-Cookie", `forget_me_not_oauth_nonce=${nonce}; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=600`);
-      return response;
+      return redirect(authorizationUrl({ clientId: env.GOOGLE_WEB_CLIENT_ID, redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI, state }), 302, `forget_me_not_oauth_nonce=${nonce}; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=600`);
     }
 
     if (request.method === "GET" && url.pathname === "/v1/oauth/google/callback") {
@@ -42,9 +40,7 @@ export default {
         await saveAccount(env.OAUTH_DB, { subject: profile.sub, envelope: await encryptTokenEnvelope(tokens, env.TOKEN_ENCRYPTION_KEY), scopes: tokens.scope ?? "", expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : null, refreshTokenPresent: Boolean(tokens.refresh_token), now });
         const handoff = await createHandoff(env.OAUTH_DB, { code: crypto.randomUUID(), subject: profile.sub, now });
         const destination = new URL(payload.returnTo); destination.searchParams.set("oauth_handoff", handoff.code);
-        const response = Response.redirect(destination, 303);
-        response.headers.set("Set-Cookie", "forget_me_not_oauth_nonce=; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=0");
-        return response;
+        return redirect(destination.toString(), 303, "forget_me_not_oauth_nonce=; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=0");
       } catch { return json({ error: "oauth-authorization-failed" }, 400); }
     }
 
@@ -149,6 +145,7 @@ async function databaseStatus(database) {
 }
 
 function corsHeaders(origin) { return { "access-control-allow-origin": origin, "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "content-type, authorization", vary: "Origin" }; }
+function redirect(location, status, setCookie) { return new Response(null, { status, headers: { location, "set-cookie": setCookie, "cache-control": "no-store" } }); }
 
 async function currentAccessToken(env, account, now) {
   const tokens = await decryptTokenEnvelope({ ciphertext: account.token_ciphertext, iv: account.token_iv }, env.TOKEN_ENCRYPTION_KEY);
