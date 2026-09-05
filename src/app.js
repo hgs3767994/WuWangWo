@@ -1652,10 +1652,8 @@ async function refreshRecoveryRequests() {
 async function approveRecoveryRequest(requestId, pairingCode) {
   if (!state.dekBytes) { alert("此裝置必須維持已解鎖狀態才能核准救援。 "); return; }
   if (!confirm(`請確認新裝置顯示的配對碼也是「${pairingCode}」。核准後請在此裝置輸入新裝置設定的相同新密碼。`)) return;
-  const newPassword = prompt("請輸入新裝置設定的新密碼（不會傳送到網路）：");
+  const newPassword = await recoveryNewPasswordDialog();
   if (newPassword === null) return;
-  const confirmation = prompt("再次輸入相同的新密碼：");
-  if (!validateNewPassword(newPassword, confirmation)) return;
   try {
     const keyPackage = await getCurrentKeyPackage();
     const updated = await buildReplacedMasterPasswordAndRecovery({ keyPackage, dekBytes: state.dekBytes, newPassword, deviceId: state.appState.deviceId, bumpSession: true });
@@ -1665,6 +1663,37 @@ async function approveRecoveryRequest(requestId, pairingCode) {
     await setItem("trustedSession", await createTrustedSessionWithDek({ vaultId: updated.keyPackage.vaultId, deviceId: state.appState.deviceId, sessionEpoch: updated.keyPackage.securityMeta.sessionEpoch, dekBytes: state.dekBytes }));
     showRecoveryCodeRoute(updated.recoveryCode, { oldInvalid: true, returnTo: { name: "settings" } });
   } catch (error) { alert(driveErrorMessage(error, "無法核准救援請求，請稍後再試。")); }
+}
+
+function recoveryNewPasswordDialog() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop";
+    overlay.innerHTML = `
+      <form class="modal-card stack" data-recovery-new-password-form>
+        <h2 class="section-title">設定新密碼</h2>
+        <p class="muted">請輸入新裝置已設定的相同新密碼。密碼只在此裝置用來重包資料金鑰，不會傳送到網路。</p>
+        <div class="field"><label>新密碼</label><input type="password" data-recovery-new-password autocomplete="new-password" /></div>
+        <div class="field"><label>再次輸入新密碼</label><input type="password" data-recovery-new-password-confirm autocomplete="new-password" /></div>
+        <p class="danger-text" data-recovery-new-password-error hidden></p>
+        <div class="actions modal-actions"><button type="submit">確認核准</button><button type="button" class="secondary" data-recovery-new-password-cancel>取消</button></div>
+      </form>
+    `;
+    const cleanup = (value) => { overlay.remove(); resolve(value); };
+    overlay.addEventListener("click", (event) => { if (event.target === overlay) cleanup(null); });
+    overlay.querySelector("[data-recovery-new-password-cancel]").addEventListener("click", () => cleanup(null));
+    overlay.querySelector("[data-recovery-new-password-form]").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const password = overlay.querySelector("[data-recovery-new-password]").value;
+      const confirmation = overlay.querySelector("[data-recovery-new-password-confirm]").value;
+      const error = overlay.querySelector("[data-recovery-new-password-error]");
+      const message = password.length < 6 ? "密碼至少需要 6 個字元" : (password !== confirmation ? "兩次輸入的密碼不一致" : "");
+      if (message) { error.textContent = message; error.hidden = false; return; }
+      cleanup(password);
+    });
+    document.body.append(overlay);
+    overlay.querySelector("[data-recovery-new-password]").focus();
+  });
 }
 
 function isRecoveryV2(keyPackage) { return keyPackage?.recoveryAuthorizationVerifier?.version === 2; }
