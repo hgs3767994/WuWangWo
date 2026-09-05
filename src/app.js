@@ -577,6 +577,13 @@ function registerHistoryNavigation() {
     if (!event.state?.appRoute) return;
     const fromRoute = state.route;
     const nextRoute = restoreHistoryRoute(event.state.route);
+    // Home is the root route. If stale in-app history exists behind it, skip it
+    // instead of reopening an earlier form, OAuth return page, or settings page.
+    // Once no in-app entry remains, the platform handles leaving the PWA.
+    if (fromRoute.name === "home") {
+      history.back();
+      return;
+    }
     if (state.skipNextPopstateConfirm) {
       state.skipNextPopstateConfirm = false;
     } else if (!confirmBeforeLeavingCurrentRoute(nextRoute, { viaHistory: true })) {
@@ -2135,7 +2142,7 @@ function syncCurrentHistoryScroll() {
 function writeHistoryRoute(route, options = {}) {
   if (!state.historyNavigationRegistered || route.name === "showRecoveryCode") return;
   const payload = { appRoute: true, route: historyRouteSnapshot(route) };
-  if (options.replace) history.replaceState(payload, "");
+  if (options.replace || route.name === "home") history.replaceState(payload, "");
   else history.pushState(payload, "");
 }
 
