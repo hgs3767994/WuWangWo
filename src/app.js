@@ -66,6 +66,7 @@ const IDLE_LOCK_MS = 3 * 60 * 1000;
 const AWAY_LOCK_MS = 2 * 60 * 1000;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
+const OAUTH_RETURN_ROUTE_STORAGE_KEY = "forget-me-not-oauth-return-route";
 const NO_SLIDE_ROUTE_NAMES = new Set([
   "loading",
   "welcome",
@@ -118,6 +119,7 @@ async function boot() {
   let oauthHandoffCompleted = false;
   let oauthHandoffError = null;
   try { oauthHandoffCompleted = Boolean(await completeGoogleOAuthHandoff()); } catch (error) { oauthHandoffError = error; }
+  const oauthReturnRoute = oauthHandoffCompleted ? consumeOAuthReturnRoute() : null;
   const storedAppState = await getItem("appState");
   let appState = normalizeLoadedAppState(storedAppState);
   if (oauthHandoffCompleted && appState?.googleDrive?.syncStatus === "syncing") {
@@ -181,15 +183,27 @@ async function boot() {
         return;
       }
     }
-    state = { ...state, appState, dekBytes, vault: normalizeVault(pruneDeleted(vault)), route: { name: "home" } };
+    state = { ...state, appState, dekBytes, vault: normalizeVault(pruneDeleted(vault)), route: oauthReturnRoute ?? { name: "home" } };
     await save();
-    void resumeDriveSyncInBackground();
+    void resumeDriveSyncInBackground({ allowOutsideHome: oauthHandoffCompleted });
   }
   render();
   registerHistoryNavigation();
   registerServiceWorker();
   registerInstallExperience();
   if (oauthHandoffError) alert(driveErrorMessage(oauthHandoffError, "Google Drive OAuth 回跳失敗，請再試一次。"));
+}
+
+function rememberOAuthReturnRoute(route) {
+  try { sessionStorage.setItem(OAUTH_RETURN_ROUTE_STORAGE_KEY, JSON.stringify(historyRouteSnapshot(route))); } catch {}
+}
+
+function consumeOAuthReturnRoute() {
+  try {
+    const route = JSON.parse(sessionStorage.getItem(OAUTH_RETURN_ROUTE_STORAGE_KEY) ?? "null");
+    sessionStorage.removeItem(OAUTH_RETURN_ROUTE_STORAGE_KEY);
+    return route?.name ? restoreHistoryRoute(route) : null;
+  } catch { return null; }
 }
 
 function normalizeLoadedAppState(appState) {
@@ -1127,6 +1141,7 @@ async function syncNow(options = {}) {
   render();
 
   try {
+    if (!options.silent && !driveAuthStatus().hasAccessToken) rememberOAuthReturnRoute(state.route);
     const driveConnection = await connectDrive({ interactive: !options.silent });
     rememberDriveAccount(driveConnection);
     const remoteEnvelope = await readDriveFile(driveFileName("vault"));
@@ -1216,8 +1231,8 @@ async function logoutGoogleDrive() {
   render();
 }
 
-async function resumeDriveSyncInBackground() {
-  if (!state.appState?.googleDrive?.connected || state.route.name !== "home") return;
+async function resumeDriveSyncInBackground({ allowOutsideHome = false } = {}) {
+  if (!state.appState?.googleDrive?.connected || (!allowOutsideHome && state.route.name !== "home")) return;
   if (!driveAuthStatus().hasAccessToken) return;
   try {
     await syncNow({ silent: true, notifyConflicts: true });
@@ -2057,13 +2072,15 @@ function navigate(route, options = {}) {
   if (!confirmBeforeLeavingCurrentRoute(route, options)) return;
   syncCurrentHistoryScroll();
   const fromRoute = state.route;
-  state.route = prepareRouteForNavigation(route);
+  const fromSettingsFlow = fromRoute.name === "settings" || Boolean(fromRoute.settingsFlow);
+  state.route = prepareRouteForNavigation({ ...route, ...(fromSettingsFlow && route.name !== "home" ? { settingsFlow: true } : {}) });
+  const historyOptions = fromSettingsFlow ? { ...options, replace: true } : options;
   render({
     restoreScroll: true,
-    transition: options.transition ?? (options.replace ? "replace" : "forward"),
+    transition: historyOptions.transition ?? (historyOptions.replace ? "replace" : "forward"),
     fromRoute
   });
-  writeHistoryRoute(state.route, options);
+  writeHistoryRoute(state.route, historyOptions);
 }
 
 function currentRouteSnapshot() {
@@ -2090,6 +2107,10 @@ function navigateBackFromDetail() {
 
 function navigateBack(fallbackRoute, options = {}) {
   if (!confirmBeforeLeavingCurrentRoute(fallbackRoute, { viaBack: true, force: options.force })) return;
+  if (state.route.name === "settings" || state.route.settingsFlow) {
+    navigate({ name: "home" }, { replace: true, force: true, transition: "back" });
+    return;
+  }
   syncCurrentHistoryScroll();
   if (history.state?.appRoute && history.length > 1) {
     if (options.force) state.skipNextPopstateConfirm = true;
@@ -2137,6 +2158,7 @@ function historyRouteSnapshot(route = {}) {
     sourcePersonId: route.sourcePersonId,
     familyMemberId: route.familyMemberId,
     memberName: route.memberName,
+    settingsFlow: Boolean(route.settingsFlow),
     returnTo: route.returnTo ? historyRouteSnapshot(route.returnTo) : undefined
   };
 }
@@ -2566,7 +2588,6 @@ function settingsView() {
         <span>興趣喜好 ${dataSummary.interestTagCount} 個</span>
         <span>自訂欄位 ${dataSummary.customFieldCount} 個</span>
       </div>
-      ${dataManagement.lastJsonExportAt ? `<p class="muted">最近 JSON 備份：${formatDateTime(dataManagement.lastJsonExportAt)}</p>` : ""}
       ${dataManagement.lastExcelExportAt ? `<p class="muted">最近 Excel 匯出：${formatDateTime(dataManagement.lastExcelExportAt)}</p>` : ""}
       ${dataManagement.lastImportAt ? `<p class="muted">最近匯入：${formatDateTime(dataManagement.lastImportAt)}</p>` : ""}
       <button class="action-quiet" data-nav="localSnapshots">本機資料快照</button>
@@ -2577,6 +2598,7 @@ function settingsView() {
       <button class="action-quiet" data-action="choose-import-file">匯入資料</button>
       <button class="action-quiet" data-nav="dataHealth">資料完整性檢查</button>
       <input type="file" accept="application/json,.json" data-import-file hidden />
+      ${dataManagement.lastJsonExportAt ? `<p class="muted">最近 JSON 備份：${formatDateTime(dataManagement.lastJsonExportAt)}</p>` : ""}
       <p class="muted">JSON 備份檔可用於匯入復原；Excel 檔適合人工檢視。匯出的資料不包含密碼、資料金鑰或救援碼；請自行妥善保存，避免他人取得。</p>
     </section>
     <section class="panel stack">
@@ -2602,7 +2624,6 @@ function securitySettingsSection() {
       <button class="action-quiet" data-nav="forgotPassword">忘記密碼</button>
       <button class="action-quiet" data-nav="regenerateRecovery">重新產生救援碼</button>
       <button class="action-quiet" data-action="refresh-recovery-requests">查看舊裝置救援核准請求</button>
-      <p class="muted">重新產生救援碼後會升級為 Recovery v2；v2 救援碼只能啟動舊裝置核准，不能解密資料。</p>
       <button class="biometric-button" data-action="${biometricEnabled ? "disable-biometric-unlock" : "enable-biometric-unlock"}">${biometricEnabled ? "停用生物辨識解鎖" : "啟用生物辨識解鎖"}</button>
       <button class="danger" data-nav="logoutAllDevices">登出所有裝置</button>
     </section>
@@ -2940,7 +2961,6 @@ function syncTroubleshootingView() {
       <p>目前狀態：${syncStatusLabel(gd)}</p>
       ${issues.map(troubleshootingItem).join("")}
       <div class="actions">
-        <button type="button" data-action="sync-now">立即同步</button>
         <button type="button" class="action-quiet" data-nav="driveRevisionRecovery">雲端歷史版本救援</button>
       </div>
     </section>
