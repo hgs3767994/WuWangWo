@@ -86,3 +86,30 @@ test("OAuth start redirects with a nonce cookie instead of throwing", async () =
   assert.equal(new URL(response.headers.get("location")).origin, "https://accounts.google.com");
   assert.match(response.headers.get("set-cookie"), /^forget_me_not_oauth_nonce=/);
 });
+
+test("session revoke accepts an opaque Bearer token and does not store its plaintext", async () => {
+  const calls = [];
+  const database = {
+    prepare(query) {
+      calls.push(query);
+      if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      return { bind: (...values) => ({ first: async () => ({ google_subject: "subject-1" }), values }) };
+    }
+  };
+  const response = await worker.fetch(new Request("https://example.test/v1/oauth/session/revoke", {
+    method: "POST",
+    headers: { Origin: "https://example.test", Authorization: "Bearer opaque-session" }
+  }), {
+    APP_ORIGINS: "https://example.test",
+    GOOGLE_WEB_CLIENT_ID: "public-client-id",
+    GOOGLE_OAUTH_REDIRECT_URI: "https://example.test/callback",
+    GOOGLE_WEB_CLIENT_SECRET: "secret",
+    OAUTH_STATE_SIGNING_KEY: "state-key",
+    TOKEN_ENCRYPTION_KEY: "encryption-key",
+    OAUTH_DB: database
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { revoked: true });
+  assert(calls.some((query) => query.includes("UPDATE oauth_sessions SET revoked_at")));
+});

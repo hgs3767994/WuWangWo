@@ -30,7 +30,11 @@ export async function connectGoogleDrive({ interactive = true } = {}) {
   return new Promise(() => {});
 }
 
-export function disconnectGoogleDrive() { sessionStorage.removeItem(SESSION_STORAGE_KEY); }
+export async function disconnectGoogleDrive() {
+  const session = readSession();
+  if (session?.sessionToken) await apiFetch("/v1/oauth/session/revoke", {}, session.sessionToken);
+  sessionStorage.removeItem(SESSION_STORAGE_KEY);
+}
 
 export function googleDriveAuthStatus() {
   const session = readSession();

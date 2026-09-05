@@ -41,4 +41,13 @@ export async function sessionAccount(database, { token, now }) {
     .first();
 }
 
+export async function revokeSession(database, { token, now }) {
+  const hash = await sha256(token);
+  const row = await database
+    .prepare("UPDATE oauth_sessions SET revoked_at = ? WHERE session_hash = ? AND revoked_at IS NULL RETURNING google_subject")
+    .bind(now, hash)
+    .first();
+  return Boolean(row?.google_subject);
+}
+
 async function sha256(value) { const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))); return btoa(String.fromCharCode(...bytes)); }

@@ -44,9 +44,9 @@ export async function connectDrive(options = {}) {
   return connectGoogleDrive(options);
 }
 
-export function disconnectDrive() {
+export async function disconnectDrive() {
   if (isMockDrive()) return;
-  disconnectGoogleDrive();
+  await disconnectGoogleDrive();
 }
 
 export function driveAuthStatus() {

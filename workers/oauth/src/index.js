@@ -2,7 +2,7 @@ import { authorizationUrl, exchangeCode, googleProfile, refreshAccessToken } fro
 import { createOAuthState } from "./oauth-state.js";
 import { verifyOAuthState } from "./oauth-state.js";
 import { decryptTokenEnvelope, encryptTokenEnvelope } from "./token-envelope.js";
-import { consumeHandoff, createHandoff, createSession, saveAccount, sessionAccount } from "./oauth-store.js";
+import { consumeHandoff, createHandoff, createSession, revokeSession, saveAccount, sessionAccount } from "./oauth-store.js";
 import { executeDriveOperation } from "./drive-proxy.js";
 
 const SERVICE_NAME = "forget-me-not-oauth";
@@ -86,6 +86,23 @@ export default {
         const message = String(error?.message ?? "");
         const status = message.startsWith("drive-") ? 400 : message.includes("google-token") ? 401 : 502;
         return json({ error: message.startsWith("drive-") || message.includes("google-token") ? message : "drive-request-failed" }, status, corsHeaders(origin));
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/oauth/session/revoke") {
+      const origin = request.headers.get("Origin");
+      if (!isAllowedOrigin(origin, env.APP_ORIGINS)) return json({ error: "origin-not-allowed" }, 403);
+      if (!hasRequiredConfiguration(env)) return json({ error: "oauth-not-configured" }, 503, corsHeaders(origin));
+      const storage = await databaseStatus(env.OAUTH_DB);
+      if (!storage.schemaReady) return json({ error: "storage-not-ready" }, 503, corsHeaders(origin));
+      const token = bearerToken(request.headers.get("Authorization"));
+      if (!token) return json({ error: "session-required" }, 401, corsHeaders(origin));
+      try {
+        await revokeSession(env.OAUTH_DB, { token, now: new Date().toISOString() });
+        // Treat repeated logout as successful without revealing whether a token was valid.
+        return json({ revoked: true }, 200, corsHeaders(origin));
+      } catch {
+        return json({ error: "session-revoke-failed" }, 500, corsHeaders(origin));
       }
     }
 

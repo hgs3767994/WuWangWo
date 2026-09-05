@@ -1195,7 +1195,12 @@ async function syncNow(options = {}) {
 
 async function logoutGoogleDrive() {
   if (!confirm("確定要登出 Google Drive 嗎？\n此裝置將停止與 Google Drive 同步，但不會刪除本機資料或雲端資料。")) return;
-  disconnectDrive();
+  try {
+    await disconnectDrive();
+  } catch (error) {
+    alert(driveErrorMessage(error, "無法撤銷這台裝置的 Google Drive session，請確認網路後再試。"));
+    return;
+  }
   state.appState = {
     ...state.appState,
     googleDrive: {
