@@ -76,12 +76,14 @@ function connectGoogleDriveInPopup(popupWindow, startUrl) {
   const workerOrigin = new URL(apiUrl()).origin;
   return new Promise((resolve, reject) => {
     let settled = false;
+    let closeGraceTimer = null;
     const finish = (callback) => {
       if (settled) return;
       settled = true;
       window.removeEventListener("message", onMessage);
       window.clearInterval(closeWatcher);
       window.clearTimeout(timeout);
+      if (closeGraceTimer) window.clearTimeout(closeGraceTimer);
       callback();
     };
     const onMessage = (event) => {
@@ -96,8 +98,13 @@ function connectGoogleDriveInPopup(popupWindow, startUrl) {
       );
     };
     const closeWatcher = window.setInterval(() => {
-      if (popupWindow.closed) finish(() => reject(new Error("google-drive-authorization-cancelled")));
-    }, 400);
+      if (!popupWindow.closed || closeGraceTimer) return;
+      // postMessage is queued on the opener.  A callback window can therefore
+      // be closed before its already-sent message is delivered.  Give that
+      // queued handoff a short, deterministic grace period before treating a
+      // closed window as a user cancellation.
+      closeGraceTimer = window.setTimeout(() => finish(() => reject(new Error("google-drive-authorization-cancelled"))), 1200);
+    }, 250);
     const timeout = window.setTimeout(() => finish(() => reject(new Error("google-drive-authorization-timeout"))), 5 * 60 * 1000);
     window.addEventListener("message", onMessage);
     try {

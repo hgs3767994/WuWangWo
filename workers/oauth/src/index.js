@@ -230,7 +230,7 @@ function popupFailure(returnTo) {
 function popupPage(destination, message) {
   const targetOrigin = destination.origin;
   const fallback = destination.toString();
-  const script = `<!doctype html><meta charset="utf-8"><title>Google Drive 授權完成</title><script>const message=${JSON.stringify(message)};const targetOrigin=${JSON.stringify(targetOrigin)};const fallback=${JSON.stringify(fallback)};if(window.opener){window.opener.postMessage(message,targetOrigin);window.close();}else{window.location.replace(fallback);}</script>`;
+  const script = `<!doctype html><meta charset="utf-8"><title>Google Drive 授權完成</title><p>Google Drive 授權完成，正在回到 App…</p><script>const message=${JSON.stringify(message)};const targetOrigin=${JSON.stringify(targetOrigin)};const fallback=${JSON.stringify(fallback)};if(window.opener){window.opener.postMessage(message,targetOrigin);window.setTimeout(()=>window.close(),750);}else{window.location.replace(fallback);}</script>`;
   return new Response(script, { status: 200, headers: { "content-type": "text/html; charset=UTF-8", "cache-control": "no-store", "referrer-policy": "no-referrer", "set-cookie": "forget_me_not_oauth_nonce=; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=0" } });
 }
 
