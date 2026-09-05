@@ -189,6 +189,7 @@ async function boot() {
   }
   render();
   registerHistoryNavigation();
+  if (oauthHandoffCompleted && state.route.name === "settings") installOAuthSettingsBackBarrier();
   registerServiceWorker();
   registerInstallExperience();
   if (oauthHandoffError) alert(driveErrorMessage(oauthHandoffError, "Google Drive OAuth 回跳失敗，請再試一次。"));
@@ -204,6 +205,15 @@ function consumeOAuthReturnRoute() {
     sessionStorage.removeItem(OAUTH_RETURN_ROUTE_STORAGE_KEY);
     return route?.name ? restoreHistoryRoute(route) : null;
   } catch { return null; }
+}
+
+function installOAuthSettingsBackBarrier() {
+  if (!history.state?.appRoute) return;
+  // The preceding cross-document entry may be accounts.google.com. Replace the
+  // callback entry with Home, then add Settings above it in this same document.
+  // Back from Settings therefore reaches Home without navigating to Google.
+  history.replaceState({ appRoute: true, route: historyRouteSnapshot({ name: "home" }) }, "");
+  history.pushState({ appRoute: true, route: historyRouteSnapshot(state.route) }, "");
 }
 
 function normalizeLoadedAppState(appState) {
