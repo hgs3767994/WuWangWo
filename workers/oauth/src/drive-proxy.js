@@ -10,6 +10,7 @@ export async function executeDriveOperation({ operation, name, content, revision
     const [keyPackage, vault] = await Promise.all([findFile(request, "key-package.enc"), findFile(request, "vault.enc")]);
     return { hasKeyPackage: Boolean(keyPackage), hasVault: Boolean(vault) };
   }
+  if (operation === "profile") return request(USERINFO_API);
   const file = await findFile(request, name);
   if (operation === "read") return file ? request(`${DRIVE_API_BASE}/files/${encodeURIComponent(file.id)}?alt=media`) : null;
   if (operation === "delete") { if (file) await request(`${DRIVE_API_BASE}/files/${encodeURIComponent(file.id)}`, { method: "DELETE" }); return null; }
@@ -27,7 +28,6 @@ export async function executeDriveOperation({ operation, name, content, revision
     return { file, revisions: result.revisions ?? [] };
   }
   if (operation === "readRevision") { if (!String(revisionId ?? "")) throw new Error("drive-revision-invalid"); return file ? request(`${DRIVE_API_BASE}/files/${encodeURIComponent(file.id)}/revisions/${encodeURIComponent(String(revisionId))}?alt=media&acknowledgeAbuse=true`) : null; }
-  if (operation === "profile") return request(USERINFO_API);
   throw new Error("drive-operation-invalid");
 }
 
