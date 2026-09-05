@@ -2079,15 +2079,13 @@ function navigate(route, options = {}) {
   if (!confirmBeforeLeavingCurrentRoute(route, options)) return;
   syncCurrentHistoryScroll();
   const fromRoute = state.route;
-  const fromSettingsFlow = fromRoute.name === "settings" || Boolean(fromRoute.settingsFlow);
-  state.route = prepareRouteForNavigation({ ...route, ...(fromSettingsFlow && route.name !== "home" ? { settingsFlow: true } : {}) });
-  const historyOptions = fromSettingsFlow ? { ...options, replace: true } : options;
+  state.route = prepareRouteForNavigation(route);
   render({
     restoreScroll: true,
-    transition: historyOptions.transition ?? (historyOptions.replace ? "replace" : "forward"),
+    transition: options.transition ?? (options.replace ? "replace" : "forward"),
     fromRoute
   });
-  writeHistoryRoute(state.route, historyOptions);
+  writeHistoryRoute(state.route, options);
 }
 
 function currentRouteSnapshot() {
@@ -2114,10 +2112,6 @@ function navigateBackFromDetail() {
 
 function navigateBack(fallbackRoute, options = {}) {
   if (!confirmBeforeLeavingCurrentRoute(fallbackRoute, { viaBack: true, force: options.force })) return;
-  if (state.route.name === "settings" || state.route.settingsFlow) {
-    navigate({ name: "home" }, { replace: true, force: true, transition: "back" });
-    return;
-  }
   syncCurrentHistoryScroll();
   if (history.state?.appRoute && history.length > 1) {
     if (options.force) state.skipNextPopstateConfirm = true;
@@ -2165,7 +2159,6 @@ function historyRouteSnapshot(route = {}) {
     sourcePersonId: route.sourcePersonId,
     familyMemberId: route.familyMemberId,
     memberName: route.memberName,
-    settingsFlow: Boolean(route.settingsFlow),
     returnTo: route.returnTo ? historyRouteSnapshot(route.returnTo) : undefined
   };
 }
