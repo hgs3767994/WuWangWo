@@ -23,7 +23,7 @@ export async function listGoogleRecoveryRequests() { return workerApiFetch("/v1/
 export async function getGoogleRecoveryRequest(requestId) { return workerApiFetch(`/v1/recovery/requests/${encodeURIComponent(requestId)}`, undefined, "GET"); }
 export async function approveGoogleRecoveryRequest(requestId, values) { return workerApiFetch(`/v1/recovery/requests/${encodeURIComponent(requestId)}/approve`, values); }
 
-export async function connectGoogleDrive({ interactive = true } = {}) {
+export async function connectGoogleDrive({ interactive = true, popupWindow = null, requirePopup = false } = {}) {
   const session = await completeGoogleOAuthHandoff();
   if (session) return { connected: true, accountEmail: session.accountEmail };
   const existing = readSession();
@@ -31,8 +31,11 @@ export async function connectGoogleDrive({ interactive = true } = {}) {
   if (!interactive) throw new Error("google-drive-auth-required");
   const returnTo = new URL(location.href);
   returnTo.searchParams.delete("oauth_handoff");
-  // Replace the current app entry so Google authorization pages are never part
-  // of the user's in-app back stack after the callback returns.
+  const startUrl = `${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ return_to: returnTo.toString(), popup: "1" })}`;
+  if (popupWindow && !popupWindow.closed) return connectGoogleDriveInPopup(popupWindow, startUrl);
+  if (requirePopup) throw new Error("google-drive-popup-blocked");
+  // Fallback for browsers that refuse a user-initiated popup.  The normal app
+  // path supplies a popup, so this is only retained for compatibility.
   location.replace(`${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ return_to: returnTo.toString() })}`);
   return new Promise(() => {});
 }
@@ -58,10 +61,7 @@ export async function completeGoogleOAuthHandoff() {
   const handoff = url.searchParams.get("oauth_handoff");
   if (!handoff) return null;
   try {
-    const response = await apiFetch("/v1/oauth/google/handoff/exchange", { handoff }, false);
-    const profile = await execute("profile", {}, response.sessionToken);
-    const session = { sessionToken: response.sessionToken, expiresAt: response.expiresAt, accountEmail: profile?.email ?? "" };
-    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    const session = await exchangeOAuthHandoff(handoff);
     url.searchParams.delete("oauth_handoff");
     history.replaceState(history.state, "", url);
     return session;
@@ -70,6 +70,51 @@ export async function completeGoogleOAuthHandoff() {
     history.replaceState(history.state, "", url);
     throw new Error(`google-drive-handoff-failed:${error?.message ?? "unknown"}`);
   }
+}
+
+function connectGoogleDriveInPopup(popupWindow, startUrl) {
+  const workerOrigin = new URL(apiUrl()).origin;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("message", onMessage);
+      window.clearInterval(closeWatcher);
+      window.clearTimeout(timeout);
+      callback();
+    };
+    const onMessage = (event) => {
+      if (event.origin !== workerOrigin || event.source !== popupWindow) return;
+      const message = event.data;
+      if (!message || message.type !== "forget-me-not-oauth-handoff") return;
+      if (message.error) return finish(() => reject(new Error(`google-drive-handoff-failed:${message.error}`)));
+      if (typeof message.handoff !== "string" || !message.handoff) return finish(() => reject(new Error("google-drive-handoff-failed:handoff-invalid")));
+      void exchangeOAuthHandoff(message.handoff).then(
+        (session) => finish(() => resolve({ connected: true, accountEmail: session.accountEmail })),
+        (error) => finish(() => reject(new Error(`google-drive-handoff-failed:${error?.message ?? "unknown"}`)))
+      );
+    };
+    const closeWatcher = window.setInterval(() => {
+      if (popupWindow.closed) finish(() => reject(new Error("google-drive-authorization-cancelled")));
+    }, 400);
+    const timeout = window.setTimeout(() => finish(() => reject(new Error("google-drive-authorization-timeout"))), 5 * 60 * 1000);
+    window.addEventListener("message", onMessage);
+    try {
+      popupWindow.location.replace(startUrl);
+      popupWindow.focus?.();
+    } catch (error) {
+      finish(() => reject(new Error(`google-drive-popup-failed:${error?.message ?? "unknown"}`)));
+    }
+  });
+}
+
+async function exchangeOAuthHandoff(handoff) {
+  const response = await apiFetch("/v1/oauth/google/handoff/exchange", { handoff }, false);
+  const profile = await execute("profile", {}, response.sessionToken);
+  const session = { sessionToken: response.sessionToken, expiresAt: response.expiresAt, accountEmail: profile?.email ?? "" };
+  sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  return session;
 }
 
 async function execute(operation, values = {}, overrideToken = "") {

@@ -24,15 +24,17 @@ export default {
       const returnTo = url.searchParams.get("return_to") ?? "";
       if (!allowedReturnTo(returnTo, env.APP_ORIGINS)) return json({ error: "invalid-return-to" }, 400);
       const nonce = crypto.randomUUID();
-      const state = await createOAuthState({ returnTo, nonce, secret: env.OAUTH_STATE_SIGNING_KEY });
+      const popup = url.searchParams.get("popup") === "1";
+      const state = await createOAuthState({ returnTo, nonce, popup, secret: env.OAUTH_STATE_SIGNING_KEY });
       return redirect(authorizationUrl({ clientId: env.GOOGLE_WEB_CLIENT_ID, redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI, state }), 302, `forget_me_not_oauth_nonce=${nonce}; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=600`);
     }
 
     if (request.method === "GET" && url.pathname === "/v1/oauth/google/callback") {
       const state = url.searchParams.get("state");
       const cookieNonce = cookie(request.headers.get("Cookie"), "forget_me_not_oauth_nonce");
+      let payload = null;
       try {
-        const payload = await verifyOAuthState({ state, secret: env.OAUTH_STATE_SIGNING_KEY });
+        payload = await verifyOAuthState({ state, secret: env.OAUTH_STATE_SIGNING_KEY });
         if (!cookieNonce || cookieNonce !== payload.nonce) throw new Error("oauth-state-invalid");
         if (url.searchParams.get("error")) throw new Error("google-authorization-denied");
         const tokens = await exchangeCode({ code: url.searchParams.get("code"), clientId: env.GOOGLE_WEB_CLIENT_ID, clientSecret: env.GOOGLE_WEB_CLIENT_SECRET, redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI });
@@ -41,8 +43,12 @@ export default {
         await saveAccount(env.OAUTH_DB, { subject: profile.sub, envelope: await encryptTokenEnvelope(tokens, env.TOKEN_ENCRYPTION_KEY), scopes: tokens.scope ?? "", expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : null, refreshTokenPresent: Boolean(tokens.refresh_token), now });
         const handoff = await createHandoff(env.OAUTH_DB, { code: crypto.randomUUID(), subject: profile.sub, now });
         const destination = new URL(payload.returnTo); destination.searchParams.set("oauth_handoff", handoff.code);
+        if (payload.popup) return popupHandoff(destination, handoff.code);
         return redirect(destination.toString(), 303, "forget_me_not_oauth_nonce=; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=0");
-      } catch { return json({ error: "oauth-authorization-failed" }, 400); }
+      } catch {
+        if (payload?.popup) return popupFailure(payload.returnTo);
+        return json({ error: "oauth-authorization-failed" }, 400);
+      }
     }
 
     if (request.method === "POST" && url.pathname === "/v1/oauth/google/handoff/exchange") {
@@ -212,6 +218,21 @@ async function recoveryDatabaseStatus(database) {
 function corsHeaders(origin) { return { "access-control-allow-origin": origin, "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type, authorization", vary: "Origin" }; }
 function bounded(value, maxLength) { const text = String(value ?? "").trim(); return text && text.length <= maxLength ? text : ""; }
 function redirect(location, status, setCookie) { return new Response(null, { status, headers: { location, "set-cookie": setCookie, "cache-control": "no-store" } }); }
+
+function popupHandoff(destination, handoff) {
+  return popupPage(destination, { type: "forget-me-not-oauth-handoff", handoff });
+}
+
+function popupFailure(returnTo) {
+  return popupPage(new URL(returnTo), { type: "forget-me-not-oauth-handoff", error: "oauth-authorization-failed" });
+}
+
+function popupPage(destination, message) {
+  const targetOrigin = destination.origin;
+  const fallback = destination.toString();
+  const script = `<!doctype html><meta charset="utf-8"><title>Google Drive 授權完成</title><script>const message=${JSON.stringify(message)};const targetOrigin=${JSON.stringify(targetOrigin)};const fallback=${JSON.stringify(fallback)};if(window.opener){window.opener.postMessage(message,targetOrigin);window.close();}else{window.location.replace(fallback);}</script>`;
+  return new Response(script, { status: 200, headers: { "content-type": "text/html; charset=UTF-8", "cache-control": "no-store", "referrer-policy": "no-referrer", "set-cookie": "forget_me_not_oauth_nonce=; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=0" } });
+}
 
 async function currentAccessToken(env, account, now) {
   const tokens = await decryptTokenEnvelope({ ciphertext: account.token_ciphertext, iv: account.token_iv }, env.TOKEN_ENCRYPTION_KEY);

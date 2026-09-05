@@ -685,16 +685,17 @@ async function initializeLocalMode() {
   render();
 }
 
-async function beginDriveSetup() {
+async function beginDriveSetup(options = {}) {
   const readiness = driveReadiness();
   if (!readiness.ready) {
     alert(readiness.message);
     return;
   }
   try {
-    const driveConnection = await connectDrive();
+    const driveConnection = await connectDrive({ popupWindow: options.oauthPopup, requirePopup: options.requireOAuthPopup });
     rememberDriveAccount(driveConnection);
   } catch (error) {
+    closeOAuthPopup(options.oauthPopup);
     alert(driveErrorMessage(error, "Google Drive 連線失敗，請稍後再試。"));
     return;
   }
@@ -1165,7 +1166,7 @@ async function syncNow(options = {}) {
 
   try {
     if (!options.silent && !driveAuthStatus().hasAccessToken) rememberOAuthReturnRoute(state.route);
-    const driveConnection = await connectDrive({ interactive: !options.silent });
+    const driveConnection = await connectDrive({ interactive: !options.silent, popupWindow: options.oauthPopup, requirePopup: options.requireOAuthPopup });
     rememberDriveAccount(driveConnection);
     const remoteEnvelope = await readDriveFile(driveFileName("vault"));
     let conflicts = [];
@@ -1203,6 +1204,7 @@ async function syncNow(options = {}) {
     }
     render();
   } catch (error) {
+    closeOAuthPopup(options.oauthPopup);
     const message = driveErrorMessage(error, "同步失敗，請稍後再試");
     if (options.silent && isDriveAuthRequiredError(error)) {
       state.appState = {
@@ -1231,6 +1233,30 @@ async function syncNow(options = {}) {
     if (!options.silent) alert(message);
     render();
   }
+}
+
+function openGoogleOAuthPopup() {
+  if (isSimulatedDrive() || driveAuthStatus().hasAccessToken) return { oauthPopup: null, requireOAuthPopup: false };
+  const oauthPopup = window.open("about:blank", "forget-me-not-google-oauth", "popup=yes,width=520,height=720");
+  return { oauthPopup, requireOAuthPopup: true };
+}
+
+function closeOAuthPopup(oauthPopup) {
+  try {
+    if (oauthPopup && !oauthPopup.closed) oauthPopup.close();
+  } catch {}
+}
+
+function syncNowWithOAuthPopup() {
+  // Opening must occur in the click handler, before syncNow persists UI state,
+  // otherwise mobile browsers treat it as an unsolicited popup.
+  return syncNow(openGoogleOAuthPopup());
+}
+
+function beginDriveSetupWithOAuthPopup() {
+  // Initial Drive setup performs IndexedDB reads before it starts OAuth, so it
+  // needs the same user-gesture popup reservation as manual sync.
+  return beginDriveSetup(openGoogleOAuthPopup());
 }
 
 async function logoutGoogleDrive() {
@@ -4266,11 +4292,11 @@ async function handleAction(event, el) {
   if (action === "install-app") return installApp();
   if (action === "open-install-guide") return navigate({ name: "installGuide" });
   if (action === "dismiss-install-tip") return dismissInstallTip();
-  if (action === "drive-placeholder") return beginDriveSetup();
+  if (action === "drive-placeholder") return beginDriveSetupWithOAuthPopup();
   if (action === "use-local-drive-setup") return useLocalDataForDriveSetup();
   if (action === "cancel-drive-setup") return cancelDriveSetup();
   if (action === "confirm-recovery-saved") return finishRecoveryCode();
-  if (action === "sync-now") return syncNow();
+  if (action === "sync-now") return syncNowWithOAuthPopup();
   if (action === "resolve-sync-conflict") return resolveSyncConflict(Number(el.dataset.index), el.dataset.source);
   if (action === "drive-logout") return logoutGoogleDrive();
   if (action === "refresh-recovery-requests") return refreshRecoveryRequests();
@@ -5624,6 +5650,8 @@ function driveErrorMessage(error, fallback) {
   if (message.includes("google-drive-handoff-failed:handoff-invalid-or-expired")) return "Google OAuth 回跳已逾時，請重新按「立即同步」。";
   if (message.includes("google-drive-handoff-failed:handoff-exchange-failed")) return "OAuth Worker 無法建立同步 session，請查看 Cloudflare Worker Logs。";
   if (message.includes("google-drive-handoff-failed:drive-request-failed")) return "OAuth Worker 無法讀取 Google 帳號資料，請查看 Cloudflare Worker Logs。";
+  if (message.includes("google-drive-authorization-cancelled")) return "已取消 Google Drive 授權，尚未完成同步。";
+  if (message.includes("google-drive-authorization-timeout")) return "Google Drive 授權等待逾時，請再按一次「立即同步」。";
   if (message.includes("access_denied")) return "Google Drive 授權已取消，尚未完成連結。";
   if (message.includes("popup")) return "Google 授權視窗被阻擋，請允許彈出視窗後再試。";
   if (message.includes("google-drive-auth-required") || message.includes("interaction_required") || message.includes("login_required") || message.includes("consent_required")) {

@@ -1,7 +1,7 @@
 const encoder = new TextEncoder();
 
-export async function createOAuthState({ returnTo, nonce, secret, now = Date.now(), lifetimeMs = 10 * 60 * 1000 }) {
-  const payload = { returnTo, nonce, expiresAt: now + lifetimeMs };
+export async function createOAuthState({ returnTo, nonce, popup = false, secret, now = Date.now(), lifetimeMs = 10 * 60 * 1000 }) {
+  const payload = { returnTo, nonce, popup: popup === true, expiresAt: now + lifetimeMs };
   const encoded = base64Url(encoder.encode(JSON.stringify(payload)));
   return `${encoded}.${await sign(encoded, secret)}`;
 }
