@@ -1503,14 +1503,7 @@ async function resetCloudPasswordWithRecovery(event) {
         alert("救援碼不正確，請確認後再試一次");
         return;
       }
-      const pairingCode = recoveryPairingCode();
-      const request = await createDriveRecoveryRequest({
-        vaultId: keyPackage.vaultId,
-        requesterDeviceId: state.appState?.deviceId ?? createDeviceId(),
-        pairingCode
-      });
-      state.route = { name: "recoveryPending", recoveryRequestId: request.requestId, pairingCode, mode };
-      render();
+      await beginDeviceApprovalRequest(keyPackage.vaultId, mode);
       return;
     }
     dekBytes = await unwrapDek(keyPackage.recoveryCodeWrapper, recoveryCode, keyPackage.crypto.iterations);
@@ -1585,6 +1578,24 @@ async function resetCloudPasswordWithRecovery(event) {
     oldInvalid: true,
     returnTo: conflicts.length ? { name: "syncConflicts" } : { name: "home" }
   });
+}
+
+async function startDeviceApprovalRecovery(event) {
+  event.preventDefault();
+  const draft = state.route.securityDraft ?? {};
+  if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
+  try {
+    const keyPackage = await readDriveFile(driveFileName("keyPackage"));
+    if (!keyPackage?.vaultId) throw new Error("missing-key-package");
+    await beginDeviceApprovalRequest(keyPackage.vaultId, state.route.mode === "merge" ? "merge" : "existing");
+  } catch (error) { alert(driveErrorMessage(error, "無法建立舊裝置授權請求。請先完成 Google Drive 連結。")); }
+}
+
+async function beginDeviceApprovalRequest(vaultId, mode) {
+  const pairingCode = recoveryPairingCode();
+  const request = await createDriveRecoveryRequest({ vaultId, requesterDeviceId: state.appState?.deviceId ?? createDeviceId(), pairingCode });
+  state.route = { name: "recoveryPending", recoveryRequestId: request.requestId, pairingCode, mode };
+  render();
 }
 
 async function checkRecoveryRequest() {
@@ -2234,6 +2245,7 @@ function view() {
   if (state.route.name === "driveMergeUnlock") return driveMergeUnlockView();
   if (state.route.name === "driveExistingUnlock") return driveExistingUnlockView();
   if (state.route.name === "driveRecoveryReset") return driveRecoveryResetView();
+  if (state.route.name === "deviceApprovalRecovery") return deviceApprovalRecoveryView();
   if (state.route.name === "recoveryPending") return recoveryPendingView();
   if (state.route.name === "recoveryComplete") return recoveryCompleteView();
   if (state.route.name === "recoveryRequests") return recoveryRequestsView();
@@ -3100,7 +3112,8 @@ function driveRecoveryResetView() {
       ["newPassword", "新密碼", "new-password"],
       ["confirmPassword", "再次輸入新密碼", "new-password"]
     ],
-    submit: "重設密碼"
+    submit: "重設密碼",
+    extraActions: `<button type="button" class="secondary" data-nav="deviceApprovalRecovery" data-mode="${mode}">從已登入舊裝置授權</button>`
   });
 }
 
@@ -3228,12 +3241,26 @@ function forgotPasswordView() {
   return securityFormView({
     title: "忘記密碼",
     form: "forgot-password",
+    intro: "請輸入救援碼並設定新密碼。完成後會產生新的救援碼，舊救援碼將失效。",
     fields: [
       ["recoveryCode", "救援碼", "one-time-code"],
       ["newPassword", "新密碼", "new-password"],
       ["confirmPassword", "再次輸入新密碼", "new-password"]
     ],
-    submit: "重設密碼"
+    submit: "重設密碼",
+    extraActions: `<button type="button" class="secondary" data-nav="deviceApprovalRecovery" data-mode="settings">從已登入舊裝置授權</button>`
+  });
+}
+
+function deviceApprovalRecoveryView() {
+  const mode = state.route.mode === "merge" ? "merge" : "existing";
+  return securityFormView({
+    title: "從已登入舊裝置授權",
+    form: "device-approval-recovery",
+    intro: "救援碼遺失時，可由已登入且已解鎖的舊裝置核准。請先設定新密碼；核准時需在舊裝置手動輸入相同的新密碼。",
+    fields: [["newPassword", "新密碼", "new-password"], ["confirmPassword", "再次輸入新密碼", "new-password"]],
+    submit: "建立核准請求",
+    backRoute: state.route.mode === "settings" ? "settings" : (mode === "merge" ? "driveMergeUnlock" : "driveExistingUnlock")
   });
 }
 
@@ -3257,7 +3284,7 @@ function logoutAllDevicesView() {
   });
 }
 
-function securityFormView({ title, form, fields, submit, intro = "", danger = false, backRoute = "settings" }) {
+function securityFormView({ title, form, fields, submit, intro = "", danger = false, backRoute = "settings", extraActions = "" }) {
   return `
     <header class="topbar topbar-centered">
       <button class="secondary" data-nav="${backRoute}">返回</button>
@@ -3277,6 +3304,7 @@ function securityFormView({ title, form, fields, submit, intro = "", danger = fa
         )
         .join("")}
       <button type="submit" class="${danger ? "danger" : ""}">${submit}</button>
+      ${extraActions}
     </form>
   `;
 }
@@ -4147,6 +4175,7 @@ function bindSecurityForms() {
     "drive-existing-unlock": unlockExistingDriveVault,
     "drive-merge-unlock": mergeExistingDriveVault,
     "drive-recovery-reset": resetCloudPasswordWithRecovery,
+    "device-approval-recovery": startDeviceApprovalRecovery,
     "recovery-v2-complete": completeRecoveryV2,
     "drive-revision-recovery": scanDriveRevisionRecovery,
     "change-password": changeMasterPassword,
