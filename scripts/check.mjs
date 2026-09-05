@@ -10,6 +10,8 @@ const requiredFiles = [
   "service-worker.js",
   ".github/workflows/deploy-pages.yml",
   "scripts/build-pages.mjs",
+  "scripts/build-web.mjs",
+  "capacitor.config.json",
   "scripts/check.mjs",
   "scripts/dev-server.mjs",
   "scripts/smoke-test.mjs",
@@ -32,6 +34,8 @@ const appShellRequiredFiles = requiredFiles.filter((file) => ![
   "service-worker.js",
   ".github/workflows/deploy-pages.yml",
   "scripts/build-pages.mjs",
+  "scripts/build-web.mjs",
+  "capacitor.config.json",
   "scripts/check.mjs",
   "scripts/dev-server.mjs",
   "scripts/smoke-test.mjs"
@@ -42,6 +46,7 @@ const checks = [];
 await check("required files exist and are readable", () => Promise.all(requiredFiles.map((file) => readFile(file, "utf8"))));
 
 const manifest = await check("manifest JSON is valid", async () => JSON.parse(await readFile("manifest.webmanifest", "utf8")));
+const capacitorConfig = await check("Capacitor config JSON is valid", async () => JSON.parse(await readFile("capacitor.config.json", "utf8")));
 
 const configSource = await readFile("src/config.js", "utf8");
 const serviceWorkerSource = await readFile("service-worker.js", "utf8");
@@ -64,6 +69,12 @@ await check("manifest has required PWA fields", () => {
   if (!Array.isArray(manifest.icons) || !manifest.icons.length) throw new Error("manifest.webmanifest must include at least one icon.");
 });
 
+await check("Capacitor uses the fixed application ID and web bundle", () => {
+  if (capacitorConfig.appId !== "io.github.hgs3767994.wuwangwo") throw new Error("Capacitor appId must remain io.github.hgs3767994.wuwangwo.");
+  if (capacitorConfig.appName !== "莫忘") throw new Error("Capacitor appName must remain 莫忘.");
+  if (capacitorConfig.webDir !== "www") throw new Error("Capacitor webDir must remain www.");
+});
+
 await check("manifest uses GitHub Pages friendly relative start_url", () => {
   if (manifest.start_url !== "./") throw new Error('manifest.webmanifest start_url must be "./" for project pages.');
 });
@@ -83,6 +94,11 @@ await check("runtime config loads before app module", () => {
   if (runtimeConfigIndex < 0) throw new Error("index.html must load src/runtime-config.js.");
   if (appModuleIndex < 0) throw new Error("index.html must load src/app.js.");
   if (runtimeConfigIndex > appModuleIndex) throw new Error("runtime-config.js must load before app.js.");
+});
+
+await check("native runtime bypasses the PWA service worker", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  if (!appSource.includes("Capacitor?.isNativePlatform?.()")) throw new Error("Native runtime must bypass PWA service worker registration.");
 });
 
 await check("public legal pages exist for OAuth production readiness", async () => {

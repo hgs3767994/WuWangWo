@@ -522,6 +522,10 @@ function maybeAutoBiometricUnlock() {
 }
 
 function registerServiceWorker() {
+  // Capacitor ships a fixed local bundle. Its WebView does not need the PWA
+  // service worker, whose update lifecycle would otherwise compete with cap
+  // sync and native application updates.
+  if (globalThis.Capacitor?.isNativePlatform?.()) return;
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./service-worker.js", { updateViaCache: "none" }).then((registration) => {
       state.serviceWorkerRegistration = registration;
