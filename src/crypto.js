@@ -1,3 +1,5 @@
+import { isNativeTrustedSession, nativeTrustedSessionAvailable, restoreNativeTrustedSession, storeNativeTrustedSession } from "./native-trusted-session.js";
+
 const RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const DEFAULT_ITERATIONS = 210000;
 
@@ -95,6 +97,18 @@ export async function unwrapDek(wrapper, secret, iterations = DEFAULT_ITERATIONS
 
 export async function createTrustedSessionWithDek({ vaultId, deviceId, sessionEpoch, dekBytes }) {
   const now = new Date().toISOString();
+  if (nativeTrustedSessionAvailable()) {
+    await storeNativeTrustedSession({ vaultId, deviceId, sessionEpoch, dekBytes });
+    return {
+      schemaVersion: 2,
+      storage: "android-keystore",
+      vaultId,
+      deviceId,
+      sessionEpoch,
+      createdAt: now,
+      lastUsedAt: now
+    };
+  }
   const localDeviceKey = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
   const nonce = randomBytes(12);
   const wrappedDek = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, localDeviceKey, dekBytes);
@@ -140,6 +154,9 @@ export async function decryptLocalEnvelope(envelope, localStorageKey) {
 }
 
 export async function restoreDekFromTrustedSession(trustedSession) {
+  if (isNativeTrustedSession(trustedSession)) {
+    return restoreNativeTrustedSession(trustedSession);
+  }
   if (!trustedSession?.localDekWrapper || !trustedSession.localDeviceKey) {
     throw new Error("trusted-session-missing-local-key");
   }

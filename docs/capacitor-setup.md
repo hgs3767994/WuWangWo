@@ -11,7 +11,8 @@
 - 原生 App 仍只取得短效 Worker session；Google access token、refresh token、DEK、主密碼與救援碼不得進入 Web bundle、Android resources、iOS plist 或 Git。
 - 原生 OAuth 會採系統瀏覽器 + Authorization Code + PKCE，不能沿用 Web PWA 的 popup flow。
 - Worker 要在原生 OAuth 開始前新增 Android/iOS public client 的允許設定與 PKCE code exchange；本階段不會以 Web client secret 冒充原生 client。
-- trusted session 將由原生 Keychain（iOS）或 Android Keystore 保護；尚未完成前不可宣稱原生版已可安全保存 trusted session。
+- Android trusted session 已改為 Android Keystore：DEK 僅以 Keystore 的不可匯出 AES 金鑰加密，IndexedDB 只保存 vault／裝置／session epoch 中繼資料；每次重新開啟或從背景回到前景均要求生物辨識或裝置螢幕鎖。iOS Keychain 仍待實作。
+- 這項 Android 實作已通過 Java 編譯、Web 安全邊界測試與 debug APK 建置；但完整實機解鎖驗證需等待原生 OAuth + PKCE 完成，讓 App 可建立真實的 Drive trusted session。
 
 ## 建立環境
 

@@ -1,14 +1,15 @@
 import { APP_CONFIG, driveFileName, driveProviderLabel, isGoogleDriveConfigured, isMockDrive } from "../src/config.js";
 import { mergeVaults } from "../src/sync.js";
 import { buildVaultXlsx } from "../src/xlsx.js";
-import { createKeyPackage, verifyRecoveryAuthorizationVerifier } from "../src/crypto.js";
+import { createKeyPackage, createTrustedSessionWithDek, restoreDekFromTrustedSession, verifyRecoveryAuthorizationVerifier } from "../src/crypto.js";
 
 const tests = [
   ["config defaults stay safe", testConfigDefaults],
   ["sync merge combines duplicate interest names and detects conflicts", testSyncMerge],
   ["sync merge supports legacy customValues object", testLegacyCustomValues],
-  ["xlsx export produces an Excel workbook blob", testXlsxExport]
-  ,["Recovery v2 verifier cannot unwrap a DEK", testRecoveryV2Verifier]
+  ["xlsx export produces an Excel workbook blob", testXlsxExport],
+  ["Recovery v2 verifier cannot unwrap a DEK", testRecoveryV2Verifier],
+  ["native trusted session keeps its DEK out of IndexedDB", testNativeTrustedSessionRecord]
 ];
 
 for (const [name, test] of tests) {
@@ -116,6 +117,31 @@ async function testRecoveryV2Verifier() {
   assert(!result.keyPackage.recoveryCodeWrapper, "new key package must not include a recovery DEK wrapper");
   assert(await verifyRecoveryAuthorizationVerifier(result.keyPackage.recoveryAuthorizationVerifier, result.recoveryCode), "recovery verifier should accept its code");
   assert(!(await verifyRecoveryAuthorizationVerifier(result.keyPackage.recoveryAuthorizationVerifier, "WRONG-CODE")), "recovery verifier should reject a wrong code");
+}
+
+async function testNativeTrustedSessionRecord() {
+  const previousCapacitor = globalThis.Capacitor;
+  const dek = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  let stored;
+  globalThis.Capacitor = {
+    isNativePlatform: () => true,
+    Plugins: {
+      TrustedSession: {
+        store: async (value) => { stored = value; },
+        restore: async () => ({ dekBase64: stored.dekBase64 })
+      }
+    }
+  };
+  try {
+    const record = await createTrustedSessionWithDek({ vaultId: "vault-native", deviceId: "device-native", sessionEpoch: 4, dekBytes: dek });
+    assert(record.schemaVersion === 2 && record.storage === "android-keystore", "native session must use the Android Keystore record schema");
+    assert(!("localDekWrapper" in record) && !("localDeviceKey" in record), "native IndexedDB record must not contain a DEK wrapper or key");
+    const restored = await restoreDekFromTrustedSession(record);
+    assert(restored.length === dek.length && restored.every((value, index) => value === dek[index]), "native bridge must restore the original DEK bytes");
+  } finally {
+    if (previousCapacitor === undefined) delete globalThis.Capacitor;
+    else globalThis.Capacitor = previousCapacitor;
+  }
 }
 
 function vault({ people = [], interestTags = [], customFieldDefs = [], revision = 1 }) {

@@ -18,6 +18,7 @@ const requiredFiles = [
   "src/app.js",
   "src/config.js",
   "src/crypto.js",
+  "src/native-trusted-session.js",
   "src/db.js",
   "src/drive.js",
   "src/drive-google.js",
@@ -99,6 +100,21 @@ await check("runtime config loads before app module", () => {
 await check("native runtime bypasses the PWA service worker", async () => {
   const appSource = await readFile("src/app.js", "utf8");
   if (!appSource.includes("Capacitor?.isNativePlatform?.()")) throw new Error("Native runtime must bypass PWA service worker registration.");
+});
+
+await check("Android trusted session uses the native Keystore bridge", async () => {
+  const cryptoSource = await readFile("src/crypto.js", "utf8");
+  const bridgeSource = await readFile("src/native-trusted-session.js", "utf8");
+  const pluginSource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/TrustedSessionPlugin.java", "utf8");
+  ["schemaVersion: 2", "storage: \"android-keystore\"", "storeNativeTrustedSession"].forEach((text) => {
+    if (!cryptoSource.includes(text)) throw new Error(`src/crypto.js is missing ${text}.`);
+  });
+  ["Plugins?.TrustedSession", "dekBase64"].forEach((text) => {
+    if (!bridgeSource.includes(text)) throw new Error(`native trusted-session bridge is missing ${text}.`);
+  });
+  ["AndroidKeyStore", "BiometricPrompt", "DEVICE_CREDENTIAL"].forEach((text) => {
+    if (!pluginSource.includes(text)) throw new Error(`Android trusted-session plugin is missing ${text}.`);
+  });
 });
 
 await check("public legal pages exist for OAuth production readiness", async () => {

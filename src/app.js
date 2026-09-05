@@ -2,6 +2,7 @@ import { getItem, removeItem, setItem } from "./db.js";
 import { approveDriveRecoveryRequest, connectDrive, createDriveRecoveryRequest, disconnectDrive, driveAuthStatus, driveReadiness, getDriveRecoveryRequest, listDriveFileRevisions, listDriveFiles, listDriveRecoveryRequests, readDriveFile, readDriveFileRevision, writeDriveFile } from "./drive.js";
 import { completeGoogleOAuthHandoff } from "./drive-google.js";
 import { APP_CONFIG, driveFileName, driveProviderLabel } from "./config.js";
+import { clearNativeTrustedSession, isNativeTrustedSession, nativeTrustedSessionAuthenticationError, nativeTrustedSessionAvailable } from "./native-trusted-session.js";
 import { mergeVaults } from "./sync.js";
 import { buildVaultXlsx } from "./xlsx.js";
 import {
@@ -146,7 +147,7 @@ async function boot() {
   }
   if (storedAppState && appState !== storedAppState) await setItem("appState", appState);
   const vault = await loadLocalVault();
-  const trustedSession = await getItem("trustedSession");
+  let trustedSession = await getItem("trustedSession");
   const localSnapshots = await loadLocalSnapshots();
   state = { ...state, localSnapshots };
   if (!appState || !vault) {
@@ -158,7 +159,7 @@ async function boot() {
     if (appState.mode === "driveSync") {
       const sessionCheck = await checkTrustedSessionStillValid(appState, trustedSession);
       if (!sessionCheck.valid) {
-        if (!sessionCheck.keepTrustedSession) await removeItem("trustedSession");
+        if (!sessionCheck.keepTrustedSession) await clearTrustedSession();
         state = {
           ...state,
           appState,
@@ -173,9 +174,14 @@ async function boot() {
       }
       try {
         dekBytes = await restoreDekFromTrustedSession(trustedSession);
-      } catch {
-        await removeItem("trustedSession");
-        state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock", allowBiometric: false } };
+        if (nativeTrustedSessionAvailable() && !isNativeTrustedSession(trustedSession)) {
+          trustedSession = await createTrustedSessionWithDek({ vaultId: trustedSession.vaultId, deviceId: trustedSession.deviceId, sessionEpoch: trustedSession.sessionEpoch, dekBytes });
+          await setItem("trustedSession", trustedSession);
+        }
+      } catch (error) {
+        const preserveForRetry = isNativeTrustedSession(trustedSession) && nativeTrustedSessionAuthenticationError(error);
+        if (!preserveForRetry) await clearTrustedSession();
+        state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock", allowBiometric: preserveForRetry, autoBiometricAttempted: preserveForRetry } };
         render();
         registerHistoryNavigation();
         registerServiceWorker();
@@ -265,9 +271,17 @@ function registerAutoLock() {
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
+      if (nativeTrustedSessionAvailable() && canAutoLock()) {
+        state.nativeBackgroundLockPending = true;
+        void lockApp("已離開 App，請使用裝置驗證解鎖。", { suppressAutoBiometric: true }).then(() => {
+          resumeNativeDeviceVerificationAfterBackground();
+        });
+        return;
+      }
       void touchTrustedSessionNow({ force: true });
     } else {
       recordUserActivity();
+      resumeNativeDeviceVerificationAfterBackground();
     }
   });
   window.addEventListener("pagehide", () => {
@@ -307,7 +321,19 @@ async function touchTrustedSessionNow(options = {}) {
   });
 }
 
-async function lockApp(message = "請重新輸入密碼以繼續使用") {
+async function clearTrustedSession() {
+  await removeItem("trustedSession");
+  await clearNativeTrustedSession();
+}
+
+function resumeNativeDeviceVerificationAfterBackground() {
+  if (!state.nativeBackgroundLockPending || document.visibilityState !== "visible" || state.route?.name !== "unlock") return;
+  state.nativeBackgroundLockPending = false;
+  state.route = { ...state.route, autoBiometricAttempted: false };
+  render();
+}
+
+async function lockApp(message = "請重新輸入密碼以繼續使用", options = {}) {
   if (!state.appState || state.route?.name === "unlock") return;
   if (state.idleLockTimer) {
     window.clearTimeout(state.idleLockTimer);
@@ -316,7 +342,13 @@ async function lockApp(message = "請重新輸入密碼以繼續使用") {
   if (state.appState.mode !== "driveSync") return;
   await touchTrustedSessionNow({ force: true });
   state.dekBytes = null;
-  state.route = { name: "unlock", message, showForgotPassword: true, allowBiometric: true };
+  state.route = {
+    name: "unlock",
+    message,
+    showForgotPassword: true,
+    allowBiometric: true,
+    autoBiometricAttempted: options.suppressAutoBiometric === true
+  };
   render();
 }
 
@@ -472,12 +504,23 @@ async function disableBiometricUnlock() {
 
 async function unlockWithBiometric(options = {}) {
   const silent = options.silent === true;
+  const trustedSession = await getItem("trustedSession");
+  if (isNativeTrustedSession(trustedSession)) {
+    try {
+      state.dekBytes = await restoreDekFromTrustedSession(trustedSession);
+      await touchTrustedSessionNow({ force: true });
+      navigate({ name: "home" }, { replace: true, force: true });
+      void resumeDriveSyncInBackground();
+    } catch {
+      if (!silent) alert("裝置驗證未完成，請改用密碼登入。");
+    }
+    return;
+  }
   if (!webAuthnSupported()) {
     if (!silent) alert("此瀏覽器目前不支援生物辨識解鎖。");
     return;
   }
   const credentialRecord = await getItem("biometricUnlock");
-  const trustedSession = await getItem("trustedSession");
   if (!isBiometricUnlockEnabled() || !credentialRecord || !trustedSession) {
     if (!silent) alert("這台裝置尚未啟用生物辨識解鎖，請使用密碼登入。");
     return;
@@ -513,7 +556,7 @@ async function unlockWithBiometric(options = {}) {
 function maybeAutoBiometricUnlock() {
   if (state.route?.name !== "unlock") return;
   if (state.route.allowBiometric === false || state.route.autoBiometricAttempted) return;
-  if (!isBiometricUnlockEnabled()) return;
+  if (!nativeTrustedSessionAvailable() && !isBiometricUnlockEnabled()) return;
   state.route.autoBiometricAttempted = true;
   window.setTimeout(() => {
     if (state.route?.name !== "unlock") return;
@@ -710,7 +753,7 @@ async function beginDriveSetup(options = {}) {
     const remoteKeyPackage = await readDriveFile(driveFileName("keyPackage"));
     if (remoteKeyPackage?.securityMeta?.sessionEpoch > existingKeyPackage.securityMeta?.sessionEpoch) {
       await setItem("keyPackage", remoteKeyPackage);
-      await removeItem("trustedSession");
+      await clearTrustedSession();
       state.appState = {
         ...state.appState,
         googleDrive: {
@@ -1937,7 +1980,7 @@ async function logoutAllDevices(event) {
     };
     await setItem("keyPackage", updatedKeyPackage);
     await uploadKeyPackageToDrive();
-    await removeItem("trustedSession");
+    await clearTrustedSession();
     navigate({ name: "unlock", message: "已從所有裝置登出，請重新輸入密碼", showForgotPassword: true, allowBiometric: false }, { replace: true, force: true });
   } catch {
     alert("目前密碼不正確，請再試一次");
@@ -2663,6 +2706,9 @@ function settingsView() {
 
 function securitySettingsSection() {
   const biometricEnabled = isBiometricUnlockEnabled();
+  const nativeDeviceVerification = nativeTrustedSessionAvailable()
+    ? `<p class="muted">原生 App 的 trusted session 使用 Android Keystore 保存，重新開啟或鎖定後必須通過生物辨識或螢幕鎖驗證。</p>`
+    : `<button class="biometric-button" data-action="${biometricEnabled ? "disable-biometric-unlock" : "enable-biometric-unlock"}">${biometricEnabled ? "停用生物辨識解鎖" : "啟用生物辨識解鎖"}</button>`;
   return `
     <section class="panel stack">
       <h2 class="section-title">安全性</h2>
@@ -2670,7 +2716,7 @@ function securitySettingsSection() {
       <button class="action-quiet" data-nav="forgotPassword">忘記密碼</button>
       <button class="action-quiet" data-nav="regenerateRecovery">重新產生救援碼</button>
       <button class="action-quiet" data-action="refresh-recovery-requests">查看舊裝置救援核准請求</button>
-      <button class="biometric-button" data-action="${biometricEnabled ? "disable-biometric-unlock" : "enable-biometric-unlock"}">${biometricEnabled ? "停用生物辨識解鎖" : "啟用生物辨識解鎖"}</button>
+      ${nativeDeviceVerification}
       <button class="danger" data-nav="logoutAllDevices">登出所有裝置</button>
     </section>
   `;
@@ -3312,7 +3358,9 @@ function unlockView() {
 }
 
 function biometricUnlockButtonForUnlockView() {
-  if (state.route.allowBiometric === false || !webAuthnSupported()) return "";
+  if (state.route.allowBiometric === false) return "";
+  if (nativeTrustedSessionAvailable()) return `<button type="button" class="biometric-button" data-action="biometric-unlock">使用生物辨識或螢幕鎖解鎖</button>`;
+  if (!webAuthnSupported()) return "";
   if (isBiometricUnlockEnabled()) {
     return `<button type="button" class="biometric-button" data-action="biometric-unlock">使用生物辨識解鎖</button>`;
   }
