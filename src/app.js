@@ -113,9 +113,21 @@ let state = {
 async function boot() {
   registerDeveloperAccessGuard();
   registerAutoLock();
-  try { await completeGoogleOAuthHandoff(); } catch {}
+  let oauthHandoffCompleted = false;
+  try { oauthHandoffCompleted = Boolean(await completeGoogleOAuthHandoff()); } catch {}
   const storedAppState = await getItem("appState");
-  const appState = normalizeLoadedAppState(storedAppState);
+  let appState = normalizeLoadedAppState(storedAppState);
+  if (oauthHandoffCompleted && appState?.googleDrive?.syncStatus === "syncing") {
+    appState = {
+      ...appState,
+      googleDrive: {
+        ...appState.googleDrive,
+        syncStatus: syncStatusAfterLocalChange(appState.googleDrive),
+        syncStartedAt: "",
+        lastSyncError: ""
+      }
+    };
+  }
   if (storedAppState && appState !== storedAppState) await setItem("appState", appState);
   const vault = await loadLocalVault();
   const trustedSession = await getItem("trustedSession");
