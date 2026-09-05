@@ -4,6 +4,9 @@ www/
 .env
 .DS_Store
 .dev.vars
+# Android release signing material must remain local to the signing machine.
+android/keystore.properties
+android/release/
 備忘錄/
 上傳/
 改檔備份/

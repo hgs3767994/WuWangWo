@@ -15,11 +15,16 @@
 
 ## 建立環境
 
-1. 安裝 Node.js LTS（含 npm）與 Android Studio／Android SDK。
+1. 安裝 Node.js LTS（含 npm）與 Android Studio／Android SDK。Capacitor Android 8 需使用 JDK 21；本機使用 `C:\Users\jp619\AppData\Local\Programs\EclipseAdoptium\jdk-21.0.12.1+1`，不能使用目前 Android Studio 內建的 Java 25 直接建置。
 2. 在專案根目錄執行 `npm install`，此步會產生 lockfile。
 3. 建置固定 bundle：設定 `GOOGLE_OAUTH_API_URL` 為 Worker URL 後執行 `npm run build:web`。
 4. 產生原生專案：`npx cap add android`、`npx cap add ios`；後者可在 Windows 產生檔案，但必須在 macOS + Xcode 編譯與簽署。
 5. 每次 Web 改動後執行 `npm run cap:sync`。
+
+## Android 實機與正式簽章
+
+- Debug APK：`android\app\build\outputs\apk\debug\app-debug.apk`；僅供實機測試，不能作為商店正式版。
+- Release keystore、正式 SHA-1／SHA-256 與 AAB 建置步驟見 [android-release-signing.md](android-release-signing.md)。keystore 與密碼永遠留在本機且不提交 Git。
 
 ## 尚待建立前的外部設定
 
