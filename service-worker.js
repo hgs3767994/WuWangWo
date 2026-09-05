@@ -1,4 +1,4 @@
-const CACHE_NAME = "forget-me-not-v121";
+const CACHE_NAME = "forget-me-not-v122";
 const NETWORK_FIRST = new Set(["./src/runtime-config.js"]);
 const APP_SHELL = [
   "./",

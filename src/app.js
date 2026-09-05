@@ -179,14 +179,13 @@ async function boot() {
 
 function normalizeLoadedAppState(appState) {
   if (!appState?.googleDrive || appState.googleDrive.syncStatus !== "syncing") return appState;
-  if (isDriveSyncRecentlyStarted(appState.googleDrive)) return appState;
   return {
     ...appState,
     googleDrive: {
       ...appState.googleDrive,
       syncStatus: syncStatusAfterLocalChange(appState.googleDrive),
       syncStartedAt: "",
-      lastSyncError: appState.googleDrive.lastSyncError || "上次同步未正常完成，請再按「立即同步」。"
+      lastSyncError: appState.googleDrive.lastSyncError || "上次同步因頁面重新載入而中斷，請再按「立即同步」。"
     }
   };
 }
