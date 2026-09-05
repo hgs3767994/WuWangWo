@@ -24,7 +24,7 @@
 
 `workers/oauth/` 提供 health、Google OAuth callback、一次性 handoff 與受限的 Drive proxy。health endpoint 會以 `SELECT 1` 確認 `OAUTH_DB` 綁定可用；Google refresh token 只以加密 envelope 存於 D1。Worker 只接受 `key-package.enc`、`vault.enc` 與短暫診斷檔，不能存取 Drive 其他檔案，也不會解密 vault、DEK、主密碼或救援碼。
 
-在啟用 OAuth 前，先由 D1 Console 執行 `workers/oauth/schema.sql`；既有資料庫還必須補執行 `workers/oauth/migrations/0002-sessions.sql`。schema 只建立加密 token envelope 的 metadata、一次性 handoff 雜湊與短效 session 雜湊；不存 vault、DEK、主密碼、救援碼、access token 明文或 refresh token 明文。執行成功後 health endpoint 會回傳 `schemaReady: true`。
+在啟用 OAuth 前，先由 D1 Console 執行 `workers/oauth/schema.sql`；既有資料庫還必須依序補執行 `workers/oauth/migrations/0002-sessions.sql` 與 `workers/oauth/migrations/0003-recovery-requests.sql`。後者只建立短效 recovery request 的路由 metadata（request ID、vault ID、裝置 ID、配對碼、到期與核准狀態）；不存 vault、DEK、主密碼、救援碼、任何 DEK wrapper、access token 明文或 refresh token 明文。執行成功後 health endpoint 會回傳 `schemaReady: true`。
 
 部署前必須由管理者設定：
 

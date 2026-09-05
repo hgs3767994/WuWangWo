@@ -4,6 +4,7 @@ import { verifyOAuthState } from "./oauth-state.js";
 import { decryptTokenEnvelope, encryptTokenEnvelope } from "./token-envelope.js";
 import { consumeHandoff, createHandoff, createSession, revokeSession, saveAccount, sessionAccount } from "./oauth-store.js";
 import { executeDriveOperation } from "./drive-proxy.js";
+import { approveRecoveryRequest, createRecoveryRequest, listRecoveryRequests, recoveryRequest } from "./recovery-store.js";
 
 const SERVICE_NAME = "forget-me-not-oauth";
 const REQUIRED_SECRETS = ["GOOGLE_WEB_CLIENT_SECRET", "OAUTH_STATE_SIGNING_KEY", "TOKEN_ENCRYPTION_KEY"];
@@ -106,6 +107,45 @@ export default {
       }
     }
 
+    if (url.pathname === "/v1/recovery/requests" || url.pathname.startsWith("/v1/recovery/requests/")) {
+      const origin = request.headers.get("Origin");
+      if (!isAllowedOrigin(origin, env.APP_ORIGINS)) return json({ error: "origin-not-allowed" }, 403);
+      if (!hasRequiredConfiguration(env)) return json({ error: "oauth-not-configured" }, 503, corsHeaders(origin));
+      if (!(await recoveryDatabaseStatus(env.OAUTH_DB)).ready) return json({ error: "recovery-storage-not-ready" }, 503, corsHeaders(origin));
+      const token = bearerToken(request.headers.get("Authorization"));
+      const account = token ? await sessionAccount(env.OAUTH_DB, { token, now: new Date().toISOString() }) : null;
+      if (!account) return json({ error: "session-expired" }, 401, corsHeaders(origin));
+      const now = new Date().toISOString();
+      const suffix = url.pathname.slice("/v1/recovery/requests/".length);
+      try {
+        if (request.method === "POST" && url.pathname === "/v1/recovery/requests") {
+          const body = await request.json();
+          const vaultId = bounded(body?.vaultId, 200);
+          const requesterDeviceId = bounded(body?.requesterDeviceId, 200);
+          const pairingCode = bounded(body?.pairingCode, 80);
+          if (!vaultId || !requesterDeviceId || !pairingCode) return json({ error: "recovery-request-invalid" }, 400, corsHeaders(origin));
+          return json(await createRecoveryRequest(env.OAUTH_DB, { requestId: crypto.randomUUID(), subject: account.google_subject, vaultId, requesterDeviceId, pairingCode, now }), 201, corsHeaders(origin));
+        }
+        if (request.method === "GET" && url.pathname === "/v1/recovery/requests") return json({ requests: await listRecoveryRequests(env.OAUTH_DB, { subject: account.google_subject, now }) }, 200, corsHeaders(origin));
+        if (request.method === "GET" && suffix && !suffix.includes("/")) {
+          const item = await recoveryRequest(env.OAUTH_DB, { requestId: suffix, subject: account.google_subject, now });
+          return item ? json({ request: item }, 200, corsHeaders(origin)) : json({ error: "recovery-request-not-found" }, 404, corsHeaders(origin));
+        }
+        const approveId = suffix.endsWith("/approve") ? suffix.slice(0, -"/approve".length) : "";
+        if (request.method === "POST" && approveId) {
+          const body = await request.json();
+          const approverDeviceId = bounded(body?.approverDeviceId, 200);
+          const sessionEpoch = Number(body?.sessionEpoch);
+          if (!approverDeviceId || !Number.isSafeInteger(sessionEpoch) || sessionEpoch < 1) return json({ error: "recovery-approval-invalid" }, 400, corsHeaders(origin));
+          const item = await approveRecoveryRequest(env.OAUTH_DB, { requestId: approveId, subject: account.google_subject, approverDeviceId, sessionEpoch, now });
+          return item ? json({ request: item }, 200, corsHeaders(origin)) : json({ error: "recovery-request-not-pending" }, 409, corsHeaders(origin));
+        }
+      } catch {
+        return json({ error: "recovery-request-failed" }, 500, corsHeaders(origin));
+      }
+      return json({ error: "not-found" }, 404, corsHeaders(origin));
+    }
+
     if (request.method === "GET" && url.pathname === "/health") {
       const storage = await databaseStatus(env?.OAUTH_DB);
       return json({
@@ -161,7 +201,16 @@ async function databaseStatus(database) {
   }
 }
 
-function corsHeaders(origin) { return { "access-control-allow-origin": origin, "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "content-type, authorization", vary: "Origin" }; }
+async function recoveryDatabaseStatus(database) {
+  if (!database?.prepare) return { ready: false };
+  try {
+    const result = await database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'recovery_requests'").all();
+    return { ready: (result.results ?? []).some((row) => row.name === "recovery_requests") };
+  } catch { return { ready: false }; }
+}
+
+function corsHeaders(origin) { return { "access-control-allow-origin": origin, "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type, authorization", vary: "Origin" }; }
+function bounded(value, maxLength) { const text = String(value ?? "").trim(); return text && text.length <= maxLength ? text : ""; }
 function redirect(location, status, setCookie) { return new Response(null, { status, headers: { location, "set-cookie": setCookie, "cache-control": "no-store" } }); }
 
 async function currentAccessToken(env, account, now) {
