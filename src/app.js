@@ -107,6 +107,7 @@ let state = {
   skipNextPopstateConfirm: false,
   developerAccessGuardRegistered: false,
   autoLockRegistered: false,
+  nativeBackButtonRegistered: false,
   idleLockTimer: null,
   lastSessionTouchAt: 0,
   installPromptEvent: null,
@@ -117,6 +118,7 @@ let state = {
 async function boot() {
   registerDeveloperAccessGuard();
   registerAutoLock();
+  registerNativeBackButton();
   let oauthHandoffCompleted = false;
   let oauthHandoffError = null;
   try { oauthHandoffCompleted = Boolean(await completeGoogleOAuthHandoff()); } catch (error) { oauthHandoffError = error; }
@@ -288,6 +290,23 @@ function registerAutoLock() {
     void touchTrustedSessionNow({ force: true });
   });
   resetIdleLockTimer();
+}
+
+function registerNativeBackButton() {
+  if (state.nativeBackButtonRegistered || !globalThis.Capacitor?.isNativePlatform?.()) return;
+  const nativeApp = globalThis.Capacitor.Plugins?.App;
+  if (!nativeApp?.addListener || !nativeApp?.exitApp) return;
+  state.nativeBackButtonRegistered = true;
+  nativeApp.addListener("backButton", () => {
+    // The native back callback takes precedence over WebView history. This
+    // prevents stale OAuth/browser entries from reopening after a completed
+    // workflow, while retaining the PWA's existing route-back rules.
+    if (["home", "welcome", "unlock"].includes(state.route?.name)) {
+      void nativeApp.exitApp();
+      return;
+    }
+    navigateBack({ name: "home" });
+  });
 }
 
 function recordUserActivity() {

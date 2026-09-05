@@ -102,6 +102,13 @@ await check("native runtime bypasses the PWA service worker", async () => {
   if (!appSource.includes("Capacitor?.isNativePlatform?.()")) throw new Error("Native runtime must bypass PWA service worker registration.");
 });
 
+await check("native Android back button exits only from root routes", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  ["registerNativeBackButton", "addListener(\"backButton\"", "nativeApp.exitApp()", "navigateBack({ name: \"home\" })"].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing ${text}.`);
+  });
+});
+
 await check("Android trusted session uses the native Keystore bridge", async () => {
   const cryptoSource = await readFile("src/crypto.js", "utf8");
   const bridgeSource = await readFile("src/native-trusted-session.js", "utf8");
