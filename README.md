@@ -18,3 +18,4 @@
 
 - [開發設定.md](開發設定.md)
 - [Cloudflare Workers 與 Capacitor 前置設計](docs/cloudflare-capacitor-plan.md)
+- [Android 實機功能矩陣與測試清單](docs/android-feature-matrix.md)

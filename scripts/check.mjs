@@ -27,7 +27,9 @@ const requiredFiles = [
   "src/runtime-config.js",
   "src/sync.js",
   "src/xlsx.js",
-  "src/styles.css"
+  "src/styles.css",
+  "android/app/src/main/res/xml/backup_rules.xml",
+  "android/app/src/main/res/xml/data_extraction_rules.xml"
 ];
 const appShellRequiredFiles = requiredFiles.filter((file) => ![
   "README.md",
@@ -39,7 +41,9 @@ const appShellRequiredFiles = requiredFiles.filter((file) => ![
   "capacitor.config.json",
   "scripts/check.mjs",
   "scripts/dev-server.mjs",
-  "scripts/smoke-test.mjs"
+  "scripts/smoke-test.mjs",
+  "android/app/src/main/res/xml/backup_rules.xml",
+  "android/app/src/main/res/xml/data_extraction_rules.xml"
 ].includes(file));
 
 const checks = [];
@@ -54,6 +58,7 @@ const serviceWorkerSource = await readFile("service-worker.js", "utf8");
 const indexSource = await readFile("index.html", "utf8");
 const workflowSource = await readFile(".github/workflows/deploy-pages.yml", "utf8");
 const buildPagesSource = await readFile("scripts/build-pages.mjs", "utf8");
+const androidManifestSource = await readFile("android/app/src/main/AndroidManifest.xml", "utf8");
 const configCacheName = configSource.match(/cacheName:\s*"([^"]+)"/)?.[1];
 const serviceWorkerCacheName = serviceWorkerSource.match(/CACHE_NAME\s*=\s*"([^"]+)"/)?.[1];
 
@@ -107,6 +112,20 @@ await check("native Android back button exits only from root routes", async () =
   ["registerNativeBackButton", "addListener(\"backButton\"", "nativeApp.exitApp()", "navigateBack({ name: \"home\" })"].forEach((text) => {
     if (!appSource.includes(text)) throw new Error(`src/app.js is missing ${text}.`);
   });
+});
+
+await check("Android backup and device transfer exclude app data", async () => {
+  if (!androidManifestSource.includes('android:allowBackup="false"')) throw new Error("Android Auto Backup must be disabled.");
+  ["@xml/backup_rules", "@xml/data_extraction_rules"].forEach((text) => {
+    if (!androidManifestSource.includes(text)) throw new Error(`AndroidManifest.xml is missing ${text}.`);
+  });
+  const legacyRules = await readFile("android/app/src/main/res/xml/backup_rules.xml", "utf8");
+  const modernRules = await readFile("android/app/src/main/res/xml/data_extraction_rules.xml", "utf8");
+  ["file", "database", "sharedpref", "external", "root"].forEach((domain) => {
+    if (!legacyRules.includes(`domain="${domain}"`)) throw new Error(`Legacy backup rules must exclude ${domain}.`);
+    if (!modernRules.includes(`domain="${domain}"`)) throw new Error(`Android 12 backup rules must exclude ${domain}.`);
+  });
+  if (!modernRules.includes("<device-transfer>")) throw new Error("Android 12 backup rules must block device-to-device transfer.");
 });
 
 await check("Android trusted session uses the native Keystore bridge", async () => {
