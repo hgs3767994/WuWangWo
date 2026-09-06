@@ -15,7 +15,7 @@
 | 背景鎖定 | 程式已完成，待真實 Drive session | 有 trusted session 後，切到背景再回來 | 回到前景應要求裝置驗證。 |
 | 重開／生物辨識或螢幕鎖解鎖 | 程式已完成，待真實 Drive session | 強制關閉後重新開啟 | Android Keystore session 不會把 DEK 放到 IndexedDB。 |
 | 登出所有裝置／session epoch | 程式已完成，待真實 Drive session | 使用兩台測試裝置 | 舊 session 必須失效。 |
-| Google Drive 連結與同步 | 尚不可測 | 等待第 3 項原生 OAuth + PKCE | 不使用 WebView popup 作為正式流程。 |
+| Google Drive 連結與同步 | 原生 OAuth + PKCE 骨架完成，尚不可端到端測試 | 等待自有網域、App Link、Google Cloud 設定與 Worker 部署 | 未設定時顯示明確提示，不會退回 WebView popup。 |
 | 更新後資料保留 | 可測試 | 建立測試人物，再以 `adb install -r` 安裝新版 APK | 不可先解除安裝；解除安裝會移除 App 私有資料。 |
 
 ## 每次 debug APK 的可重複流程

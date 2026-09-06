@@ -1,4 +1,5 @@
 import { APP_CONFIG, isGoogleDriveConfigured } from "./config.js";
+import { completeNativeGoogleOAuthLaunch, connectNativeGoogleDrive, isNativeOAuthRuntime } from "./native-oauth.js";
 
 const SESSION_STORAGE_KEY = "forget-me-not-oauth-session";
 
@@ -24,6 +25,7 @@ export async function getGoogleRecoveryRequest(requestId) { return workerApiFetc
 export async function approveGoogleRecoveryRequest(requestId, values) { return workerApiFetch(`/v1/recovery/requests/${encodeURIComponent(requestId)}/approve`, values); }
 
 export async function connectGoogleDrive({ interactive = true, popupWindow = null, requirePopup = false } = {}) {
+  if (isNativeOAuthRuntime()) return connectNativeGoogleDrive({ interactive });
   const session = await completeGoogleOAuthHandoff();
   if (session) return { connected: true, accountEmail: session.accountEmail };
   const existing = readSession();
@@ -57,6 +59,8 @@ export function googleDriveReadiness() {
 }
 
 export async function completeGoogleOAuthHandoff() {
+  const nativeSession = await completeNativeGoogleOAuthLaunch();
+  if (nativeSession) return nativeSession;
   const url = new URL(location.href);
   const handoff = url.searchParams.get("oauth_handoff");
   if (!handoff) return null;

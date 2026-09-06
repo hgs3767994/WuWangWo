@@ -39,6 +39,8 @@
 - `GOOGLE_WEB_CLIENT_SECRET`：僅以 Worker secret 保存。
 - `OAUTH_STATE_SIGNING_KEY`：僅以 Worker secret 保存；用於 state／一次性登入授權。
 - `TOKEN_ENCRYPTION_KEY`：僅以 Worker secret 保存；用於資料庫中的 refresh token envelope。
+- `GOOGLE_NATIVE_CLIENT_ID`：Android/iOS public OAuth client ID；可公開，但尚未設定前 native OAuth endpoint 會保持停用。
+- `NATIVE_OAUTH_APP_LINK_URI`：唯一的正式 HTTPS App Link callback；native start endpoint 只接受 PKCE code challenge，native exchange endpoint 只接受同一 state 所對應的 verifier。
 
 在沒有自有網域時，可將 `https://<worker>.<account-subdomain>.workers.dev` 作為開發 callback。它不應作為正式 OAuth 或上架的長期網址；正式環境應採已驗證的自有網域。
 

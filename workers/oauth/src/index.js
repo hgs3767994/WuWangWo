@@ -9,6 +9,7 @@ import { approveRecoveryRequest, createRecoveryRequest, listRecoveryRequests, re
 const SERVICE_NAME = "forget-me-not-oauth";
 const REQUIRED_SECRETS = ["GOOGLE_WEB_CLIENT_SECRET", "OAUTH_STATE_SIGNING_KEY", "TOKEN_ENCRYPTION_KEY"];
 const REQUIRED_PUBLIC_VALUES = ["APP_ORIGINS", "GOOGLE_WEB_CLIENT_ID", "GOOGLE_OAUTH_REDIRECT_URI"];
+const REQUIRED_NATIVE_VALUES = ["APP_ORIGINS", "GOOGLE_NATIVE_CLIENT_ID", "NATIVE_OAUTH_APP_LINK_URI", "OAUTH_STATE_SIGNING_KEY", "TOKEN_ENCRYPTION_KEY"];
 
 export default {
   async fetch(request, env) {
@@ -27,6 +28,39 @@ export default {
       const popup = url.searchParams.get("popup") === "1";
       const state = await createOAuthState({ returnTo, nonce, popup, secret: env.OAUTH_STATE_SIGNING_KEY });
       return redirect(authorizationUrl({ clientId: env.GOOGLE_WEB_CLIENT_ID, redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI, state }), 302, `forget_me_not_oauth_nonce=${nonce}; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=600`);
+    }
+
+    if (request.method === "GET" && url.pathname === "/v1/oauth/google/native/start") {
+      if (!hasNativeConfiguration(env)) return json({ error: "native-oauth-not-configured", missing: missingNativeConfiguration(env) }, 503);
+      if (!(await databaseStatus(env.OAUTH_DB)).schemaReady) return json({ error: "storage-not-ready" }, 503);
+      const codeChallenge = url.searchParams.get("code_challenge") ?? "";
+      if (!validCodeChallenge(codeChallenge)) return json({ error: "native-oauth-pkce-invalid" }, 400);
+      const state = await createOAuthState({ returnTo: env.NATIVE_OAUTH_APP_LINK_URI, nonce: crypto.randomUUID(), native: true, codeChallenge, secret: env.OAUTH_STATE_SIGNING_KEY });
+      return redirect(authorizationUrl({ clientId: env.GOOGLE_NATIVE_CLIENT_ID, redirectUri: env.NATIVE_OAUTH_APP_LINK_URI, state, codeChallenge }), 302);
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/oauth/google/native/exchange") {
+      const origin = request.headers.get("Origin");
+      if (!isAllowedOrigin(origin, env.APP_ORIGINS)) return json({ error: "origin-not-allowed" }, 403);
+      if (!hasNativeConfiguration(env)) return json({ error: "native-oauth-not-configured", missing: missingNativeConfiguration(env) }, 503, corsHeaders(origin));
+      if (!(await databaseStatus(env.OAUTH_DB)).schemaReady) return json({ error: "storage-not-ready" }, 503, corsHeaders(origin));
+      try {
+        const body = await request.json();
+        const verifier = String(body?.code_verifier ?? "");
+        const payload = await verifyOAuthState({ state: body?.state, secret: env.OAUTH_STATE_SIGNING_KEY });
+        if (!payload.native || !validCodeVerifier(verifier) || !sameText(payload.codeChallenge, await pkceChallenge(verifier))) throw new Error("native-oauth-pkce-invalid");
+        const tokens = await exchangeCode({ code: body?.code, clientId: env.GOOGLE_NATIVE_CLIENT_ID, redirectUri: env.NATIVE_OAUTH_APP_LINK_URI, codeVerifier: verifier });
+        const profile = await googleProfile({ accessToken: tokens.access_token });
+        const now = new Date().toISOString();
+        await saveAccount(env.OAUTH_DB, { subject: profile.sub, envelope: await encryptTokenEnvelope(tokens, env.TOKEN_ENCRYPTION_KEY), scopes: tokens.scope ?? "", expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : null, refreshTokenPresent: Boolean(tokens.refresh_token), now });
+        const token = crypto.randomUUID();
+        const session = await createSession(env.OAUTH_DB, { token, subject: profile.sub, now });
+        return json({ sessionToken: token, expiresAt: session.expiresAt, accountEmail: profile.email ?? "" }, 200, corsHeaders(origin));
+      } catch (error) {
+        const message = String(error?.message ?? "");
+        const status = message === "native-oauth-pkce-invalid" || message.startsWith("oauth-state-") ? 400 : 502;
+        return json({ error: status === 400 ? "native-oauth-pkce-invalid" : "native-oauth-exchange-failed" }, status, corsHeaders(origin));
+      }
     }
 
     if (request.method === "GET" && url.pathname === "/v1/oauth/google/callback") {
@@ -174,6 +208,11 @@ export default {
       });
     }
 
+    if (request.method === "GET" && url.pathname === "/v1/oauth/google/native/configuration") {
+      const storage = await databaseStatus(env?.OAUTH_DB);
+      return json({ nativeOAuthReady: hasNativeConfiguration(env), missing: missingNativeConfiguration(env), storageReady: storage.ready, schemaReady: storage.schemaReady, message: "原生 OAuth 需要已驗證的 HTTPS App Link、Android/iOS OAuth client 與 PKCE；未設定時原生 App 不會退回 WebView popup。" });
+    }
+
     return json({ error: "not-found" }, 404);
   }
 };
@@ -192,6 +231,13 @@ function bearerToken(header) { const match = /^Bearer\s+(.+)$/i.exec(String(head
 function missingConfiguration(env) {
   return [...REQUIRED_PUBLIC_VALUES, ...REQUIRED_SECRETS].filter((name) => !String(env?.[name] ?? "").trim());
 }
+function missingNativeConfiguration(env) { return REQUIRED_NATIVE_VALUES.filter((name) => !String(env?.[name] ?? "").trim()); }
+function hasNativeConfiguration(env) { return missingNativeConfiguration(env).length === 0; }
+function validCodeChallenge(value) { return /^[A-Za-z0-9_-]{43,128}$/.test(value); }
+function validCodeVerifier(value) { return /^[A-Za-z0-9._~-]{43,128}$/.test(value); }
+async function pkceChallenge(verifier) { return base64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)))); }
+function sameText(left, right) { const a = new TextEncoder().encode(String(left)); const b = new TextEncoder().encode(String(right)); if (a.length !== b.length) return false; let result = 0; for (let index = 0; index < a.length; index += 1) result |= a[index] ^ b[index]; return result === 0; }
+function base64Url(bytes) { return btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", ""); }
 
 async function databaseStatus(database) {
   if (!database?.prepare) return { ready: false, schemaReady: false };

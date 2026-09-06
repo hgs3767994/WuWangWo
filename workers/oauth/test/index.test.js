@@ -53,6 +53,36 @@ test("OAuth start remains unavailable without complete configuration", async () 
   assert.deepEqual(await response.json(), { error: "oauth-not-configured" });
 });
 
+test("native OAuth remains unavailable until an App Link and native client are configured", async () => {
+  const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/native/start?code_challenge=" + "a".repeat(43)), {});
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.error, "native-oauth-not-configured");
+  assert(body.missing.includes("NATIVE_OAUTH_APP_LINK_URI"));
+});
+
+test("native OAuth start redirects to Google with PKCE and an App Link redirect URI", async () => {
+  const database = {
+    prepare: (query) => query === "SELECT 1 AS ready"
+      ? { first: async () => ({ ready: 1 }) }
+      : { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) }
+  };
+  const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/native/start?code_challenge=" + "a".repeat(43)), {
+    APP_ORIGINS: "http://localhost",
+    GOOGLE_NATIVE_CLIENT_ID: "android-client-id",
+    NATIVE_OAUTH_APP_LINK_URI: "https://app.example/oauth/native/complete",
+    OAUTH_STATE_SIGNING_KEY: "state-key",
+    TOKEN_ENCRYPTION_KEY: "encryption-key",
+    OAUTH_DB: database
+  });
+  assert.equal(response.status, 302);
+  const location = new URL(response.headers.get("location"));
+  assert.equal(location.origin, "https://accounts.google.com");
+  assert.equal(location.searchParams.get("redirect_uri"), "https://app.example/oauth/native/complete");
+  assert.equal(location.searchParams.get("code_challenge"), "a".repeat(43));
+  assert.equal(location.searchParams.get("code_challenge_method"), "S256");
+});
+
 test("OAuth start refuses to begin before the D1 session schema is ready", async () => {
   const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/start?return_to=https://example.test/app"), {
     APP_ORIGINS: "https://example.test",

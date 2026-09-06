@@ -19,6 +19,7 @@ const requiredFiles = [
   "src/config.js",
   "src/crypto.js",
   "src/native-trusted-session.js",
+  "src/native-oauth.js",
   "src/db.js",
   "src/drive.js",
   "src/drive-google.js",
@@ -112,6 +113,15 @@ await check("native Android back button exits only from root routes", async () =
   ["registerNativeBackButton", "addListener(\"backButton\"", "nativeApp.exitApp()", "navigateBack({ name: \"home\" })"].forEach((text) => {
     if (!appSource.includes(text)) throw new Error(`src/app.js is missing ${text}.`);
   });
+});
+
+await check("native OAuth uses system browser, App Link, and PKCE", async () => {
+  const nativeOAuthSource = await readFile("src/native-oauth.js", "utf8");
+  const driveGoogleSource = await readFile("src/drive-google.js", "utf8");
+  ["Browser.open", "appUrlOpen", "code_challenge", "code_verifier", "nativeOAuthCallbackUrl"].forEach((text) => {
+    if (!nativeOAuthSource.includes(text)) throw new Error(`native OAuth adapter is missing ${text}.`);
+  });
+  if (!driveGoogleSource.includes("isNativeOAuthRuntime()")) throw new Error("Google Drive adapter must select native OAuth outside the WebView popup flow.");
 });
 
 await check("Android backup and device transfer exclude app data", async () => {

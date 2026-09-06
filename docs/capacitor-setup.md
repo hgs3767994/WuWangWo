@@ -9,8 +9,8 @@
 ## 安全邊界
 
 - 原生 App 仍只取得短效 Worker session；Google access token、refresh token、DEK、主密碼與救援碼不得進入 Web bundle、Android resources、iOS plist 或 Git。
-- 原生 OAuth 會採系統瀏覽器 + Authorization Code + PKCE，不能沿用 Web PWA 的 popup flow。
-- Worker 要在原生 OAuth 開始前新增 Android/iOS public client 的允許設定與 PKCE code exchange；本階段不會以 Web client secret 冒充原生 client。
+- 原生 OAuth 已有程式骨架：只在 Capacitor 原生環境採系統瀏覽器 + Authorization Code + PKCE，不能沿用 Web PWA 的 popup flow；未設定正式 App Link 時會明確拒絕連結，不會降級到 WebView popup。
+- Worker 已有 native start／exchange endpoint；以 native public client + PKCE verifier 驗證 authorization code 後才建立短效 Worker session。本階段不會以 Web client secret 冒充原生 client。
 - Android trusted session 已改為 Android Keystore：DEK 僅以 Keystore 的不可匯出 AES 金鑰加密，IndexedDB 只保存 vault／裝置／session epoch 中繼資料；每次重新開啟或從背景回到前景均要求生物辨識或裝置螢幕鎖。iOS Keychain 仍待實作。
 - 這項 Android 實作已通過 Java 編譯、Web 安全邊界測試與 debug APK 建置；但完整實機解鎖驗證需等待原生 OAuth + PKCE 完成，讓 App 可建立真實的 Drive trusted session。
 
@@ -32,3 +32,12 @@
 - Android：Google 已停止支援 Android custom URI scheme OAuth 回跳。必須先有自有 HTTPS 網域，建立並驗證 Android App Link，才可安全完成系統瀏覽器 + PKCE；不能以目前的 `workers.dev` 或自訂 scheme 冒充正式回跳。
 - iOS：登入 Apple Developer、註冊 bundle ID，建立 iOS OAuth client；其回跳設定要與日後 Android 的正式 HTTPS callback 策略一併確認。
 - Google Cloud：原生 client callback 與 Worker PKCE exchange 設計完成後才新增，不把 web client secret 複製到原生端。
+
+## 購買自有網域後：啟用原生 OAuth 的順序
+
+1. 選定唯一 HTTPS App Link，例如 `https://auth.example.com/oauth/native/complete`；不可在不同平台臨時改用不同路徑。
+2. 在 Android manifest 加入該 host/path 的 `autoVerify` App Link intent filter，並在 `https://auth.example.com/.well-known/assetlinks.json` 放入正式簽章的 SHA-256；Google Play App Signing 啟用後也需加入 Play 的 app-signing certificate 指紋。
+3. 在 Google Cloud 建立 Android OAuth client（App ID `io.github.hgs3767994.wuwangwo` + 正式 SHA-1），並把相同 HTTPS App Link 設為授權 redirect URI。
+4. 在 Worker 設定 `GOOGLE_NATIVE_CLIENT_ID`、`NATIVE_OAUTH_APP_LINK_URI`，並在 `APP_ORIGINS` 加入 Android Capacitor origin `http://localhost`（iOS 啟用時另加入 `capacitor://localhost`）。這些不是 secret；`TOKEN_ENCRYPTION_KEY` 等既有 secret 保持只在 Worker。
+5. 在原生 bundle runtime config 設定同一個 `googleDrive.nativeOAuthCallbackUrl`。App 啟動系統瀏覽器後，只有與此 URL 完全相符的 App Link callback 才會被接受。
+6. 實機測試取消、逾時、拒絕授權、成功回跳、關閉重開、背景鎖定與 session epoch 失效；通過後才允許 Android 版 Google Drive 同步上線。

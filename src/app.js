@@ -5723,6 +5723,9 @@ function driveErrorMessage(error, fallback) {
   if (message.includes("google-drive-handoff-failed:drive-request-failed")) return "OAuth Worker 無法讀取 Google 帳號資料，請查看 Cloudflare Worker Logs。";
   if (message.includes("google-drive-authorization-cancelled")) return "已取消 Google Drive 授權，尚未完成同步。";
   if (message.includes("google-drive-authorization-timeout")) return "Google Drive 授權等待逾時，請再按一次「立即同步」。";
+  if (message.includes("native-oauth-not-configured")) return "原生 Google Drive 尚待設定正式 HTTPS 網域與 App Link，暫時不能連結。";
+  if (message.includes("native-oauth-pkce-invalid")) return "原生 Google Drive 授權驗證失敗，請重新開始授權。";
+  if (message.includes("native-oauth-exchange-failed:origin-not-allowed")) return "OAuth Worker 尚未允許原生 App 來源，請在正式設定時加入 Capacitor origin。";
   if (message.includes("access_denied")) return "Google Drive 授權已取消，尚未完成連結。";
   if (message.includes("popup")) return "Google 授權視窗被阻擋，請允許彈出視窗後再試。";
   if (message.includes("google-drive-auth-required") || message.includes("interaction_required") || message.includes("login_required") || message.includes("consent_required")) {
