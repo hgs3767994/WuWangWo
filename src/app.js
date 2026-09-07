@@ -2494,7 +2494,6 @@ function welcomeView() {
       <div class="panel stack">
         <button data-action="start-local">開始使用</button>
       </div>
-      ${installPromptCard("welcome")}
     </section>
   `;
 }
@@ -2512,7 +2511,6 @@ function homeView() {
     <div class="home-actions">
       <button data-nav="new">＋ 新增人物</button>
     </div>
-    ${installPromptCard("home")}
     ${people.length ? people.map(personCard).join("") : `<div class="empty">還沒有任何人物，先新增一位吧。</div>`}
   `;
 }
@@ -2601,10 +2599,10 @@ function personFormView(person = null) {
     <form class="stack" data-form="person">
       ${nameField(d.name)}
       ${basicFieldsEditor(d)}
+      ${familyMembersEditor(d.familyMembers, d.id)}
       ${personGroupEditor(d.personGroupTagIds)}
       ${interestEditor(d.interestTagIds)}
       ${favoriteItemsEditor(d.favoriteItems)}
-      ${familyMembersEditor(d.familyMembers, d.id)}
       ${lifeEventsEditor(d.lifeEvents)}
       ${customFieldEditor(d)}
       <section class="panel">
@@ -2750,7 +2748,6 @@ function settingsView() {
       <button class="action-quiet" data-nav="syncTroubleshooting">同步疑難排解</button>
       ${gd.connected ? `<button class="action-quiet" data-action="sync-now" ${isDriveSyncRecentlyStarted(gd) ? "disabled" : ""}>立即同步</button><button class="action-quiet" data-action="drive-logout">登出 Google Drive</button>` : `<button class="action-quiet" data-action="drive-placeholder">連結 Google Drive</button>`}
     </section>
-    ${installSettingsSection()}
     ${themeSettingsSection()}
       ${gd.connected ? securitySettingsSection() : ""}
     <section class="panel stack">
