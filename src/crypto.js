@@ -178,11 +178,12 @@ export function generateRecoveryCode() {
   return chars.join("").match(/.{1,5}/g).join("-");
 }
 
-export async function createKeyPackage({ vaultId, deviceId, masterPassword }) {
+export async function createKeyPackage({ vaultId, deviceId, masterPassword, includeRecoveryWrapper = false }) {
   const dekBytes = randomBytes(32);
   const recoveryCode = generateRecoveryCode();
   const now = new Date().toISOString();
   const masterPasswordWrapper = await wrapDek(dekBytes, masterPassword);
+  const recoveryCodeWrapper = includeRecoveryWrapper ? await wrapDek(dekBytes, recoveryCode) : null;
   const recoveryAuthorizationVerifier = await createRecoveryAuthorizationVerifier(recoveryCode);
 
   return {
@@ -202,6 +203,7 @@ export async function createKeyPackage({ vaultId, deviceId, masterPassword }) {
         ...masterPasswordWrapper,
         updatedByDeviceId: deviceId
       },
+      ...(recoveryCodeWrapper ? { recoveryCodeWrapper: { ...recoveryCodeWrapper, recoveryCodeVersion: 1, updatedByDeviceId: deviceId } } : {}),
       recoveryAuthorizationVerifier: {
         ...recoveryAuthorizationVerifier,
         recoveryCodeVersion: 1,

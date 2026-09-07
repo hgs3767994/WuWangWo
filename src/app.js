@@ -63,7 +63,7 @@ const ADDRESS_CITY_DISTRICTS = {
 };
 const ADDRESS_CITY_OPTIONS = [...Object.keys(ADDRESS_CITY_DISTRICTS), "其它/海外地址"];
 const GENDER_OPTIONS = ["男", "女", "其它"];
-const IDLE_LOCK_MS = 3 * 60 * 1000;
+const IDLE_LOCK_MS = 2 * 60 * 1000;
 const AWAY_LOCK_MS = 2 * 60 * 1000;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
@@ -148,17 +148,23 @@ async function boot() {
     };
   }
   if (storedAppState && appState !== storedAppState) await setItem("appState", appState);
-  const vault = await loadLocalVault();
+  const storedKeyPackage = await getItem("keyPackage");
+  const vault = appState?.mode === "localOnly" && storedKeyPackage ? null : await loadLocalVault();
   let trustedSession = await getItem("trustedSession");
   const localSnapshots = await loadLocalSnapshots();
   state = { ...state, localSnapshots };
-  if (!appState || !vault) {
+  if (!appState || (!vault && !(appState.mode === "localOnly" && storedKeyPackage))) {
     state = { ...state, route: { name: "welcome" } };
-  } else if (appState.mode === "driveSync" && !trustedSession) {
-    state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock", allowBiometric: false } };
+  } else if ((appState.mode === "driveSync" || appState.mode === "localOnly") && storedKeyPackage && !trustedSession) {
+    state = { ...state, appState, vault: appState.mode === "localOnly" ? null : normalizeVault(pruneDeleted(vault)), route: { name: "unlock", showForgotPassword: appState.mode === "localOnly", allowBiometric: appState.mode === "localOnly" } };
+    render();
+    registerHistoryNavigation();
+    registerServiceWorker();
+    registerInstallExperience();
+    return;
   } else {
     let dekBytes = null;
-    if (appState.mode === "driveSync") {
+    if (appState.mode === "driveSync" || (appState.mode === "localOnly" && storedKeyPackage)) {
       const sessionCheck = await checkTrustedSessionStillValid(appState, trustedSession);
       if (!sessionCheck.valid) {
         if (!sessionCheck.keepTrustedSession) await clearTrustedSession();
@@ -190,6 +196,14 @@ async function boot() {
         registerInstallExperience();
         return;
       }
+    }
+    if (appState.mode === "localOnly" && storedKeyPackage && !vault) {
+      state = { ...state, appState, dekBytes: null, vault: null, route: { name: "unlock", showForgotPassword: true, allowBiometric: true } };
+      render();
+      registerHistoryNavigation();
+      registerServiceWorker();
+      registerInstallExperience();
+      return;
     }
     state = { ...state, appState, dekBytes, vault: normalizeVault(pruneDeleted(vault)), route: oauthReturnRoute ?? { name: "home" } };
     await save();
@@ -319,12 +333,12 @@ function resetIdleLockTimer() {
   if (state.idleLockTimer) window.clearTimeout(state.idleLockTimer);
   if (!canAutoLock()) return;
   state.idleLockTimer = window.setTimeout(() => {
-    void lockApp("已閒置超過 3 分鐘，請重新輸入密碼");
+    void lockApp("已閒置超過 2 分鐘，請重新輸入密碼");
   }, IDLE_LOCK_MS);
 }
 
 function canAutoLock() {
-  return Boolean(state.appState?.mode === "driveSync" && state.dekBytes && state.route?.name !== "unlock");
+  return Boolean((state.appState?.mode === "driveSync" || state.appState?.mode === "localOnly") && state.dekBytes && state.route?.name !== "unlock");
 }
 
 async function touchTrustedSessionNow(options = {}) {
@@ -358,7 +372,7 @@ async function lockApp(message = "請重新輸入密碼以繼續使用", options
     window.clearTimeout(state.idleLockTimer);
     state.idleLockTimer = null;
   }
-  if (state.appState.mode !== "driveSync") return;
+  if (!["driveSync", "localOnly"].includes(state.appState.mode)) return;
   await touchTrustedSessionNow({ force: true });
   state.dekBytes = null;
   state.route = {
@@ -527,6 +541,9 @@ async function unlockWithBiometric(options = {}) {
   if (isNativeTrustedSession(trustedSession)) {
     try {
       state.dekBytes = await restoreDekFromTrustedSession(trustedSession);
+      if (state.appState?.mode === "localOnly" && !state.vault) {
+        state.vault = normalizeVault(pruneDeleted(await loadLocalVault()));
+      }
       await touchTrustedSessionNow({ force: true });
       navigate({ name: "home" }, { replace: true, force: true });
       void resumeDriveSyncInBackground();
@@ -564,6 +581,9 @@ async function unlockWithBiometric(options = {}) {
     if (rpId) publicKey.rpId = rpId;
     await navigator.credentials.get({ publicKey });
     state.dekBytes = await restoreDekFromTrustedSession(trustedSession);
+    if (state.appState?.mode === "localOnly" && !state.vault) {
+      state.vault = normalizeVault(pruneDeleted(await loadLocalVault()));
+    }
     await touchTrustedSessionNow({ force: true });
     navigate({ name: "home" }, { replace: true, force: true });
     void resumeDriveSyncInBackground();
@@ -746,7 +766,7 @@ async function initializeLocalMode() {
     }
   };
   state.vault = vault;
-  state.route = { name: "home" };
+  state.route = { name: "setupMasterPassword", mode: "localSetup" };
   await save();
   render();
 }
@@ -878,6 +898,9 @@ async function loadLocalVault() {
   }
   const envelope = await getItem("localVaultEnvelope");
   if (!envelope) return null;
+  if (state.appState?.mode === "localOnly" && state.dekBytes) {
+    return decryptVaultEnvelope(envelope, state.dekBytes);
+  }
   const key = await getItem("localVaultStorageKey");
   if (!key) throw new Error("local-vault-key-missing");
   return decryptLocalEnvelope(envelope, key);
@@ -885,6 +908,12 @@ async function loadLocalVault() {
 
 async function saveLocalVault(vault) {
   if (!vault) return;
+  if (state.appState?.mode === "localOnly" && state.dekBytes) {
+    const envelope = await encryptVaultEnvelope(vault, state.dekBytes);
+    await setItem("localVaultEnvelope", envelope);
+    await removeItem("vault");
+    return;
+  }
   const key = await ensureLocalVaultStorageKey();
   const envelope = await encryptLocalEnvelope(vault, key, "local-vault");
   await setItem("localVaultEnvelope", envelope);
@@ -947,16 +976,18 @@ async function setupMasterPassword(event) {
   const result = await createKeyPackage({
     vaultId: state.vault.vaultId,
     deviceId: state.appState.deviceId,
-    masterPassword: draft.password
+    masterPassword: draft.password,
+    includeRecoveryWrapper: state.route.mode === "localSetup"
   });
   state.dekBytes = result.dekBytes;
   await setItem("keyPackage", result.keyPackage);
   await setItem("trustedSession", result.trustedSession);
 
+  const isLocalSetup = state.route.mode === "localSetup";
   state.appState = {
     ...state.appState,
-    mode: "driveSync",
-    googleDrive: {
+    mode: isLocalSetup ? "localOnly" : "driveSync",
+    googleDrive: isLocalSetup ? { connected: false, syncStatus: "disabled" } : {
       connected: true,
       syncStatus: "synced",
       lastSyncAt: new Date().toISOString(),
@@ -966,8 +997,13 @@ async function setupMasterPassword(event) {
   };
   await save();
   try {
+    if (isLocalSetup) {
+      // The local vault is now protected by the password-wrapped DEK.
+      await saveLocalVault(state.vault);
+    } else {
     await uploadKeyPackageToDrive();
     await uploadCurrentVaultToDrive();
+    }
   } catch (error) {
     markDriveSyncIssue(error);
     alert(driveErrorMessage(error, "密碼與救援碼已在本機建立，但寫入 Google Drive 失敗。請不要刪除本機資料，稍後到設定頁按「立即同步」。"));
@@ -1529,6 +1565,10 @@ async function unlockWithMasterPassword(event) {
   const password = state.route.securityDraft?.password ?? "";
   try {
     const { keyPackage, dekBytes } = await unwrapCurrentDek(password);
+    state.dekBytes = dekBytes;
+    if (state.appState?.mode === "localOnly" && !state.vault) {
+      state.vault = normalizeVault(pruneDeleted(await loadLocalVault()));
+    }
     await setItem(
       "trustedSession",
       await createTrustedSessionWithDek({
@@ -1598,6 +1638,32 @@ async function resetForgottenPassword(event) {
   try {
     const recoveryCode = normalizeRecoveryCode(draft.recoveryCode ?? "");
     const currentKeyPackage = await getCurrentKeyPackage();
+    if (state.appState?.mode === "localOnly" && currentKeyPackage?.recoveryCodeWrapper) {
+      const { keyPackage, dekBytes } = await unwrapCurrentDek(recoveryCode, "recoveryCodeWrapper");
+      const updated = await buildReplacedMasterPasswordAndRecovery({
+        keyPackage,
+        dekBytes,
+        newPassword: draft.newPassword,
+        deviceId: state.appState.deviceId,
+        bumpSession: true
+      });
+      const recoveryCodeWrapper = await wrapDekForSecret(dekBytes, updated.recoveryCode, keyPackage.crypto.iterations);
+      const localKeyPackage = {
+        ...updated.keyPackage,
+        recoveryCodeWrapper: {
+          ...recoveryCodeWrapper,
+          recoveryCodeVersion: (keyPackage.recoveryCodeWrapper.recoveryCodeVersion ?? 1) + 1,
+          updatedByDeviceId: state.appState.deviceId
+        }
+      };
+      await setItem("keyPackage", localKeyPackage);
+      state.dekBytes = dekBytes;
+      state.vault = normalizeVault(pruneDeleted(await loadLocalVault()));
+      await setItem("trustedSession", await createTrustedSessionWithDek({ vaultId: localKeyPackage.vaultId, deviceId: state.appState.deviceId, sessionEpoch: localKeyPackage.securityMeta.sessionEpoch, dekBytes }));
+      await save();
+      showRecoveryCodeRoute(updated.recoveryCode, { oldInvalid: true, returnTo: { name: "home" } });
+      return;
+    }
     if (isRecoveryV2(currentKeyPackage)) {
       alert("此 vault 已使用 Recovery v2。請在新裝置連結相同的 Google Drive 後，從「忘記密碼」建立舊裝置核准請求。");
       return;
@@ -3315,9 +3381,10 @@ function recoveryRequestsView() {
 
 function setupMasterPasswordView() {
   const draft = state.route.passwordDraft ?? { password: "", confirm: "" };
+  const backRoute = state.route.mode === "localSetup" ? "welcome" : "driveIntro";
   return `
     <header class="topbar">
-      <button class="secondary" data-nav="driveIntro">返回</button>
+      <button class="secondary" data-nav="${backRoute}">返回</button>
       <h1 class="section-title">設定密碼</h1>
       <span></span>
     </header>
