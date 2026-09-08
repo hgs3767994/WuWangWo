@@ -67,7 +67,10 @@ const GENDER_OPTIONS = ["男", "女", "其它"];
 const IDLE_LOCK_MS = 2 * 60 * 1000;
 const AWAY_LOCK_MS = 2 * 60 * 1000;
 const NATIVE_BACKGROUND_LOCK_MS = 2 * 60 * 1000;
-const NATIVE_BIOMETRIC_PROMPT_DELAY_MS = 450;
+// A native cold start needs time for both the WebView and Android window to
+// become interactive. Starting the prompt earlier can silently fail on some
+// devices, while returning to this page later happens to work.
+const NATIVE_BIOMETRIC_PROMPT_DELAY_MS = 700;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
 const OAUTH_RETURN_ROUTE_STORAGE_KEY = "forget-me-not-oauth-return-route";
@@ -647,13 +650,15 @@ function maybeAutoBiometricUnlock() {
   if (!nativeTrustedSessionAvailable() && !isBiometricUnlockEnabled()) return;
   state.route.autoBiometricAttempted = true;
   // Android must finish restoring the resumed Activity before BiometricPrompt
-  // is opened. A short delay makes the prompt appear automatically on the
-  // visible unlock page instead of requiring a manual retry.
+  // is opened. The native bridge also waits for its window to be ready. This
+  // makes a cold launch behave the same as returning to the unlock page.
   const delay = nativeTrustedSessionAvailable() ? NATIVE_BIOMETRIC_PROMPT_DELAY_MS : 250;
-  window.setTimeout(() => {
-    if (state.route?.name !== "unlock") return;
-    void unlockWithBiometric({ silent: true });
-  }, delay);
+  window.requestAnimationFrame(() => {
+    window.setTimeout(() => {
+      if (state.route?.name !== "unlock" || document.visibilityState !== "visible") return;
+      void unlockWithBiometric({ silent: true });
+    }, delay);
+  });
 }
 
 function registerServiceWorker() {
@@ -2511,6 +2516,10 @@ function view() {
   // restored its DEK. The unlock screen must therefore be renderable before
   // a vault exists, otherwise a cold native launch is stuck on "載入中…".
   if (state.route.name === "unlock") return unlockView();
+  // Password recovery must also work while the local encrypted vault remains
+  // locked. Keep these routes ahead of the vault guard for cold launches.
+  if (state.route.name === "forgotPassword") return forgotPasswordView();
+  if (state.route.name === "deviceApprovalRecovery") return deviceApprovalRecoveryView();
   if (!state.vault) return `<div class="empty">載入中…</div>`;
   if (state.route.name === "search") return searchView();
   if (state.route.name === "new") return personFormView();
@@ -2539,7 +2548,6 @@ function view() {
   if (state.route.name === "setupMasterPassword") return setupMasterPasswordView();
   if (state.route.name === "showRecoveryCode") return showRecoveryCodeView();
   if (state.route.name === "changePassword") return changePasswordView();
-  if (state.route.name === "forgotPassword") return forgotPasswordView();
   if (state.route.name === "regenerateRecovery") return regenerateRecoveryView();
   if (state.route.name === "logoutAllDevices") return logoutAllDevicesView();
   return homeView();

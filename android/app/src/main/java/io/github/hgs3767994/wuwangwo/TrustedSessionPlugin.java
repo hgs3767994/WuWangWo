@@ -3,6 +3,8 @@ package io.github.hgs3767994.wuwangwo;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
@@ -41,6 +43,7 @@ public class TrustedSessionPlugin extends Plugin {
     private static final String VAULT_ID = "vaultId";
     private static final String DEVICE_ID = "deviceId";
     private static final String SESSION_EPOCH = "sessionEpoch";
+    private static final long PROMPT_WINDOW_READY_DELAY_MS = 300L;
 
     @PluginMethod
     public void store(PluginCall call) {
@@ -115,7 +118,7 @@ public class TrustedSessionPlugin extends Plugin {
 
     private void authenticateWhenResumed(PluginCall call, FragmentActivity activity, String vaultId, String deviceId, int sessionEpoch, int authenticators) {
         if (activity.getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.RESUMED)) {
-            authenticateAndRestore(call, activity, vaultId, deviceId, sessionEpoch, authenticators);
+            authenticateAfterWindowReady(call, activity, vaultId, deviceId, sessionEpoch, authenticators);
             return;
         }
         LifecycleEventObserver observer = new LifecycleEventObserver() {
@@ -123,7 +126,7 @@ public class TrustedSessionPlugin extends Plugin {
             public void onStateChanged(@NonNull LifecycleOwner source, @NonNull Lifecycle.Event event) {
                 if (event == Lifecycle.Event.ON_RESUME) {
                     source.getLifecycle().removeObserver(this);
-                    authenticateAndRestore(call, activity, vaultId, deviceId, sessionEpoch, authenticators);
+                    authenticateAfterWindowReady(call, activity, vaultId, deviceId, sessionEpoch, authenticators);
                 } else if (event == Lifecycle.Event.ON_DESTROY) {
                     source.getLifecycle().removeObserver(this);
                     call.reject("trusted-session-auth-unavailable");
@@ -131,6 +134,19 @@ public class TrustedSessionPlugin extends Plugin {
             }
         };
         activity.getLifecycle().addObserver(observer);
+    }
+
+    private void authenticateAfterWindowReady(PluginCall call, FragmentActivity activity, String vaultId, String deviceId, int sessionEpoch, int authenticators) {
+        // Lifecycle.RESUMED alone is not enough during a cold start: some
+        // Android devices have not attached a focused window for the prompt
+        // yet. Queue the prompt after that window becomes usable.
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (activity.isFinishing() || activity.isDestroyed() || !activity.getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.RESUMED)) {
+                call.reject("trusted-session-auth-unavailable");
+                return;
+            }
+            authenticateAndRestore(call, activity, vaultId, deviceId, sessionEpoch, authenticators);
+        }, PROMPT_WINDOW_READY_DELAY_MS);
     }
 
     private void authenticateAndRestore(PluginCall call, FragmentActivity activity, String vaultId, String deviceId, int sessionEpoch, int authenticators) {

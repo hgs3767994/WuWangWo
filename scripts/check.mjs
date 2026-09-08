@@ -163,7 +163,7 @@ await check("Android trusted session uses the native Keystore bridge", async () 
   ["Plugins?.TrustedSession", "dekBase64"].forEach((text) => {
     if (!bridgeSource.includes(text)) throw new Error(`native trusted-session bridge is missing ${text}.`);
   });
-  ["AndroidKeyStore", "BiometricPrompt", "DEVICE_CREDENTIAL", "Lifecycle.Event.ON_RESUME"].forEach((text) => {
+  ["AndroidKeyStore", "BiometricPrompt", "DEVICE_CREDENTIAL", "Lifecycle.Event.ON_RESUME", "PROMPT_WINDOW_READY_DELAY_MS"].forEach((text) => {
     if (!pluginSource.includes(text)) throw new Error(`Android trusted-session plugin is missing ${text}.`);
   });
 });
