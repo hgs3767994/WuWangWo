@@ -161,7 +161,7 @@ async function boot() {
   if (!appState || (appState.mode === "localOnly" && !storedKeyPackage) || (!vault && !(appState.mode === "localOnly" && storedKeyPackage))) {
     state = { ...state, route: { name: "welcome" } };
   } else if ((appState.mode === "driveSync" || appState.mode === "localOnly") && storedKeyPackage && !trustedSession) {
-    state = { ...state, appState, vault: appState.mode === "localOnly" ? null : normalizeVault(pruneDeleted(vault)), route: { name: "unlock", showForgotPassword: appState.mode === "localOnly", allowBiometric: appState.mode === "localOnly" } };
+    state = { ...state, appState, vault: appState.mode === "localOnly" ? null : normalizeVault(pruneDeleted(vault)), route: { name: "unlock", showForgotPassword: true, allowBiometric: appState.mode === "localOnly" } };
     render();
     registerHistoryNavigation();
     registerServiceWorker();
@@ -174,7 +174,7 @@ async function boot() {
       // unlock screen first so Android can attach that prompt to a resumed
       // Activity instead of leaving the WebView on the loading screen.
       if (isNativeTrustedSession(trustedSession)) {
-        state = { ...state, appState, vault: appState.mode === "localOnly" ? null : normalizeVault(pruneDeleted(vault)), route: { name: "unlock", allowBiometric: true } };
+        state = { ...state, appState, vault: appState.mode === "localOnly" ? null : normalizeVault(pruneDeleted(vault)), route: { name: "unlock", showForgotPassword: true, allowBiometric: true } };
         render();
         registerHistoryNavigation();
         registerServiceWorker();
@@ -205,7 +205,7 @@ async function boot() {
       } catch (error) {
         const preserveForRetry = isNativeTrustedSession(trustedSession) && nativeTrustedSessionAuthenticationError(error);
         if (!preserveForRetry) await clearTrustedSession();
-        state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock", allowBiometric: preserveForRetry, autoBiometricAttempted: preserveForRetry } };
+        state = { ...state, appState, vault: normalizeVault(pruneDeleted(vault)), route: { name: "unlock", showForgotPassword: true, allowBiometric: preserveForRetry, autoBiometricAttempted: preserveForRetry } };
         render();
         registerHistoryNavigation();
         registerServiceWorker();
@@ -2820,8 +2820,6 @@ function settingsView() {
         <span>興趣喜好 ${dataSummary.interestTagCount} 個</span>
         <span>自訂欄位 ${dataSummary.customFieldCount} 個</span>
       </div>
-      ${dataManagement.lastExcelExportAt ? `<p class="muted">最近 Excel 匯出：${formatDateTime(dataManagement.lastExcelExportAt)}</p>` : ""}
-      ${dataManagement.lastImportAt ? `<p class="muted">最近匯入：${formatDateTime(dataManagement.lastImportAt)}</p>` : ""}
       <button class="action-quiet" data-nav="localSnapshots">本機資料快照</button>
       <button class="action-quiet" data-nav="deleted">最近刪除</button>
       <button class="action-quiet" data-nav="archived">查看封存人物</button>
@@ -2831,6 +2829,8 @@ function settingsView() {
       <button class="action-quiet" data-nav="dataHealth">資料完整性檢查</button>
       <input type="file" accept="application/json,.json" data-import-file hidden />
       ${dataManagement.lastJsonExportAt ? `<p class="muted">最近 JSON 備份：${formatDateTime(dataManagement.lastJsonExportAt)}</p>` : ""}
+      ${dataManagement.lastExcelExportAt ? `<p class="muted">最近 Excel 匯出：${formatDateTime(dataManagement.lastExcelExportAt)}</p>` : ""}
+      ${dataManagement.lastImportAt ? `<p class="muted">最近匯入：${formatDateTime(dataManagement.lastImportAt)}</p>` : ""}
       <p class="muted">JSON 備份檔可用於匯入復原；Excel 檔適合人工檢視。匯出的資料不包含密碼、資料金鑰或救援碼；請自行妥善保存，避免他人取得。</p>
     </section>
     <section class="panel stack">

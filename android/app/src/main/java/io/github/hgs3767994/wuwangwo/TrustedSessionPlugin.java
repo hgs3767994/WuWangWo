@@ -12,6 +12,9 @@ import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
+import androidx.lifecycle.Lifecycle;
+import androidx.lifecycle.LifecycleEventObserver;
+import androidx.lifecycle.LifecycleOwner;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -91,7 +94,7 @@ public class TrustedSessionPlugin extends Plugin {
                 call.reject("trusted-session-auth-unavailable");
                 return;
             }
-            authenticateAndRestore(call, vaultId, deviceId, sessionEpoch, authenticators);
+            authenticateWhenResumed(call, (FragmentActivity) getActivity(), vaultId, deviceId, sessionEpoch, authenticators);
         } catch (Exception error) {
             call.reject("trusted-session-restore-failed", error);
         }
@@ -110,9 +113,29 @@ public class TrustedSessionPlugin extends Plugin {
         }
     }
 
-    private void authenticateAndRestore(PluginCall call, String vaultId, String deviceId, int sessionEpoch, int authenticators) {
+    private void authenticateWhenResumed(PluginCall call, FragmentActivity activity, String vaultId, String deviceId, int sessionEpoch, int authenticators) {
+        if (activity.getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.RESUMED)) {
+            authenticateAndRestore(call, activity, vaultId, deviceId, sessionEpoch, authenticators);
+            return;
+        }
+        LifecycleEventObserver observer = new LifecycleEventObserver() {
+            @Override
+            public void onStateChanged(@NonNull LifecycleOwner source, @NonNull Lifecycle.Event event) {
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    source.getLifecycle().removeObserver(this);
+                    authenticateAndRestore(call, activity, vaultId, deviceId, sessionEpoch, authenticators);
+                } else if (event == Lifecycle.Event.ON_DESTROY) {
+                    source.getLifecycle().removeObserver(this);
+                    call.reject("trusted-session-auth-unavailable");
+                }
+            }
+        };
+        activity.getLifecycle().addObserver(observer);
+    }
+
+    private void authenticateAndRestore(PluginCall call, FragmentActivity activity, String vaultId, String deviceId, int sessionEpoch, int authenticators) {
         Executor executor = ContextCompat.getMainExecutor(getContext());
-        BiometricPrompt prompt = new BiometricPrompt((FragmentActivity) getActivity(), executor, new BiometricPrompt.AuthenticationCallback() {
+        BiometricPrompt prompt = new BiometricPrompt(activity, executor, new BiometricPrompt.AuthenticationCallback() {
             @Override
             public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
                 super.onAuthenticationSucceeded(result);
