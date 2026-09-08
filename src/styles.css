@@ -1433,6 +1433,20 @@ button:focus-visible,
   color: var(--danger);
 }
 
+.sync-password-notice {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--text-secondary);
+}
+
+.sync-password-notice strong {
+  color: var(--accent);
+  font-weight: 800;
+}
+
 .empty {
   padding: 28px 16px;
   text-align: center;

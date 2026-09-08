@@ -2,6 +2,7 @@ import { getItem, removeItem, setItem } from "./db.js";
 import { approveDriveRecoveryRequest, connectDrive, createDriveRecoveryRequest, disconnectDrive, driveAuthStatus, driveReadiness, getDriveRecoveryRequest, listDriveFileRevisions, listDriveFiles, listDriveRecoveryRequests, readDriveFile, readDriveFileRevision, writeDriveFile } from "./drive.js";
 import { completeGoogleOAuthHandoff } from "./drive-google.js";
 import { APP_CONFIG, driveFileName, driveProviderLabel } from "./config.js";
+import { nativeFileExportAvailable, saveNativeExport } from "./native-file-export.js";
 import { clearNativeTrustedSession, isNativeTrustedSession, nativeTrustedSessionAuthenticationError, nativeTrustedSessionAvailable } from "./native-trusted-session.js";
 import { mergeVaults } from "./sync.js";
 import { buildVaultXlsx } from "./xlsx.js";
@@ -1442,7 +1443,7 @@ async function exportData() {
   const exportedAt = new Date().toISOString();
   const payload = buildExportPayload(exportedAt);
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `莫忘-資料備份-${fileDateTime(exportedAt)}.json`);
+  await downloadBlob(blob, `莫忘-資料備份-${fileDateTime(exportedAt)}.json`, { announce: true });
   await rememberDataManagementEvent("lastJsonExportAt", exportedAt);
 }
 
@@ -1496,7 +1497,7 @@ async function downloadLocalSnapshot(id) {
     vault: snapshot.vault
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `莫忘-本機快照-${fileDateTime(snapshot.createdAt)}.json`);
+  await downloadBlob(blob, `莫忘-本機快照-${fileDateTime(snapshot.createdAt)}.json`, { announce: true });
 }
 
 async function exportExcel() {
@@ -1504,7 +1505,7 @@ async function exportExcel() {
   if (!(await verifySensitiveOperation("匯出 Excel"))) return;
   const exportedAt = new Date().toISOString();
   const blob = buildVaultXlsx(state.vault, exportedAt);
-  downloadBlob(blob, `莫忘-資料匯出-${fileDateTime(exportedAt)}.xlsx`);
+  await downloadBlob(blob, `莫忘-資料匯出-${fileDateTime(exportedAt)}.xlsx`, { announce: true });
   await rememberDataManagementEvent("lastExcelExportAt", exportedAt);
 }
 
@@ -1519,7 +1520,12 @@ function buildExportPayload(exportedAt = new Date().toISOString()) {
   };
 }
 
-function downloadBlob(blob, filename) {
+async function downloadBlob(blob, filename, { announce = false } = {}) {
+  if (nativeFileExportAvailable()) {
+    const result = await saveNativeExport(blob, filename);
+    if (announce) alert(`檔案已儲存至「${result.location ?? "下載／莫忘"}」\n${filename}`);
+    return result;
+  }
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -1528,6 +1534,7 @@ function downloadBlob(blob, filename) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+  return null;
 }
 
 async function importDataFile(event) {
@@ -1549,7 +1556,7 @@ async function importDataFile(event) {
     ) {
       return;
     }
-    exportPreImportBackup();
+    await exportPreImportBackup();
     await createLocalSnapshot("匯入前自動快照");
     const merged = mergeVaults(state.vault, importedVault, state.appState.deviceId);
     state.vault = merged.vault;
@@ -1587,11 +1594,11 @@ function readImportVault(payload) {
   throw new Error("invalid-import-file");
 }
 
-function exportPreImportBackup() {
+async function exportPreImportBackup() {
   const exportedAt = new Date().toISOString();
   const payload = buildExportPayload(exportedAt);
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `莫忘-匯入前本機備份-${fileDateTime(exportedAt)}.json`);
+  await downloadBlob(blob, `莫忘-匯入前本機備份-${fileDateTime(exportedAt)}.json`);
 }
 
 async function rememberDataManagementEvent(key, value) {
@@ -2798,7 +2805,7 @@ function settingsView() {
     ${securitySettingsSection()}
     <section class="panel stack">
       <h2 class="section-title">資料管理</h2>
-      ${storageWarningView()}
+      ${isNativeRuntime() ? "" : storageWarningView()}
       <div class="data-summary">
         <span>人物 ${dataSummary.peopleCount} 位</span>
         <span>人物群組 ${dataSummary.personGroupTagCount} 個</span>
@@ -2834,8 +2841,8 @@ function settingsView() {
 
 function securitySettingsSection() {
   const biometricEnabled = isBiometricUnlockEnabled();
-  const nativeDeviceVerification = nativeTrustedSessionAvailable()
-    ? `<p class="muted">原生 App 的 trusted session 使用 Android Keystore 保存，重新開啟或鎖定後必須通過生物辨識或螢幕鎖驗證。</p>`
+  const nativeDeviceVerification = isNativeRuntime()
+    ? ""
     : `<button class="biometric-button" data-action="${biometricEnabled ? "disable-biometric-unlock" : "enable-biometric-unlock"}">${biometricEnabled ? "停用生物辨識解鎖" : "啟用生物辨識解鎖"}</button>`;
   return `
     <section class="panel stack">
@@ -2886,6 +2893,10 @@ function storageWarningView() {
       <span class="muted">清除瀏覽器網站資料會移除本機資料；若未啟用 Google Drive 同步，資料可能無法復原。</span>
     </div>
   `;
+}
+
+function isNativeRuntime() {
+  return Boolean(globalThis.Capacitor?.isNativePlatform?.());
 }
 
 function installPromptCard(location) {
@@ -3340,6 +3351,7 @@ function driveMergeUnlockView() {
     </header>
     <form class="panel stack" data-form="drive-merge-unlock">
       <p class="muted">請輸入雲端同步資料的密碼。通過後會合併本機與 Google Drive 資料，不會直接用其中一邊覆蓋另一邊。</p>
+      <p class="sync-password-notice">請輸入雲端同步資料<strong>原先設定的密碼</strong>；完成同步後，這台裝置原先設定的密碼與救援碼會失效。</p>
       <div class="field">
         <label>密碼</label>
         <input type="password" data-security-draft="password" autocomplete="current-password" />

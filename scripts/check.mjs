@@ -18,6 +18,7 @@ const requiredFiles = [
   "src/app.js",
   "src/config.js",
   "src/crypto.js",
+  "src/native-file-export.js",
   "src/native-trusted-session.js",
   "src/native-oauth.js",
   "src/db.js",
@@ -30,7 +31,8 @@ const requiredFiles = [
   "src/xlsx.js",
   "src/styles.css",
   "android/app/src/main/res/xml/backup_rules.xml",
-  "android/app/src/main/res/xml/data_extraction_rules.xml"
+  "android/app/src/main/res/xml/data_extraction_rules.xml",
+  "android/app/src/main/java/io/github/hgs3767994/wuwangwo/NativeFileExportPlugin.java"
 ];
 const appShellRequiredFiles = requiredFiles.filter((file) => ![
   "README.md",
@@ -44,7 +46,8 @@ const appShellRequiredFiles = requiredFiles.filter((file) => ![
   "scripts/dev-server.mjs",
   "scripts/smoke-test.mjs",
   "android/app/src/main/res/xml/backup_rules.xml",
-  "android/app/src/main/res/xml/data_extraction_rules.xml"
+  "android/app/src/main/res/xml/data_extraction_rules.xml",
+  "android/app/src/main/java/io/github/hgs3767994/wuwangwo/NativeFileExportPlugin.java"
 ].includes(file));
 
 const checks = [];
@@ -150,6 +153,17 @@ await check("Android trusted session uses the native Keystore bridge", async () 
   });
   ["AndroidKeyStore", "BiometricPrompt", "DEVICE_CREDENTIAL"].forEach((text) => {
     if (!pluginSource.includes(text)) throw new Error(`Android trusted-session plugin is missing ${text}.`);
+  });
+});
+
+await check("native Android exports use the public Downloads folder", async () => {
+  const bridgeSource = await readFile("src/native-file-export.js", "utf8");
+  const pluginSource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/NativeFileExportPlugin.java", "utf8");
+  ["Plugins?.NativeFileExport", "saveNativeExport"].forEach((text) => {
+    if (!bridgeSource.includes(text)) throw new Error(`native file export bridge is missing ${text}.`);
+  });
+  ["MediaStore.Downloads", "RELATIVE_PATH", "莫忘"].forEach((text) => {
+    if (!pluginSource.includes(text)) throw new Error(`native file export plugin is missing ${text}.`);
   });
 });
 
