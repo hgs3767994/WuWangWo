@@ -70,7 +70,7 @@ const NATIVE_BACKGROUND_LOCK_MS = 2 * 60 * 1000;
 // A native cold start needs time for both the WebView and Android window to
 // become interactive. Starting the prompt earlier can silently fail on some
 // devices, while returning to this page later happens to work.
-const NATIVE_BIOMETRIC_PROMPT_DELAY_MS = 700;
+const NATIVE_BIOMETRIC_PROMPT_DELAY_MS = 350;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
 const OAUTH_RETURN_ROUTE_STORAGE_KEY = "forget-me-not-oauth-return-route";
@@ -122,6 +122,66 @@ let state = {
   installDismissed: localStorage.getItem("forget-me-not-install-dismissed") === "true",
   isInstalled: isPwaInstalled()
 };
+
+const messageDialogQueue = [];
+let activeMessageDialog = null;
+
+// Keep existing alert() call sites, but render a theme-aware Traditional
+// Chinese dialog instead of the browser-controlled native alert.
+function alert(message) {
+  void showMessageDialog(message);
+}
+
+function showMessageDialog(message) {
+  return enqueueMessageDialog({ message, confirmLabel: "確認" });
+}
+
+function confirmDialog(message, options = {}) {
+  return enqueueMessageDialog({
+    message,
+    confirmLabel: options.confirmLabel ?? "確認",
+    cancelLabel: "取消",
+    danger: options.danger === true
+  });
+}
+
+function enqueueMessageDialog(dialog) {
+  return new Promise((resolve) => {
+    messageDialogQueue.push({ ...dialog, resolve });
+    showNextMessageDialog();
+  });
+}
+
+function showNextMessageDialog() {
+  if (activeMessageDialog || !messageDialogQueue.length) return;
+  const dialog = messageDialogQueue.shift();
+  const overlay = document.createElement("div");
+  const hasCancel = Boolean(dialog.cancelLabel);
+  overlay.className = "modal-backdrop message-dialog-backdrop";
+  overlay.innerHTML = `
+    <section class="modal-card message-dialog-card" role="dialog" aria-modal="true" aria-label="系統訊息">
+      <p class="message-dialog-text">${escapeHtml(String(dialog.message ?? ""))}</p>
+      <div class="actions modal-actions">
+        ${hasCancel ? `<button type="button" class="secondary" data-message-dialog-cancel>${escapeHtml(dialog.cancelLabel)}</button>` : ""}
+        <button type="button" class="${dialog.danger ? "danger" : ""}" data-message-dialog-confirm>${escapeHtml(dialog.confirmLabel)}</button>
+      </div>
+    </section>
+  `;
+  const close = (value) => {
+    overlay.remove();
+    activeMessageDialog = null;
+    dialog.resolve(value);
+    showNextMessageDialog();
+  };
+  overlay.querySelector("[data-message-dialog-confirm]").addEventListener("click", () => close(true));
+  overlay.querySelector("[data-message-dialog-cancel]")?.addEventListener("click", () => close(false));
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close(false);
+  });
+  activeMessageDialog = overlay;
+  document.body.append(overlay);
+  overlay.querySelector("[data-message-dialog-confirm]").focus();
+}
 
 async function boot() {
   registerDeveloperAccessGuard();
@@ -513,7 +573,7 @@ async function enableBiometricUnlock() {
     alert("此瀏覽器或裝置目前不支援可驗證使用者的生物辨識／裝置解鎖。");
     return;
   }
-  const confirmed = confirm("啟用後，這台裝置可使用指紋、臉部辨識或螢幕鎖快速解鎖莫忘。\n\n密碼與救援碼仍會保留作為備援。是否啟用？");
+  const confirmed = await confirmDialog("啟用後，這台裝置可使用指紋、臉部辨識或螢幕鎖快速解鎖莫忘。\n\n密碼與救援碼仍會保留作為備援。是否啟用？", { confirmLabel: "啟用" });
   if (!confirmed) return;
   try {
     const userId = randomBuffer(16);
@@ -723,7 +783,7 @@ function registerHistoryNavigation() {
   if (state.historyNavigationRegistered) return;
   state.historyNavigationRegistered = true;
   replaceHistoryRoute(state.route);
-  window.addEventListener("popstate", (event) => {
+  window.addEventListener("popstate", async (event) => {
     if (state.ignoreNextPopstate) {
       state.ignoreNextPopstate = false;
       return;
@@ -746,7 +806,7 @@ function registerHistoryNavigation() {
     }
     if (state.skipNextPopstateConfirm) {
       state.skipNextPopstateConfirm = false;
-    } else if (!confirmBeforeLeavingCurrentRoute(nextRoute, { viaHistory: true })) {
+    } else if (!(await confirmBeforeLeavingCurrentRoute(nextRoute, { viaHistory: true }))) {
       return;
     }
     state.route = nextRoute;
@@ -1024,8 +1084,9 @@ async function setupMasterPassword(event) {
   }
   if (isRebuildCloudFromBackup) {
     const summary = vaultDataSummary();
-    const confirmed = confirm(
-      `確定要使用本機備份重建雲端資料嗎？\n\n目前本機資料：人物 ${summary.peopleCount} 位\n\n此操作會用目前本機資料覆蓋 Google Drive 中既有的莫忘同步資料，舊密碼與舊救援碼將失效。完成後請務必保存新的救援碼。`
+    const confirmed = await confirmDialog(
+      `確定要使用本機備份重建雲端資料嗎？\n\n目前本機資料：人物 ${summary.peopleCount} 位\n\n此操作會用目前本機資料覆蓋 Google Drive 中既有的莫忘同步資料，舊密碼與舊救援碼將失效。完成後請務必保存新的救援碼。`,
+      { confirmLabel: "重建", danger: true }
     );
     if (!confirmed) return;
   }
@@ -1129,7 +1190,7 @@ async function verifySensitiveOperation(actionLabel) {
     keyPackage = await getKeyPackage();
   }
   if (!keyPackage?.masterPasswordWrapper) {
-    return confirm(`「${actionLabel}」屬於敏感操作，但此裝置尚未設定密碼，無法進行密碼驗證。\n\n若此裝置只有本機資料，請確認周遭環境安全後再繼續。`);
+    return confirmDialog(`「${actionLabel}」屬於敏感操作，但此裝置尚未設定密碼，無法進行密碼驗證。\n\n若此裝置只有本機資料，請確認周遭環境安全後再繼續。`, { confirmLabel: "繼續" });
   }
   const password = await passwordConfirmDialog(actionLabel);
   if (password === null) return false;
@@ -1419,7 +1480,7 @@ function beginDriveSetupWithOAuthPopup() {
 }
 
 async function logoutGoogleDrive() {
-  if (!confirm("確定要登出 Google Drive 嗎？\n此裝置將停止與 Google Drive 同步，但不會刪除本機資料或雲端資料。")) return;
+  if (!(await confirmDialog("確定要登出 Google Drive 嗎？\n此裝置將停止與 Google Drive 同步，但不會刪除本機資料或雲端資料。", { confirmLabel: "登出" }))) return;
   try {
     await disconnectDrive();
   } catch (error) {
@@ -1476,7 +1537,7 @@ async function restoreLocalSnapshot(id) {
   const snapshot = state.localSnapshots.find((item) => item.id === id);
   if (!snapshot) return;
   if (!(await verifySensitiveOperation("還原本機資料快照"))) return;
-  if (!confirm(`確定要還原 ${formatDateTime(snapshot.createdAt)} 的本機快照嗎？\n目前資料會先自動建立一份快照，再還原到該時間點。`)) return;
+  if (!(await confirmDialog(`確定要還原 ${formatDateTime(snapshot.createdAt)} 的本機快照嗎？\n目前資料會先自動建立一份快照，再還原到該時間點。`, { confirmLabel: "還原" }))) return;
   await createLocalSnapshot("還原前自動快照");
   state.vault = normalizeVault(pruneDeleted(snapshot.vault));
   markLocalVaultChanged();
@@ -1487,7 +1548,7 @@ async function restoreLocalSnapshot(id) {
 
 async function deleteLocalSnapshot(id) {
   const snapshot = state.localSnapshots.find((item) => item.id === id);
-  if (!snapshot || !confirm("確定要刪除這份本機快照嗎？")) return;
+  if (!snapshot || !(await confirmDialog("確定要刪除這份本機快照嗎？", { confirmLabel: "刪除", danger: true }))) return;
   if (!(await verifySensitiveOperation("刪除本機資料快照"))) return;
   state.localSnapshots = state.localSnapshots.filter((item) => item.id !== id);
   await saveLocalSnapshots(state.localSnapshots);
@@ -1560,9 +1621,10 @@ async function importDataFile(event) {
     const importedGroupCount = importedVault.personGroupTags.length;
     const importedTagCount = importedVault.interestTags.length;
     if (
-      !confirm(
-        `確定要匯入這份資料嗎？\n\n人物：${importedPeopleCount} 位\n人物群組：${importedGroupCount} 個\n興趣喜好：${importedTagCount} 個\n\n匯入會與目前資料合併，不會直接清空現有資料。\n匯入前會先下載一份目前本機資料備份。`
-      )
+      !(await confirmDialog(
+        `確定要匯入這份資料嗎？\n\n人物：${importedPeopleCount} 位\n人物群組：${importedGroupCount} 個\n興趣喜好：${importedTagCount} 個\n\n匯入會與目前資料合併，不會直接清空現有資料。\n匯入前會先下載一份目前本機資料備份。`,
+        { confirmLabel: "匯入" }
+      ))
     ) {
       return;
     }
@@ -1910,7 +1972,7 @@ async function refreshRecoveryRequests() {
 
 async function approveRecoveryRequest(requestId, pairingCode) {
   if (!state.dekBytes) { alert("此裝置必須維持已解鎖狀態才能核准救援。 "); return; }
-  if (!confirm(`請確認新裝置顯示的配對碼也是「${pairingCode}」。核准後請在此裝置輸入新裝置設定的相同新密碼。`)) return;
+  if (!(await confirmDialog(`請確認新裝置顯示的配對碼也是「${pairingCode}」。核准後請在此裝置輸入新裝置設定的相同新密碼。`, { confirmLabel: "核准" }))) return;
   const newPassword = await recoveryNewPasswordDialog();
   if (newPassword === null) return;
   try {
@@ -2042,8 +2104,9 @@ async function applyDriveRevisionRecovery() {
     return;
   }
   if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
-  const confirmed = confirm(
-    `確定要使用找到的歷史版本重建雲端同步資料嗎？\n\n金鑰檔：${candidate.keyRevision.label}\n資料檔：${candidate.vaultRevision.label}\n人物：${candidate.vault.people.length} 位\n\n此操作會覆蓋目前 Google Drive 中的莫忘同步資料，並產生新的密碼與救援碼。`
+  const confirmed = await confirmDialog(
+    `確定要使用找到的歷史版本重建雲端同步資料嗎？\n\n金鑰檔：${candidate.keyRevision.label}\n資料檔：${candidate.vaultRevision.label}\n人物：${candidate.vault.people.length} 位\n\n此操作會覆蓋目前 Google Drive 中的莫忘同步資料，並產生新的密碼與救援碼。`,
+    { confirmLabel: "重建", danger: true }
   );
   if (!confirmed) return;
   const deviceId = state.appState?.deviceId ?? createDeviceId();
@@ -2222,11 +2285,11 @@ async function replaceRecoveryCode(keyPackage, dekBytes) {
   return { keyPackage: updatedKeyPackage, recoveryCode };
 }
 
-function confirmBeforeLeavingCurrentRoute(targetRoute = {}, options = {}) {
+async function confirmBeforeLeavingCurrentRoute(targetRoute = {}, options = {}) {
   if (options.force) return true;
   if (isSameRoute(state.route, targetRoute)) return true;
   if (state.route.name === "showRecoveryCode") {
-    const leave = confirm("離開此畫面後將不再顯示此救援碼，確定已妥善保存嗎？");
+    const leave = await confirmDialog("離開此畫面後將不再顯示此救援碼，確定已妥善保存嗎？", { confirmLabel: "離開" });
     if (!leave && options.viaHistory) cancelHistoryBack();
     if (leave && options.viaHistory) {
       const fallbackRoute = state.route.returnTo ?? { name: "home" };
@@ -2238,12 +2301,12 @@ function confirmBeforeLeavingCurrentRoute(targetRoute = {}, options = {}) {
     return leave;
   }
   if (isPersonFormDirty()) {
-    const leave = confirm("尚未儲存變更，確定要離開嗎？");
+    const leave = await confirmDialog("尚未儲存變更，確定要離開嗎？", { confirmLabel: "離開" });
     if (!leave && options.viaHistory) cancelHistoryBack();
     return leave;
   }
   if (hasPendingSecurityOperation()) {
-    const leave = confirm("尚未完成操作，確定要離開嗎？");
+    const leave = await confirmDialog("尚未完成操作，確定要離開嗎？", { confirmLabel: "離開" });
     if (!leave && options.viaHistory) cancelHistoryBack();
     return leave;
   }
@@ -2312,8 +2375,8 @@ function hasAnyDraftValue(draft = {}) {
   return Object.values(draft).some((value) => String(value ?? "").trim());
 }
 
-function navigate(route, options = {}) {
-  if (!confirmBeforeLeavingCurrentRoute(route, options)) return;
+async function navigate(route, options = {}) {
+  if (!(await confirmBeforeLeavingCurrentRoute(route, options))) return false;
   syncCurrentHistoryScroll();
   const fromRoute = state.route;
   state.route = prepareRouteForNavigation(route);
@@ -2323,6 +2386,7 @@ function navigate(route, options = {}) {
     fromRoute
   });
   writeHistoryRoute(state.route, options);
+  return true;
 }
 
 function currentRouteSnapshot() {
@@ -2343,19 +2407,19 @@ function detailRoute(id) {
   };
 }
 
-function navigateBackFromDetail() {
-  navigateBack(state.route.returnTo ?? { name: "home" });
+async function navigateBackFromDetail() {
+  return navigateBack(state.route.returnTo ?? { name: "home" });
 }
 
-function navigateBack(fallbackRoute, options = {}) {
-  if (!confirmBeforeLeavingCurrentRoute(fallbackRoute, { viaBack: true, force: options.force })) return;
+async function navigateBack(fallbackRoute, options = {}) {
+  if (!(await confirmBeforeLeavingCurrentRoute(fallbackRoute, { viaBack: true, force: options.force }))) return false;
   syncCurrentHistoryScroll();
   if (history.state?.appRoute && history.length > 1) {
     if (options.force) state.skipNextPopstateConfirm = true;
     history.back();
-    return;
+    return true;
   }
-  navigate(fallbackRoute, { replace: true, force: true, transition: "back" });
+  return navigate(fallbackRoute, { replace: true, force: true, transition: "back" });
 }
 
 function prepareRouteForNavigation(route) {
@@ -2479,7 +2543,7 @@ async function checkVersionUpdate() {
       alert("已是最新版本");
       return;
     }
-    if (confirm("發現新版本，是否更新？")) applyUpdate();
+    if (await confirmDialog("發現新版本，是否更新？", { confirmLabel: "更新" })) applyUpdate();
   } catch {
     alert("暫時無法檢查更新，請稍後再試");
   }
@@ -4735,9 +4799,9 @@ function addListItem(key) {
   render();
 }
 
-function removeListItem(key, index) {
+async function removeListItem(key, index) {
   const label = key === "phones" ? "電話" : "地址";
-  if (!confirm(`確定要刪除這筆${label}嗎？`)) return;
+  if (!(await confirmDialog(`確定要刪除這筆${label}嗎？`, { confirmLabel: "刪除", danger: true }))) return;
   state.route.draft[key].splice(index, 1);
   ensureSingleDefault(state.route.draft[key]);
   render();
@@ -4995,7 +5059,7 @@ async function deletePersonGroup(tag) {
   const usageWarning = usedCount ? `\n此人物群組目前有 ${usedCount} 位人物使用\n移除後會從這些人物身上移除此人物群組。` : "";
   const defaultHint = tag.isDefault ? "\n之後可使用「恢復預設人物群組」重新加入。" : "";
   const verb = tag.isDefault ? "移除" : "刪除";
-  if (!confirm(`確定要${verb}「${tagLabelPlain(tag)}」嗎？${usageWarning}${defaultHint}`)) return;
+  if (!(await confirmDialog(`確定要${verb}「${tagLabelPlain(tag)}」嗎？${usageWarning}${defaultHint}`, { confirmLabel: verb, danger: verb === "刪除" }))) return;
   const now = new Date().toISOString();
   const vault = {
     ...state.vault,
@@ -5072,7 +5136,7 @@ async function deleteInterest(tag) {
   const usageWarning = usedCount ? `\n此興趣喜好目前有 ${usedCount} 位人物使用\n移除後會從這些人物身上移除此興趣喜好。` : "";
   const defaultHint = tag.isDefault ? "\n之後可使用「恢復預設興趣喜好」重新加入。" : "";
   const verb = tag.isDefault ? "移除" : "刪除";
-  if (!confirm(`確定要${verb}「${tagLabelPlain(tag)}」嗎？${usageWarning}${defaultHint}`)) return;
+  if (!(await confirmDialog(`確定要${verb}「${tagLabelPlain(tag)}」嗎？${usageWarning}${defaultHint}`, { confirmLabel: verb, danger: verb === "刪除" }))) return;
   const now = new Date().toISOString();
   const vault = {
     ...state.vault,
@@ -5098,7 +5162,7 @@ async function deleteInterest(tag) {
 }
 
 async function restoreDefaultInterests() {
-  if (!confirm("確定要恢復預設興趣喜好嗎？\n這會重新加入缺少的預設項目，不會刪除你的自訂項目。")) return;
+  if (!(await confirmDialog("確定要恢復預設興趣喜好嗎？\n這會重新加入缺少的預設項目，不會刪除你的自訂項目。", { confirmLabel: "恢復" }))) return;
   const now = new Date().toISOString();
   const normalized = normalizeTagCollection(state.vault.interestTags, DEFAULT_INTEREST_TAGS, [], "interestTag", now);
   const people = state.vault.people.map((person) => rewritePersonTagIds(person, new Map(), normalized.redirects));
@@ -5228,7 +5292,7 @@ async function deleteCustomFieldById(id) {
 async function deleteCustomField(field) {
   const usedCount = state.vault.people.filter((person) => person.customValues.some((value) => value.fieldId === field.id)).length;
   const globalWarning = field.scope === "global" ? `\n此欄位目前有 ${usedCount} 位人物填寫\n刪除後會移除所有人物此欄位資料。` : "";
-  if (!confirm(`確定要刪除「${field.name}」嗎？${globalWarning}`)) return;
+  if (!(await confirmDialog(`確定要刪除「${field.name}」嗎？${globalWarning}`, { confirmLabel: "刪除", danger: true }))) return;
   const now = new Date().toISOString();
   const vault = {
     ...state.vault,
@@ -5337,7 +5401,7 @@ async function renameCustomOption(fieldId, oldName) {
 async function deleteCustomOption(fieldId, optionName) {
   const field = state.vault.customFieldDefs.find((item) => item.id === fieldId);
   if (!field || !isChoiceField(field)) return;
-  if (!confirm(`確定要刪除選項「${optionName}」嗎？\n已使用此選項的人物資料會同步移除此值。`)) return;
+  if (!(await confirmDialog(`確定要刪除選項「${optionName}」嗎？\n已使用此選項的人物資料會同步移除此值。`, { confirmLabel: "刪除", danger: true }))) return;
   const options = (field.options ?? []).filter((option) => option !== optionName);
   if (field.type === "single" && options.length < 2) {
     alert("單選欄位至少需要保留 2 個選項");
@@ -5369,7 +5433,7 @@ async function updateCustomFieldOptions(fieldId, options) {
 async function deletePerson(id) {
   const person = getPerson(id);
   if (!person) return;
-  if (!confirm(`確定要刪除「${person.name}」嗎？\n刪除後 5 天內可從最近刪除還原。`)) return;
+  if (!(await confirmDialog(`確定要刪除「${person.name}」嗎？\n刪除後 5 天內可從最近刪除還原。`, { confirmLabel: "刪除", danger: true }))) return;
   const now = new Date();
   const restoreUntil = new Date(now.getTime() + 5 * 86400000).toISOString();
   const expiresAt = new Date(now.getTime() + 30 * 86400000).toISOString();
@@ -5389,7 +5453,7 @@ async function deletePerson(id) {
 async function archivePerson(id) {
   const person = getPerson(id);
   if (!person || person.archivedAt) return;
-  if (!confirm(`確定要封存「${person.name}」嗎？\n封存後不會顯示於首頁與搜尋結果。`)) return;
+  if (!(await confirmDialog(`確定要封存「${person.name}」嗎？\n封存後不會顯示於首頁與搜尋結果。`, { confirmLabel: "封存" }))) return;
   const now = new Date().toISOString();
   const vault = {
     ...state.vault,
@@ -5406,7 +5470,7 @@ async function archivePerson(id) {
 async function restoreArchivedPerson(id) {
   const person = getPerson(id);
   if (!person || !person.archivedAt) return;
-  if (!confirm(`確定要還原「${person.name}」嗎？`)) return;
+  if (!(await confirmDialog(`確定要還原「${person.name}」嗎？`, { confirmLabel: "還原" }))) return;
   const now = new Date().toISOString();
   const vault = {
     ...state.vault,
@@ -5422,12 +5486,12 @@ async function restoreArchivedPerson(id) {
 async function deleteArchivedPerson(id) {
   const person = getPerson(id);
   if (!person || !person.archivedAt) return;
-  if (!confirm("確定要永久刪除這位封存人物嗎？刪除後會移到最近刪除，可在保留期限內恢復。")) return;
+  if (!(await confirmDialog("確定要永久刪除這位封存人物嗎？刪除後會移到最近刪除，可在保留期限內恢復。", { confirmLabel: "永久刪除", danger: true }))) return;
   await deletePersonToRecentlyDeleted(person, { returnRoute: { name: "archived" }, confirmFirst: false });
 }
 
 async function deletePersonToRecentlyDeleted(person, { returnRoute = { name: "home" }, confirmFirst = true } = {}) {
-  if (confirmFirst && !confirm(`確定要刪除「${person.name}」嗎？\n刪除後 5 天內可從最近刪除還原。`)) return;
+  if (confirmFirst && !(await confirmDialog(`確定要刪除「${person.name}」嗎？\n刪除後 5 天內可從最近刪除還原。`, { confirmLabel: "刪除", danger: true }))) return;
   const now = new Date();
   const restoreUntil = new Date(now.getTime() + 5 * 86400000).toISOString();
   const expiresAt = new Date(now.getTime() + 30 * 86400000).toISOString();
@@ -5446,7 +5510,7 @@ async function deletePersonToRecentlyDeleted(person, { returnRoute = { name: "ho
 
 async function restorePerson(id) {
   const item = state.vault.deletedItems.find((entry) => entry.id === id);
-  if (!item || !confirm(`確定要還原「${item.snapshot.name}」嗎？`)) return;
+  if (!item || !(await confirmDialog(`確定要還原「${item.snapshot.name}」嗎？`, { confirmLabel: "還原" }))) return;
   const vault = {
     ...state.vault,
     people: [...state.vault.people, { ...item.snapshot, updatedAt: new Date().toISOString(), updatedByDeviceId: state.appState.deviceId }],
@@ -5458,7 +5522,7 @@ async function restorePerson(id) {
 
 async function purgePerson(id) {
   const item = state.vault.deletedItems.find((entry) => entry.id === id);
-  if (!item || !confirm(`確定要永久刪除「${item.snapshot.name}」嗎？\n此操作無法復原。`)) return;
+  if (!item || !(await confirmDialog(`確定要永久刪除「${item.snapshot.name}」嗎？\n此操作無法復原。`, { confirmLabel: "永久刪除", danger: true }))) return;
   const vault = { ...state.vault, deletedItems: state.vault.deletedItems.filter((entry) => entry.id !== id) };
   await commitVault(vault);
 }

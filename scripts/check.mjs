@@ -111,6 +111,14 @@ await check("native runtime bypasses the PWA service worker", async () => {
   if (!appSource.includes("Capacitor?.isNativePlatform?.()")) throw new Error("Native runtime must bypass PWA service worker registration.");
 });
 
+await check("app messages use the themed Traditional Chinese dialog", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  ["function alert(message)", "function confirmDialog(message", "message-dialog-card"].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing themed message dialog support: ${text}`);
+  });
+  if (/\bconfirm\(/.test(appSource)) throw new Error("src/app.js must not use browser-native confirm dialogs.");
+});
+
 await check("unlock page renders before an encrypted local vault is loaded", async () => {
   const appSource = await readFile("src/app.js", "utf8");
   const viewStart = appSource.indexOf("function view() {");

@@ -838,6 +838,17 @@ button:focus-visible,
   min-width: 112px;
 }
 
+.message-dialog-card {
+  max-width: 380px;
+}
+
+.message-dialog-text {
+  margin: 0 0 20px;
+  color: var(--text-primary);
+  line-height: 1.65;
+  white-space: pre-line;
+}
+
 .field {
   margin: 13px 0;
 }
