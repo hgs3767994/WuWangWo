@@ -65,6 +65,7 @@ const ADDRESS_CITY_OPTIONS = [...Object.keys(ADDRESS_CITY_DISTRICTS), "其它/�
 const GENDER_OPTIONS = ["男", "女", "其它"];
 const IDLE_LOCK_MS = 2 * 60 * 1000;
 const AWAY_LOCK_MS = 2 * 60 * 1000;
+const NATIVE_BACKGROUND_LOCK_MS = 2 * 60 * 1000;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
 const OAUTH_RETURN_ROUTE_STORAGE_KEY = "forget-me-not-oauth-return-route";
@@ -109,6 +110,8 @@ let state = {
   autoLockRegistered: false,
   nativeBackButtonRegistered: false,
   idleLockTimer: null,
+  nativeBackgroundLockTimer: null,
+  nativeBackgroundAt: 0,
   lastSessionTouchAt: 0,
   installPromptEvent: null,
   installDismissed: localStorage.getItem("forget-me-not-install-dismissed") === "true",
@@ -153,7 +156,7 @@ async function boot() {
   let trustedSession = await getItem("trustedSession");
   const localSnapshots = await loadLocalSnapshots();
   state = { ...state, localSnapshots };
-  if (!appState || (!vault && !(appState.mode === "localOnly" && storedKeyPackage))) {
+  if (!appState || (appState.mode === "localOnly" && !storedKeyPackage) || (!vault && !(appState.mode === "localOnly" && storedKeyPackage))) {
     state = { ...state, route: { name: "welcome" } };
   } else if ((appState.mode === "driveSync" || appState.mode === "localOnly") && storedKeyPackage && !trustedSession) {
     state = { ...state, appState, vault: appState.mode === "localOnly" ? null : normalizeVault(pruneDeleted(vault)), route: { name: "unlock", showForgotPassword: appState.mode === "localOnly", allowBiometric: appState.mode === "localOnly" } };
@@ -299,14 +302,12 @@ function registerAutoLock() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
       if (nativeTrustedSessionAvailable() && canAutoLock()) {
-        state.nativeBackgroundLockPending = true;
-        void lockApp("已離開 App，請使用裝置驗證解鎖。", { suppressAutoBiometric: true }).then(() => {
-          resumeNativeDeviceVerificationAfterBackground();
-        });
+        scheduleNativeBackgroundLock();
         return;
       }
       void touchTrustedSessionNow({ force: true });
     } else {
+      if (handleNativeReturnFromBackground()) return;
       recordUserActivity();
       resumeNativeDeviceVerificationAfterBackground();
     }
@@ -315,6 +316,41 @@ function registerAutoLock() {
     void touchTrustedSessionNow({ force: true });
   });
   resetIdleLockTimer();
+}
+
+function scheduleNativeBackgroundLock() {
+  clearNativeBackgroundLockTimer();
+  state.nativeBackgroundAt = Date.now();
+  state.nativeBackgroundLockTimer = window.setTimeout(lockAfterNativeBackgroundTimeout, NATIVE_BACKGROUND_LOCK_MS);
+  void touchTrustedSessionNow({ force: true });
+}
+
+function clearNativeBackgroundLockTimer() {
+  if (state.nativeBackgroundLockTimer) window.clearTimeout(state.nativeBackgroundLockTimer);
+  state.nativeBackgroundLockTimer = null;
+}
+
+function lockAfterNativeBackgroundTimeout() {
+  if (!state.nativeBackgroundAt || Date.now() - state.nativeBackgroundAt < NATIVE_BACKGROUND_LOCK_MS) return;
+  clearNativeBackgroundLockTimer();
+  state.nativeBackgroundAt = 0;
+  state.nativeBackgroundLockPending = true;
+  void lockApp("已離開 App 超過 2 分鐘，請使用裝置驗證解鎖。", { suppressAutoBiometric: true }).then(() => {
+    resumeNativeDeviceVerificationAfterBackground();
+  });
+}
+
+function handleNativeReturnFromBackground() {
+  const backgroundAt = state.nativeBackgroundAt;
+  if (!backgroundAt) return false;
+  clearNativeBackgroundLockTimer();
+  state.nativeBackgroundAt = 0;
+  if (Date.now() - backgroundAt < NATIVE_BACKGROUND_LOCK_MS) return false;
+  state.nativeBackgroundLockPending = true;
+  void lockApp("已離開 App 超過 2 分鐘，請使用裝置驗證解鎖。", { suppressAutoBiometric: true }).then(() => {
+    resumeNativeDeviceVerificationAfterBackground();
+  });
+  return true;
 }
 
 function registerNativeBackButton() {
@@ -778,7 +814,6 @@ async function initializeLocalMode() {
   };
   state.vault = vault;
   state.route = { name: "setupMasterPassword", mode: "localSetup" };
-  await save();
   render();
 }
 
@@ -2760,7 +2795,7 @@ function settingsView() {
       ${gd.connected ? `<button class="action-quiet" data-action="sync-now" ${isDriveSyncRecentlyStarted(gd) ? "disabled" : ""}>立即同步</button><button class="action-quiet" data-action="drive-logout">登出 Google Drive</button>` : `<button class="action-quiet" data-action="drive-placeholder">連結 Google Drive</button>`}
     </section>
     ${themeSettingsSection()}
-      ${gd.connected ? securitySettingsSection() : ""}
+    ${securitySettingsSection()}
     <section class="panel stack">
       <h2 class="section-title">資料管理</h2>
       ${storageWarningView()}
