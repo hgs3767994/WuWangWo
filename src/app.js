@@ -2502,6 +2502,10 @@ function waitForServiceWorkerUpdate(registration) {
 
 function view() {
   if (state.route.name === "welcome") return welcomeView();
+  // A local vault stays encrypted until the password or device credential has
+  // restored its DEK. The unlock screen must therefore be renderable before
+  // a vault exists, otherwise a cold native launch is stuck on "載入中…".
+  if (state.route.name === "unlock") return unlockView();
   if (!state.vault) return `<div class="empty">載入中…</div>`;
   if (state.route.name === "search") return searchView();
   if (state.route.name === "new") return personFormView();
@@ -2529,7 +2533,6 @@ function view() {
   if (state.route.name === "recoveryRequests") return recoveryRequestsView();
   if (state.route.name === "setupMasterPassword") return setupMasterPasswordView();
   if (state.route.name === "showRecoveryCode") return showRecoveryCodeView();
-  if (state.route.name === "unlock") return unlockView();
   if (state.route.name === "changePassword") return changePasswordView();
   if (state.route.name === "forgotPassword") return forgotPasswordView();
   if (state.route.name === "regenerateRecovery") return regenerateRecoveryView();

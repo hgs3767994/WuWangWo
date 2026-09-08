@@ -111,6 +111,18 @@ await check("native runtime bypasses the PWA service worker", async () => {
   if (!appSource.includes("Capacitor?.isNativePlatform?.()")) throw new Error("Native runtime must bypass PWA service worker registration.");
 });
 
+await check("unlock page renders before an encrypted local vault is loaded", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  const viewStart = appSource.indexOf("function view() {");
+  const viewEnd = appSource.indexOf("function welcomeView()", viewStart);
+  const viewSource = appSource.slice(viewStart, viewEnd);
+  const unlockIndex = viewSource.indexOf('if (state.route.name === "unlock")');
+  const vaultIndex = viewSource.indexOf("if (!state.vault)");
+  if (unlockIndex < 0 || vaultIndex < 0 || unlockIndex > vaultIndex) {
+    throw new Error("The unlock route must render before the missing-vault loading state.");
+  }
+});
+
 await check("native Android back button exits only from root routes", async () => {
   const appSource = await readFile("src/app.js", "utf8");
   ["registerNativeBackButton", "addListener(\"backButton\"", "nativeApp.exitApp()", "navigateBack({ name: \"home\" })"].forEach((text) => {
