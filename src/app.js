@@ -165,6 +165,17 @@ async function boot() {
   } else {
     let dekBytes = null;
     if (appState.mode === "driveSync" || (appState.mode === "localOnly" && storedKeyPackage)) {
+      // Native Keystore restoration opens a biometric prompt. Render the
+      // unlock screen first so Android can attach that prompt to a resumed
+      // Activity instead of leaving the WebView on the loading screen.
+      if (isNativeTrustedSession(trustedSession)) {
+        state = { ...state, appState, vault: appState.mode === "localOnly" ? null : normalizeVault(pruneDeleted(vault)), route: { name: "unlock", allowBiometric: true } };
+        render();
+        registerHistoryNavigation();
+        registerServiceWorker();
+        registerInstallExperience();
+        return;
+      }
       const sessionCheck = await checkTrustedSessionStillValid(appState, trustedSession);
       if (!sessionCheck.valid) {
         if (!sessionCheck.keepTrustedSession) await clearTrustedSession();
