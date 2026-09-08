@@ -111,6 +111,7 @@ let state = {
   historyNavigationRegistered: false,
   ignoreNextPopstate: false,
   skipNextPopstateConfirm: false,
+  historyLeaveGuard: null,
   developerAccessGuardRegistered: false,
   autoLockRegistered: false,
   nativeBackButtonRegistered: false,
@@ -167,7 +168,10 @@ function showNextMessageDialog() {
       </div>
     </section>
   `;
+  let closed = false;
   const close = (value) => {
+    if (closed) return;
+    closed = true;
     overlay.remove();
     activeMessageDialog = null;
     dialog.resolve(value);
@@ -178,9 +182,15 @@ function showNextMessageDialog() {
   overlay.addEventListener("click", (event) => {
     if (event.target === overlay) close(false);
   });
-  activeMessageDialog = overlay;
+  activeMessageDialog = { overlay, close };
   document.body.append(overlay);
   overlay.querySelector("[data-message-dialog-confirm]").focus();
+}
+
+function closeActiveMessageDialog(value = false) {
+  if (!activeMessageDialog) return false;
+  activeMessageDialog.close(value);
+  return true;
 }
 
 async function boot() {
@@ -424,6 +434,9 @@ function registerNativeBackButton() {
   if (!nativeApp?.addListener || !nativeApp?.exitApp) return;
   state.nativeBackButtonRegistered = true;
   nativeApp.addListener("backButton", () => {
+    // A visible app dialog owns Back first. Treat it exactly like its
+    // Cancel action and do not navigate the page underneath it.
+    if (closeActiveMessageDialog(false)) return;
     // The native back callback takes precedence over WebView history. This
     // prevents stale OAuth/browser entries from reopening after a completed
     // workflow, while retaining the PWA's existing route-back rules.
@@ -431,7 +444,7 @@ function registerNativeBackButton() {
       void nativeApp.exitApp();
       return;
     }
-    navigateBack({ name: "home" });
+    void navigateBack({ name: "home" });
   });
 }
 
@@ -789,6 +802,19 @@ function registerHistoryNavigation() {
       return;
     }
     if (!event.state?.appRoute) return;
+    // Browser/PWA Back while an app dialog is visible must close the dialog,
+    // not move the page behind it. If the dialog was opened by an earlier
+    // popstate, the pending guard restores every intercepted history step.
+    if (activeMessageDialog) {
+      if (state.historyLeaveGuard) {
+        state.historyLeaveGuard.restoreSteps += 1;
+        closeActiveMessageDialog(false);
+      } else {
+        closeActiveMessageDialog(false);
+        restoreHistorySteps(1);
+      }
+      return;
+    }
     const fromRoute = state.route;
     const nextRoute = restoreHistoryRoute(event.state.route);
     // Home is the root route. If stale in-app history exists behind it, skip it
@@ -806,8 +832,25 @@ function registerHistoryNavigation() {
     }
     if (state.skipNextPopstateConfirm) {
       state.skipNextPopstateConfirm = false;
-    } else if (!(await confirmBeforeLeavingCurrentRoute(nextRoute, { viaHistory: true }))) {
-      return;
+    } else if (needsLeaveConfirmation(nextRoute)) {
+      // Browser Back has already moved the history cursor. Keep the current
+      // page in place while its leave dialog is open; only commit the route
+      // change after the user explicitly chooses to leave.
+      const guard = { restoreSteps: 1 };
+      state.historyLeaveGuard = guard;
+      const leave = await confirmBeforeLeavingCurrentRoute(nextRoute);
+      if (state.historyLeaveGuard !== guard) return;
+      state.historyLeaveGuard = null;
+      if (!leave) {
+        restoreHistorySteps(guard.restoreSteps);
+        return;
+      }
+      if (fromRoute.name === "showRecoveryCode") {
+        state.route = prepareRouteForNavigation(fromRoute.returnTo ?? { name: "home" });
+        render({ restoreScroll: true, transition: "back", fromRoute });
+        writeHistoryRoute(state.route, { replace: true, force: true });
+        return;
+      }
     }
     state.route = nextRoute;
     render({ restoreScroll: true, transition: "back", fromRoute });
@@ -817,6 +860,12 @@ function registerHistoryNavigation() {
     event.preventDefault();
     event.returnValue = "";
   });
+}
+
+function restoreHistorySteps(steps) {
+  if (!Number.isInteger(steps) || steps < 1) return;
+  state.ignoreNextPopstate = true;
+  history.go(steps);
 }
 
 function isPwaInstalled() {
@@ -2289,33 +2338,20 @@ async function confirmBeforeLeavingCurrentRoute(targetRoute = {}, options = {}) 
   if (options.force) return true;
   if (isSameRoute(state.route, targetRoute)) return true;
   if (state.route.name === "showRecoveryCode") {
-    const leave = await confirmDialog("離開此畫面後將不再顯示此救援碼，確定已妥善保存嗎？", { confirmLabel: "離開" });
-    if (!leave && options.viaHistory) cancelHistoryBack();
-    if (leave && options.viaHistory) {
-      const fallbackRoute = state.route.returnTo ?? { name: "home" };
-      state.route = prepareRouteForNavigation(fallbackRoute);
-      render({ restoreScroll: true });
-      writeHistoryRoute(state.route, { replace: true, force: true });
-      return false;
-    }
-    return leave;
+    return confirmDialog("離開此畫面後將不再顯示此救援碼，確定已妥善保存嗎？", { confirmLabel: "離開" });
   }
   if (isPersonFormDirty()) {
-    const leave = await confirmDialog("尚未儲存變更，確定要離開嗎？", { confirmLabel: "離開" });
-    if (!leave && options.viaHistory) cancelHistoryBack();
-    return leave;
+    return confirmDialog("尚未儲存變更，確定要離開嗎？", { confirmLabel: "離開" });
   }
   if (hasPendingSecurityOperation()) {
-    const leave = await confirmDialog("尚未完成操作，確定要離開嗎？", { confirmLabel: "離開" });
-    if (!leave && options.viaHistory) cancelHistoryBack();
-    return leave;
+    return confirmDialog("尚未完成操作，確定要離開嗎？", { confirmLabel: "離開" });
   }
   return true;
 }
 
-function cancelHistoryBack() {
-  state.ignoreNextPopstate = true;
-  history.forward();
+function needsLeaveConfirmation(targetRoute = {}, options = {}) {
+  if (options.force || isSameRoute(state.route, targetRoute)) return false;
+  return state.route.name === "showRecoveryCode" || isPersonFormDirty() || hasPendingSecurityOperation();
 }
 
 function hasPendingRouteWork() {
@@ -2413,9 +2449,14 @@ async function navigateBackFromDetail() {
 
 async function navigateBack(fallbackRoute, options = {}) {
   if (!(await confirmBeforeLeavingCurrentRoute(fallbackRoute, { viaBack: true, force: options.force }))) return false;
+  if (state.route.name === "showRecoveryCode") {
+    return navigate(state.route.returnTo ?? fallbackRoute, { replace: true, force: true, transition: "back" });
+  }
   syncCurrentHistoryScroll();
   if (history.state?.appRoute && history.length > 1) {
-    if (options.force) state.skipNextPopstateConfirm = true;
+    // The dialog has already approved leaving. The popstate caused by this
+    // deliberate history.back() must not ask the same question a second time.
+    state.skipNextPopstateConfirm = true;
     history.back();
     return true;
   }

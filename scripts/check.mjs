@@ -113,7 +113,7 @@ await check("native runtime bypasses the PWA service worker", async () => {
 
 await check("app messages use the themed Traditional Chinese dialog", async () => {
   const appSource = await readFile("src/app.js", "utf8");
-  ["function alert(message)", "function confirmDialog(message", "message-dialog-card"].forEach((text) => {
+  ["function alert(message)", "function confirmDialog(message", "message-dialog-card", "closeActiveMessageDialog", "historyLeaveGuard", "restoreHistorySteps"].forEach((text) => {
     if (!appSource.includes(text)) throw new Error(`src/app.js is missing themed message dialog support: ${text}`);
   });
   if (/\bconfirm\(/.test(appSource)) throw new Error("src/app.js must not use browser-native confirm dialogs.");
