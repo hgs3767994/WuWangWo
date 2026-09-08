@@ -1528,7 +1528,7 @@ function buildExportPayload(exportedAt = new Date().toISOString()) {
 async function downloadBlob(blob, filename, { announce = false } = {}) {
   if (nativeFileExportAvailable()) {
     const result = await saveNativeExport(blob, filename);
-    if (announce) alert(`檔案已儲存至「${result.location ?? "下載／莫忘"}」\n${filename}`);
+    if (announce) alert(`檔案已儲存至「${result.location ?? "下載／莫忘"}」資料夾中\n${filename}`);
     return result;
   }
   const url = URL.createObjectURL(blob);
