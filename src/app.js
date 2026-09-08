@@ -67,6 +67,7 @@ const GENDER_OPTIONS = ["男", "女", "其它"];
 const IDLE_LOCK_MS = 2 * 60 * 1000;
 const AWAY_LOCK_MS = 2 * 60 * 1000;
 const NATIVE_BACKGROUND_LOCK_MS = 2 * 60 * 1000;
+const NATIVE_BIOMETRIC_PROMPT_DELAY_MS = 450;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
 const OAUTH_RETURN_ROUTE_STORAGE_KEY = "forget-me-not-oauth-return-route";
@@ -645,10 +646,14 @@ function maybeAutoBiometricUnlock() {
   if (state.route.allowBiometric === false || state.route.autoBiometricAttempted) return;
   if (!nativeTrustedSessionAvailable() && !isBiometricUnlockEnabled()) return;
   state.route.autoBiometricAttempted = true;
+  // Android must finish restoring the resumed Activity before BiometricPrompt
+  // is opened. A short delay makes the prompt appear automatically on the
+  // visible unlock page instead of requiring a manual retry.
+  const delay = nativeTrustedSessionAvailable() ? NATIVE_BIOMETRIC_PROMPT_DELAY_MS : 250;
   window.setTimeout(() => {
     if (state.route?.name !== "unlock") return;
     void unlockWithBiometric({ silent: true });
-  }, 250);
+  }, delay);
 }
 
 function registerServiceWorker() {
@@ -3503,7 +3508,7 @@ function unlockView() {
 
 function biometricUnlockButtonForUnlockView() {
   if (state.route.allowBiometric === false) return "";
-  if (nativeTrustedSessionAvailable()) return `<button type="button" class="biometric-button" data-action="biometric-unlock">使用生物辨識或螢幕鎖解鎖</button>`;
+  if (nativeTrustedSessionAvailable()) return `<button type="button" class="biometric-button" data-action="biometric-unlock">使用生物辨識解鎖登入</button>`;
   if (!webAuthnSupported()) return "";
   if (isBiometricUnlockEnabled()) {
     return `<button type="button" class="biometric-button" data-action="biometric-unlock">使用生物辨識解鎖</button>`;
