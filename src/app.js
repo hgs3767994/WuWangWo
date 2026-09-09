@@ -1066,6 +1066,15 @@ async function ensureLocalVaultStorageKey() {
   return key;
 }
 
+async function ensureLocalSnapshotStorageKey() {
+  let key = await getItem("localSnapshotStorageKey");
+  if (!key) {
+    key = await createLocalStorageKey();
+    await setItem("localSnapshotStorageKey", key);
+  }
+  return key;
+}
+
 async function loadLocalVault() {
   const plaintextVault = await getItem("vault");
   if (plaintextVault) {
@@ -1104,17 +1113,30 @@ async function loadLocalSnapshots() {
   }
   const envelope = await getItem("localSnapshotsEnvelope");
   if (!envelope) return [];
-  const key = await getItem("localVaultStorageKey");
-  if (!key) return [];
-  return decryptLocalEnvelope(envelope, key);
+  try {
+    if (envelope.storageKey === "snapshot") {
+      const snapshotKey = await getItem("localSnapshotStorageKey");
+      if (!snapshotKey) return [];
+      return decryptLocalEnvelope(envelope, snapshotKey);
+    }
+    const legacyKey = await getItem("localVaultStorageKey");
+    if (!legacyKey) return [];
+    const snapshots = await decryptLocalEnvelope(envelope, legacyKey);
+    await saveLocalSnapshots(snapshots);
+    return snapshots;
+  } catch (error) {
+    console.warn("讀取本機資料快照失敗，已略過舊快照。", error);
+    return [];
+  }
 }
 
 async function saveLocalSnapshots(snapshots) {
   let stage = "KEY";
   try {
-    const key = await ensureLocalVaultStorageKey();
+    const key = await ensureLocalSnapshotStorageKey();
     stage = "ENCRYPT";
     const envelope = await encryptLocalEnvelope(snapshots ?? [], key, "local-snapshots");
+    envelope.storageKey = "snapshot";
     stage = "WRITE";
     await setItem("localSnapshotsEnvelope", envelope);
     stage = "CLEANUP";
