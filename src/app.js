@@ -1679,12 +1679,17 @@ async function importDataFile(event) {
   input.value = "";
   if (!file) return;
   if (!(await verifySensitiveOperation("匯入資料"))) return;
+  let importStage = { code: "IMPORT-READ", label: "讀取備份檔" };
   try {
-    const payload = JSON.parse(await file.text());
+    const fileText = await file.text();
+    importStage = { code: "IMPORT-PARSE", label: "解析備份檔" };
+    const payload = JSON.parse(fileText);
+    importStage = { code: "IMPORT-NORMALIZE", label: "整理備份資料" };
     const importedVault = readImportVault(payload);
     const importedPeopleCount = importedVault.people.length;
     const importedGroupCount = importedVault.personGroupTags.length;
     const importedTagCount = importedVault.interestTags.length;
+    importStage = { code: "IMPORT-CONFIRM", label: "顯示匯入確認" };
     if (
       !(await confirmDialog(
         `確定要匯入這份資料嗎？\n\n人物：${importedPeopleCount} 位\n人物群組：${importedGroupCount} 個\n興趣喜好：${importedTagCount} 個\n\n匯入會與目前資料合併，不會直接清空現有資料。\n匯入前會先下載一份目前本機資料備份。`,
@@ -1693,9 +1698,13 @@ async function importDataFile(event) {
     ) {
       return;
     }
+    importStage = { code: "IMPORT-PREBACKUP", label: "建立匯入前備份" };
     await exportPreImportBackup();
+    importStage = { code: "IMPORT-SNAPSHOT", label: "建立本機快照" };
     await createLocalSnapshot("匯入前自動快照");
+    importStage = { code: "IMPORT-MERGE", label: "合併匯入資料" };
     const merged = mergeVaults(state.vault, importedVault, state.appState.deviceId);
+    importStage = { code: "IMPORT-PREPARE-SAVE", label: "準備儲存匯入資料" };
     state.vault = merged.vault;
     const importedAt = new Date().toISOString();
     const existingConflicts = state.appState.googleDrive.pendingConflicts ?? [];
@@ -1713,11 +1722,14 @@ async function importDataFile(event) {
         lastSyncError: ""
       }
     };
+    importStage = { code: "IMPORT-SAVE", label: "加密儲存匯入資料" };
     await save();
     alert(merged.conflicts.length ? "已匯入資料，但有資料衝突需要處理" : "資料匯入完成");
-    navigate(merged.conflicts.length ? { name: "syncConflicts" } : { name: "settings" });
-  } catch {
-    alert("匯入失敗，請確認檔案是否為莫忘的資料備份檔。");
+    importStage = { code: "IMPORT-NAVIGATE", label: "完成匯入畫面切換" };
+    await navigate(merged.conflicts.length ? { name: "syncConflicts" } : { name: "settings" });
+  } catch (error) {
+    console.error("[莫忘匯入診斷]", { stage: importStage.code, error });
+    alert(`匯入失敗：${importStage.label}。\n診斷代碼：${importStage.code}\n\n請先不要同步，保留目前檔案與匯入前備份／本機快照後，再將診斷代碼提供給開發人員。`);
   }
 }
 
