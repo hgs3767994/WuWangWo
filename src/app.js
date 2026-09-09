@@ -2941,15 +2941,19 @@ function settingsView() {
       <button class="action-quiet" data-action="choose-import-file">匯入資料</button>
       <button class="action-quiet" data-nav="dataHealth">資料完整性檢查</button>
       <input type="file" accept="application/json,.json" data-import-file hidden />
-      ${dataManagement.lastJsonExportAt ? `<p class="muted">最近 JSON 備份：${formatDateTime(dataManagement.lastJsonExportAt)}</p>` : ""}
-      ${dataManagement.lastExcelExportAt ? `<p class="muted">最近 Excel 匯出：${formatDateTime(dataManagement.lastExcelExportAt)}</p>` : ""}
-      ${dataManagement.lastImportAt ? `<p class="muted">最近匯入：${formatDateTime(dataManagement.lastImportAt)}</p>` : ""}
+      <div class="settings-meta-list">
+        ${dataManagement.lastJsonExportAt ? `<p class="muted">最近 JSON 備份：${formatDateTime(dataManagement.lastJsonExportAt)}</p>` : ""}
+        ${dataManagement.lastExcelExportAt ? `<p class="muted">最近 Excel 匯出：${formatDateTime(dataManagement.lastExcelExportAt)}</p>` : ""}
+        ${dataManagement.lastImportAt ? `<p class="muted">最近匯入：${formatDateTime(dataManagement.lastImportAt)}</p>` : ""}
+      </div>
       <p class="muted">JSON 備份檔可用於匯入復原；Excel 檔適合人工檢視。匯出的資料不包含密碼、資料金鑰或救援碼；請自行妥善保存，避免他人取得。</p>
     </section>
     <section class="panel stack">
       <h2 class="section-title">關於</h2>
-      <p>版本：${escapeHtml(APP_CONFIG.appVersion)}</p>
-      <p class="muted">快取版本：${escapeHtml(APP_CONFIG.cacheName)}</p>
+      <div class="settings-meta-list">
+        <p>版本：${escapeHtml(APP_CONFIG.appVersion)}</p>
+        <p class="muted">快取版本：${escapeHtml(APP_CONFIG.cacheName)}</p>
+      </div>
       <button type="button" class="action-quiet" data-action="check-version-update">檢查版本更新</button>
       <div class="legal-links">
         <a href="./privacy.html">隱私權政策</a>
@@ -3836,23 +3840,28 @@ function hasListValue(rows = []) {
 }
 
 function inputField(label, field, value, type = "text") {
+  const isInlineBasicField = ["nickname", "birthDate", "nationalId"].includes(field);
+  const panelClass = isInlineBasicField ? "panel basic-inline-field" : "panel";
   if (field === "nationalId") {
     return `
-      <section class="panel">
+      <section class="${panelClass}">
         <h2 class="section-title">${label}</h2>
-        <div class="input-status-row">
+        <div class="basic-inline-control">
           <input type="${type}" data-field="${field}" data-validate-national-id="true" value="${escapeAttr(value)}" />
           <span class="field-error" data-national-id-message>${nationalIdErrorText(value)}</span>
         </div>
       </section>
     `;
   }
-  return `<section class="panel"><h2 class="section-title">${label}</h2><input type="${type}" data-field="${field}" value="${escapeAttr(value)}" /></section>`;
+  if (isInlineBasicField) {
+    return `<section class="${panelClass}"><h2 class="section-title">${label}</h2><div class="basic-inline-control"><input type="${type}" data-field="${field}" value="${escapeAttr(value)}" /></div></section>`;
+  }
+  return `<section class="${panelClass}"><h2 class="section-title">${label}</h2><input type="${type}" data-field="${field}" value="${escapeAttr(value)}" /></section>`;
 }
 
 function genderField(value) {
   return `
-    <section class="panel">
+    <section class="panel basic-inline-field basic-inline-gender">
       <h2 class="section-title">性別</h2>
       <div class="chip-list">
         ${GENDER_OPTIONS.map((option) => `

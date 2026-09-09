@@ -1139,6 +1139,41 @@ button:focus-visible,
   gap: 10px;
 }
 
+.settings-meta-list {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-meta-list p {
+  margin: 0;
+}
+
+.basic-inline-field {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: center;
+}
+
+.basic-inline-field .section-title {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.basic-inline-control {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.basic-inline-control input {
+  min-width: 0;
+}
+
+.basic-inline-gender .chip-list {
+  justify-content: flex-start;
+}
+
 .route-settings > .panel {
   margin: 22px 0;
 }
