@@ -4,7 +4,12 @@ const RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const DEFAULT_ITERATIONS = 210000;
 
 function bytesToBase64(bytes) {
-  return btoa(String.fromCharCode(...bytes));
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
 }
 
 function base64ToBytes(value) {

@@ -1,13 +1,14 @@
 import { APP_CONFIG, driveFileName, driveProviderLabel, isGoogleDriveConfigured, isMockDrive } from "../src/config.js";
 import { mergeVaults } from "../src/sync.js";
 import { buildVaultXlsx } from "../src/xlsx.js";
-import { createKeyPackage, createTrustedSessionWithDek, restoreDekFromTrustedSession, verifyRecoveryAuthorizationVerifier } from "../src/crypto.js";
+import { createKeyPackage, createLocalStorageKey, createTrustedSessionWithDek, decryptLocalEnvelope, encryptLocalEnvelope, restoreDekFromTrustedSession, verifyRecoveryAuthorizationVerifier } from "../src/crypto.js";
 
 const tests = [
   ["config defaults stay safe", testConfigDefaults],
   ["sync merge combines duplicate interest names and detects conflicts", testSyncMerge],
   ["sync merge supports legacy customValues object", testLegacyCustomValues],
   ["xlsx export produces an Excel workbook blob", testXlsxExport],
+  ["local snapshot encryption supports large payloads", testLargeLocalSnapshotEnvelope],
   ["Recovery v2 verifier cannot unwrap a DEK", testRecoveryV2Verifier],
   ["native trusted session keeps its DEK out of IndexedDB", testNativeTrustedSessionRecord]
 ];
@@ -110,6 +111,17 @@ async function testXlsxExport() {
 
   assert(blob.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "wrong xlsx mime type");
   assert(blob.size > 1000, "xlsx blob is unexpectedly small");
+}
+
+async function testLargeLocalSnapshotEnvelope() {
+  const key = await createLocalStorageKey();
+  const payload = Array.from({ length: 3 }, (_, index) => ({
+    id: `snapshot-${index}`,
+    vault: { note: "測試資料".repeat(40000) }
+  }));
+  const envelope = await encryptLocalEnvelope(payload, key, "local-snapshots");
+  const restored = await decryptLocalEnvelope(envelope, key);
+  assert(restored.length === 3 && restored[2].vault.note === payload[2].vault.note, "large local snapshot envelope should round-trip");
 }
 
 async function testRecoveryV2Verifier() {
