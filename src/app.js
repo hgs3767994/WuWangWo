@@ -1110,10 +1110,21 @@ async function loadLocalSnapshots() {
 }
 
 async function saveLocalSnapshots(snapshots) {
-  const key = await ensureLocalVaultStorageKey();
-  const envelope = await encryptLocalEnvelope(snapshots ?? [], key, "local-snapshots");
-  await setItem("localSnapshotsEnvelope", envelope);
-  await removeItem("localSnapshots");
+  let stage = "KEY";
+  try {
+    const key = await ensureLocalVaultStorageKey();
+    stage = "ENCRYPT";
+    const envelope = await encryptLocalEnvelope(snapshots ?? [], key, "local-snapshots");
+    stage = "WRITE";
+    await setItem("localSnapshotsEnvelope", envelope);
+    stage = "CLEANUP";
+    await removeItem("localSnapshots");
+  } catch (error) {
+    if (error && typeof error === "object" && !error.localSnapshotStage) {
+      error.localSnapshotStage = stage;
+    }
+    throw error;
+  }
 }
 
 async function commitVault(vault, options = {}) {
@@ -1585,17 +1596,28 @@ async function exportData() {
 
 async function createLocalSnapshot(reason) {
   if (!state.vault) return;
-  const vault = normalizeVault(state.vault);
-  const createdAt = new Date().toISOString();
-  const snapshot = {
-    id: `snapshot-${crypto.randomUUID()}`,
-    reason,
-    createdAt,
-    peopleCount: vault.people.length,
-    vault: structuredClone(vault)
-  };
-  state.localSnapshots = [snapshot, ...asArray(state.localSnapshots)].slice(0, 3);
-  await saveLocalSnapshots(state.localSnapshots);
+  let stage = "NORMALIZE";
+  try {
+    const vault = normalizeVault(state.vault);
+    const createdAt = new Date().toISOString();
+    stage = "CLONE";
+    const snapshot = {
+      id: `snapshot-${crypto.randomUUID()}`,
+      reason,
+      createdAt,
+      peopleCount: vault.people.length,
+      vault: structuredClone(vault)
+    };
+    const nextSnapshots = [snapshot, ...asArray(state.localSnapshots)].slice(0, 3);
+    stage = "SAVE";
+    await saveLocalSnapshots(nextSnapshots);
+    state.localSnapshots = nextSnapshots;
+  } catch (error) {
+    if (error && typeof error === "object" && !error.localSnapshotStage) {
+      error.localSnapshotStage = stage;
+    }
+    throw error;
+  }
 }
 
 async function restoreLocalSnapshot(id) {
@@ -1728,6 +1750,12 @@ async function importDataFile(event) {
     importStage = { code: "IMPORT-NAVIGATE", label: "完成匯入畫面切換" };
     await navigate(merged.conflicts.length ? { name: "syncConflicts" } : { name: "settings" });
   } catch (error) {
+    if (importStage.code === "IMPORT-SNAPSHOT" && error?.localSnapshotStage) {
+      importStage = {
+        code: `IMPORT-SNAPSHOT-${error.localSnapshotStage}`,
+        label: "建立本機快照"
+      };
+    }
     console.error("[莫忘匯入診斷]", { stage: importStage.code, error });
     alert(`匯入失敗：${importStage.label}。\n診斷代碼：${importStage.code}\n\n請先不要同步，保留目前檔案與匯入前備份／本機快照後，再將診斷代碼提供給開發人員。`);
   }
