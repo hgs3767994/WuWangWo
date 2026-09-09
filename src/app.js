@@ -70,7 +70,7 @@ const NATIVE_BACKGROUND_LOCK_MS = 2 * 60 * 1000;
 // A native cold start needs time for both the WebView and Android window to
 // become interactive. Starting the prompt earlier can silently fail on some
 // devices, while returning to this page later happens to work.
-const NATIVE_BIOMETRIC_PROMPT_DELAY_MS = 350;
+const NATIVE_BIOMETRIC_PROMPT_DELAY_MS = 300;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
 const OAUTH_RETURN_ROUTE_STORAGE_KEY = "forget-me-not-oauth-return-route";
@@ -126,6 +126,7 @@ let state = {
 
 const messageDialogQueue = [];
 let activeMessageDialog = null;
+let activePageDialog = null;
 
 // Keep existing alert() call sites, but render a theme-aware Traditional
 // Chinese dialog instead of the browser-controlled native alert.
@@ -173,7 +174,8 @@ function showNextMessageDialog() {
     if (closed) return;
     closed = true;
     overlay.remove();
-    activeMessageDialog = null;
+    if (activeMessageDialog === activeDialog) activeMessageDialog = null;
+    if (activePageDialog === activeDialog) activePageDialog = null;
     dialog.resolve(value);
     showNextMessageDialog();
   };
@@ -182,7 +184,9 @@ function showNextMessageDialog() {
   overlay.addEventListener("click", (event) => {
     if (event.target === overlay) close(false);
   });
-  activeMessageDialog = { overlay, close };
+  const activeDialog = { overlay, close };
+  activeMessageDialog = activeDialog;
+  activePageDialog = activeDialog;
   document.body.append(overlay);
   overlay.querySelector("[data-message-dialog-confirm]").focus();
 }
@@ -190,6 +194,12 @@ function showNextMessageDialog() {
 function closeActiveMessageDialog(value = false) {
   if (!activeMessageDialog) return false;
   activeMessageDialog.close(value);
+  return true;
+}
+
+function closeActivePageDialog(value = false) {
+  if (!activePageDialog) return false;
+  activePageDialog.close(value);
   return true;
 }
 
@@ -436,7 +446,7 @@ function registerNativeBackButton() {
   nativeApp.addListener("backButton", () => {
     // A visible app dialog owns Back first. Treat it exactly like its
     // Cancel action and do not navigate the page underneath it.
-    if (closeActiveMessageDialog(false)) return;
+    if (closeActivePageDialog(false)) return;
     // The native back callback takes precedence over WebView history. This
     // prevents stale OAuth/browser entries from reopening after a completed
     // workflow, while retaining the PWA's existing route-back rules.
@@ -801,20 +811,20 @@ function registerHistoryNavigation() {
       state.ignoreNextPopstate = false;
       return;
     }
-    if (!event.state?.appRoute) return;
     // Browser/PWA Back while an app dialog is visible must close the dialog,
     // not move the page behind it. If the dialog was opened by an earlier
     // popstate, the pending guard restores every intercepted history step.
-    if (activeMessageDialog) {
-      if (state.historyLeaveGuard) {
+    if (activePageDialog) {
+      if (activePageDialog === activeMessageDialog && state.historyLeaveGuard) {
         state.historyLeaveGuard.restoreSteps += 1;
         closeActiveMessageDialog(false);
       } else {
-        closeActiveMessageDialog(false);
+        closeActivePageDialog(false);
         restoreHistorySteps(1);
       }
       return;
     }
+    if (!event.state?.appRoute) return;
     const fromRoute = state.route;
     const nextRoute = restoreHistoryRoute(event.state.route);
     // Home is the root route. If stale in-app history exists behind it, skip it
@@ -1270,8 +1280,12 @@ function passwordConfirmDialog(actionLabel) {
         </div>
       </form>
     `;
+    let closed = false;
     const cleanup = (value) => {
+      if (closed) return;
+      closed = true;
       overlay.remove();
+      if (activePageDialog === activeDialog) activePageDialog = null;
       resolve(value);
     };
     overlay.addEventListener("click", (event) => {
@@ -1282,6 +1296,8 @@ function passwordConfirmDialog(actionLabel) {
       event.preventDefault();
       cleanup(overlay.querySelector("[data-sensitive-password]").value);
     });
+    const activeDialog = { overlay, close: cleanup };
+    activePageDialog = activeDialog;
     document.body.append(overlay);
     overlay.querySelector("[data-sensitive-password]").focus();
   });

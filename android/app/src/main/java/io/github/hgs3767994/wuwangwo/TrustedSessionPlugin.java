@@ -43,7 +43,7 @@ public class TrustedSessionPlugin extends Plugin {
     private static final String VAULT_ID = "vaultId";
     private static final String DEVICE_ID = "deviceId";
     private static final String SESSION_EPOCH = "sessionEpoch";
-    private static final long PROMPT_WINDOW_READY_DELAY_MS = 300L;
+    private static final long PROMPT_WINDOW_READY_DELAY_MS = 200L;
 
     @PluginMethod
     public void store(PluginCall call) {
