@@ -277,7 +277,7 @@ async function boot() {
         return;
       }
       bootStage = { code: "BOOT-SESSION-CHECK", label: "確認登入狀態" };
-      const sessionCheck = await checkTrustedSessionStillValid(appState, trustedSession);
+      const sessionCheck = await checkTrustedSessionStillValid(appState, trustedSession, storedKeyPackage);
       if (!sessionCheck.valid) {
         if (!sessionCheck.keepTrustedSession) await clearTrustedSession();
         state = {
@@ -556,12 +556,12 @@ async function lockApp(message = "請重新輸入密碼以繼續使用", options
   render();
 }
 
-async function checkTrustedSessionStillValid(appState, trustedSession) {
+async function checkTrustedSessionStillValid(appState, trustedSession, alreadyLoadedKeyPackage = null) {
   if (!trustedSession) return { valid: false, message: "請輸入密碼以繼續使用" };
   if (shouldLockForAwayTimeout(trustedSession)) {
     return { valid: false, keepTrustedSession: true, message: "離開 App 時間較久，請重新輸入密碼" };
   }
-  const localKeyPackage = await getKeyPackage();
+  const localKeyPackage = alreadyLoadedKeyPackage ?? await getKeyPackage();
   let remoteKeyPackage = null;
   if (appState.googleDrive?.connected && driveAuthStatus().hasAccessToken) {
     try {
@@ -571,7 +571,11 @@ async function checkTrustedSessionStillValid(appState, trustedSession) {
   const keyPackage = remoteKeyPackage ?? localKeyPackage;
   if (!keyPackage?.securityMeta) return { valid: true };
   if ((keyPackage.securityMeta.sessionEpoch ?? 0) <= (trustedSession.sessionEpoch ?? 0)) return { valid: true };
-  await setItem("keyPackage", keyPackage);
+  try {
+    await setItem("keyPackage", keyPackage);
+  } catch (error) {
+    console.warn("無法更新較新的本機加密設定，將在解鎖時重新確認。", error);
+  }
   return { valid: false, message: securityEventMessage(keyPackage.securityMeta) };
 }
 
