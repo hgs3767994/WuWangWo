@@ -104,6 +104,7 @@ let state = {
   dekBytes: null,
   vault: null,
   localSnapshots: [],
+  bootFailure: null,
   route: { name: "loading" },
   updateAvailable: false,
   waitingServiceWorker: null,
@@ -204,13 +205,17 @@ function closeActivePageDialog(value = false) {
 }
 
 async function boot() {
+  let bootStage = { code: "BOOT-STARTUP", label: "啟動 App" };
+  try {
   registerDeveloperAccessGuard();
   registerAutoLock();
   registerNativeBackButton();
   let oauthHandoffCompleted = false;
   let oauthHandoffError = null;
+  bootStage = { code: "BOOT-OAUTH-HANDOFF", label: "處理 Google Drive 授權回跳" };
   try { oauthHandoffCompleted = Boolean(await completeGoogleOAuthHandoff()); } catch (error) { oauthHandoffError = error; }
   const oauthReturnRoute = oauthHandoffCompleted ? consumeOAuthReturnRoute() : null;
+  bootStage = { code: "BOOT-APP-STATE", label: "讀取本機設定" };
   const storedAppState = await getItem("appState");
   let appState = normalizeLoadedAppState(storedAppState);
   if (oauthHandoffCompleted && appState?.googleDrive?.syncStatus === "syncing") {
@@ -235,10 +240,17 @@ async function boot() {
       }
     };
   }
-  if (storedAppState && appState !== storedAppState) await setItem("appState", appState);
+  if (storedAppState && appState !== storedAppState) {
+    bootStage = { code: "BOOT-APP-STATE-WRITE", label: "更新本機設定" };
+    await setItem("appState", appState);
+  }
+  bootStage = { code: "BOOT-KEY-PACKAGE", label: "讀取加密設定" };
   const storedKeyPackage = await getItem("keyPackage");
+  bootStage = { code: "BOOT-LOCAL-VAULT", label: "讀取本機加密資料" };
   const vault = appState?.mode === "localOnly" && storedKeyPackage ? null : await loadLocalVault();
+  bootStage = { code: "BOOT-TRUSTED-SESSION", label: "讀取裝置信任狀態" };
   let trustedSession = await getItem("trustedSession");
+  bootStage = { code: "BOOT-LOCAL-SNAPSHOTS", label: "讀取本機資料快照" };
   const localSnapshots = await loadLocalSnapshots();
   state = { ...state, localSnapshots };
   if (!appState || (appState.mode === "localOnly" && !storedKeyPackage) || (!vault && !(appState.mode === "localOnly" && storedKeyPackage))) {
@@ -264,6 +276,7 @@ async function boot() {
         registerInstallExperience();
         return;
       }
+      bootStage = { code: "BOOT-SESSION-CHECK", label: "確認登入狀態" };
       const sessionCheck = await checkTrustedSessionStillValid(appState, trustedSession);
       if (!sessionCheck.valid) {
         if (!sessionCheck.keepTrustedSession) await clearTrustedSession();
@@ -280,6 +293,7 @@ async function boot() {
         return;
       }
       try {
+        bootStage = { code: "BOOT-SESSION-RESTORE", label: "還原本機登入狀態" };
         dekBytes = await restoreDekFromTrustedSession(trustedSession);
         if (nativeTrustedSessionAvailable() && !isNativeTrustedSession(trustedSession)) {
           trustedSession = await createTrustedSessionWithDek({ vaultId: trustedSession.vaultId, deviceId: trustedSession.deviceId, sessionEpoch: trustedSession.sessionEpoch, dekBytes });
@@ -305,6 +319,7 @@ async function boot() {
       return;
     }
     state = { ...state, appState, dekBytes, vault: normalizeVault(pruneDeleted(vault)), route: oauthReturnRoute ?? { name: "home" } };
+    bootStage = { code: "BOOT-INITIAL-SAVE", label: "儲存啟動狀態" };
     await save();
     void resumeDriveSyncInBackground({ allowOutsideHome: oauthHandoffCompleted });
   }
@@ -314,6 +329,27 @@ async function boot() {
   registerServiceWorker();
   registerInstallExperience();
   if (oauthHandoffError) alert(driveErrorMessage(oauthHandoffError, "Google Drive OAuth 回跳失敗，請再試一次。"));
+  } catch (error) {
+    showBootFailure(bootStage, error);
+  }
+}
+
+function showBootFailure(stage, error) {
+  console.error("[莫忘啟動診斷]", { stage: stage.code, error });
+  state = {
+    ...state,
+    dekBytes: null,
+    vault: null,
+    bootFailure: { code: stage.code, label: stage.label },
+    route: { name: "startupRecovery" }
+  };
+  try {
+    render();
+  } catch (renderError) {
+    console.error("[莫忘啟動診斷] 無法顯示安全復原畫面", renderError);
+    app.innerHTML = `<main class="app"><section class="panel stack"><h1>暫時無法啟動莫忘</h1><p>為保護資料，系統沒有清除任何本機內容。</p><p>診斷代碼：${escapeHtml(stage.code)}</p><button type="button" data-retry-boot>重新嘗試</button></section></main>`;
+    app.querySelector("[data-retry-boot]")?.addEventListener("click", () => window.location.reload());
+  }
 }
 
 function rememberOAuthReturnRoute(route) {
@@ -2695,6 +2731,7 @@ function waitForServiceWorkerUpdate(registration) {
 
 function view() {
   if (state.route.name === "welcome") return welcomeView();
+  if (state.route.name === "startupRecovery") return startupRecoveryView();
   // A local vault stays encrypted until the password or device credential has
   // restored its DEK. The unlock screen must therefore be renderable before
   // a vault exists, otherwise a cold native launch is stuck on "載入中…".
@@ -2734,6 +2771,21 @@ function view() {
   if (state.route.name === "regenerateRecovery") return regenerateRecoveryView();
   if (state.route.name === "logoutAllDevices") return logoutAllDevicesView();
   return homeView();
+}
+
+function startupRecoveryView() {
+  const failure = state.bootFailure ?? { code: "BOOT-UNKNOWN", label: "讀取本機資料" };
+  return `
+    <section class="welcome startup-recovery">
+      <div class="panel stack">
+        <h1>暫時無法讀取本機資料</h1>
+        <p>為保護你的資料，莫忘沒有清除或覆寫任何本機內容。</p>
+        <div class="status-message error-message">診斷代碼：${escapeHtml(failure.code)}</div>
+        <p class="hint">失敗位置：${escapeHtml(failure.label)}。請先保留目前瀏覽器資料；若已連結 Google Drive，請暫時不要同步。將此診斷代碼提供給開發人員即可進一步處理。</p>
+        <div class="actions centered-actions"><button type="button" data-action="retry-boot">重新嘗試</button></div>
+      </div>
+    </section>
+  `;
 }
 
 function welcomeView() {
@@ -4683,6 +4735,7 @@ function bindSecurityForms() {
 
 async function handleAction(event, el) {
   const action = el.dataset.action;
+  if (action === "retry-boot") return window.location.reload();
   if (action === "start-local") return initializeLocalMode();
   if (action === "apply-update") return applyUpdate();
   if (action === "check-version-update") return checkVersionUpdate();
