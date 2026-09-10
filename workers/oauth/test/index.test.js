@@ -11,7 +11,7 @@ test("health endpoint is available without OAuth configuration", async () => {
     oauthReady: false,
     storageReady: false,
     schemaReady: false,
-    recoveryPolicy: "recovery-code-authorizes-reset-only"
+    recoveryPolicy: "recovery-v3-code-or-sealed-device-transfer"
   });
 });
 

@@ -88,6 +88,54 @@ export async function wrapDekForSecret(dekBytes, secret, iterations = DEFAULT_IT
   return wrapDek(dekBytes, secret, iterations);
 }
 
+export async function createRecoveryTransferKeyPair() {
+  const generated = await crypto.subtle.generateKey(
+    { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true,
+    ["encrypt", "decrypt"]
+  );
+  const publicKey = await crypto.subtle.exportKey("jwk", generated.publicKey);
+  const privateJwk = await crypto.subtle.exportKey("jwk", generated.privateKey);
+  const privateKey = await crypto.subtle.importKey(
+    "jwk",
+    privateJwk,
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    false,
+    ["decrypt"]
+  );
+  return { publicKey, privateKey };
+}
+
+export async function encryptDekForRecoveryTransfer(dekBytes, requesterPublicKey) {
+  const publicKey = await crypto.subtle.importKey(
+    "jwk",
+    requesterPublicKey,
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    false,
+    ["encrypt"]
+  );
+  const ciphertext = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, publicKey, dekBytes);
+  return {
+    version: 1,
+    algorithm: "RSA-OAEP-256",
+    ciphertext: bytesToBase64(new Uint8Array(ciphertext))
+  };
+}
+
+export async function decryptDekFromRecoveryTransfer(transferEnvelope, privateKey) {
+  if (transferEnvelope?.version !== 1 || transferEnvelope?.algorithm !== "RSA-OAEP-256" || !privateKey) {
+    throw new Error("recovery-transfer-invalid");
+  }
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "RSA-OAEP" },
+    privateKey,
+    base64ToBytes(transferEnvelope.ciphertext)
+  );
+  const dekBytes = new Uint8Array(plaintext);
+  if (dekBytes.length !== 32) throw new Error("recovery-transfer-invalid-dek");
+  return dekBytes;
+}
+
 export async function unwrapDek(wrapper, secret, iterations = DEFAULT_ITERATIONS) {
   const salt = base64ToBytes(wrapper.salt);
   const nonce = base64ToBytes(wrapper.nonce);
@@ -216,6 +264,7 @@ export async function createKeyPackage({ vaultId, deviceId, masterPassword, incl
       },
       securityMeta: {
         sessionEpoch: 1,
+        recoveryVersion: recoveryCodeWrapper ? 3 : 2,
         createdAt: now,
         updatedAt: now
       }

@@ -1,7 +1,7 @@
 import { APP_CONFIG, driveFileName, driveProviderLabel, isGoogleDriveConfigured, isMockDrive } from "../src/config.js";
 import { mergeVaults } from "../src/sync.js";
 import { buildVaultXlsx } from "../src/xlsx.js";
-import { createKeyPackage, createLocalStorageKey, createTrustedSessionWithDek, decryptLocalEnvelope, encryptLocalEnvelope, restoreDekFromTrustedSession, verifyRecoveryAuthorizationVerifier } from "../src/crypto.js";
+import { createKeyPackage, createLocalStorageKey, createRecoveryTransferKeyPair, createTrustedSessionWithDek, decryptDekFromRecoveryTransfer, decryptLocalEnvelope, encryptDekForRecoveryTransfer, encryptLocalEnvelope, restoreDekFromTrustedSession, unwrapDek, verifyRecoveryAuthorizationVerifier } from "../src/crypto.js";
 
 const tests = [
   ["config defaults stay safe", testConfigDefaults],
@@ -9,7 +9,7 @@ const tests = [
   ["sync merge supports legacy customValues object", testLegacyCustomValues],
   ["xlsx export produces an Excel workbook blob", testXlsxExport],
   ["local snapshot encryption supports large payloads", testLargeLocalSnapshotEnvelope],
-  ["Recovery v2 verifier cannot unwrap a DEK", testRecoveryV2Verifier],
+  ["Recovery v3 code wrapper and sealed device transfer restore the same DEK", testRecoveryV3],
   ["native trusted session keeps its DEK out of IndexedDB", testNativeTrustedSessionRecord]
 ];
 
@@ -124,11 +124,17 @@ async function testLargeLocalSnapshotEnvelope() {
   assert(restored.length === 3 && restored[2].vault.note === payload[2].vault.note, "large local snapshot envelope should round-trip");
 }
 
-async function testRecoveryV2Verifier() {
-  const result = await createKeyPackage({ vaultId: "vault-test", deviceId: "device-test", masterPassword: "password-test" });
-  assert(!result.keyPackage.recoveryCodeWrapper, "new key package must not include a recovery DEK wrapper");
+async function testRecoveryV3() {
+  const result = await createKeyPackage({ vaultId: "vault-test", deviceId: "device-test", masterPassword: "password-test", includeRecoveryWrapper: true });
+  assert(result.keyPackage.recoveryCodeWrapper, "Recovery v3 key package must include a recovery DEK wrapper");
   assert(await verifyRecoveryAuthorizationVerifier(result.keyPackage.recoveryAuthorizationVerifier, result.recoveryCode), "recovery verifier should accept its code");
   assert(!(await verifyRecoveryAuthorizationVerifier(result.keyPackage.recoveryAuthorizationVerifier, "WRONG-CODE")), "recovery verifier should reject a wrong code");
+  const recoveredByCode = await unwrapDek(result.keyPackage.recoveryCodeWrapper, result.recoveryCode, result.keyPackage.crypto.iterations);
+  assert(Buffer.from(recoveredByCode).equals(Buffer.from(result.dekBytes)), "recovery code wrapper should restore the original DEK");
+  const transferKeys = await createRecoveryTransferKeyPair();
+  const envelope = await encryptDekForRecoveryTransfer(result.dekBytes, transferKeys.publicKey);
+  const recoveredByDevice = await decryptDekFromRecoveryTransfer(envelope, transferKeys.privateKey);
+  assert(Buffer.from(recoveredByDevice).equals(Buffer.from(result.dekBytes)), "sealed device transfer should restore the original DEK");
 }
 
 async function testNativeTrustedSessionRecord() {

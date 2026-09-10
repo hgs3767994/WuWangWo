@@ -10,7 +10,7 @@
 | 本機資料檢視與編輯 | 可測試 | 建立或編輯人物，離開再開啟確認仍存在 | 不使用 Google Drive。 |
 | JSON 匯出／匯入 | 可測試 | 匯出、確認檔案存在，再匯入測試資料 | 匯入前先保留自己的備份。 |
 | Excel 匯出 | 可測試 | 匯出後以 Android 檔案管理員或 Excel 開啟 | 不修改本機資料。 |
-| 忘記密碼／Recovery v2 | 程式可用，完整 Drive 情境待測 | 僅用測試 vault 驗證 | 不要對唯一正式資料做測試。 |
+| 忘記密碼／Recovery v3 | 程式可用，完整 Drive 情境待測 | 分別測試救援碼直接重設與舊裝置加密核准 | 不要對唯一正式資料做測試。 |
 | Android 返回鍵 | 可測試 | 子頁返回上一層；首頁按返回鍵結束 App | 原生 handler 已接管，不應回到舊 OAuth 頁。 |
 | 背景鎖定 | 程式已完成，待真實 Drive session | 有 trusted session 後，切到背景再回來 | 回到前景應要求裝置驗證。 |
 | 重開／生物辨識或螢幕鎖解鎖 | 程式已完成，待真實 Drive session | 強制關閉後重新開啟 | Android Keystore session 不會把 DEK 放到 IndexedDB。 |

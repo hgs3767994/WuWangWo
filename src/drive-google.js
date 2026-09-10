@@ -23,6 +23,8 @@ export async function createGoogleRecoveryRequest(values) { return workerApiFetc
 export async function listGoogleRecoveryRequests() { return workerApiFetch("/v1/recovery/requests", undefined, "GET"); }
 export async function getGoogleRecoveryRequest(requestId) { return workerApiFetch(`/v1/recovery/requests/${encodeURIComponent(requestId)}`, undefined, "GET"); }
 export async function approveGoogleRecoveryRequest(requestId, values) { return workerApiFetch(`/v1/recovery/requests/${encodeURIComponent(requestId)}/approve`, values); }
+export async function verifyGoogleRecoveryRequest(requestId, values) { return workerApiFetch(`/v1/recovery/requests/${encodeURIComponent(requestId)}/verify`, values); }
+export async function completeGoogleRecoveryRequest(requestId, values) { return workerApiFetch(`/v1/recovery/requests/${encodeURIComponent(requestId)}/complete`, values); }
 
 export async function connectGoogleDrive({ interactive = true, popupWindow = null, requirePopup = false } = {}) {
   if (isNativeOAuthRuntime()) return connectNativeGoogleDrive({ interactive });

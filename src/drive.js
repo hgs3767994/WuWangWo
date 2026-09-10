@@ -1,5 +1,5 @@
 import { isMockDrive } from "./config.js";
-import { approveGoogleRecoveryRequest, connectGoogleDrive, createGoogleRecoveryRequest, disconnectGoogleDrive, getGoogleRecoveryRequest, googleDriveAuthStatus, googleDriveReadiness, listGoogleDriveFileRevisions, listGoogleDriveFiles, listGoogleRecoveryRequests, readGoogleDriveFile, readGoogleDriveFileRevision, removeGoogleDriveFile, testGoogleDriveConnection, writeGoogleDriveFile } from "./drive-google.js";
+import { approveGoogleRecoveryRequest, completeGoogleRecoveryRequest, connectGoogleDrive, createGoogleRecoveryRequest, disconnectGoogleDrive, getGoogleRecoveryRequest, googleDriveAuthStatus, googleDriveReadiness, listGoogleDriveFileRevisions, listGoogleDriveFiles, listGoogleRecoveryRequests, readGoogleDriveFile, readGoogleDriveFileRevision, removeGoogleDriveFile, testGoogleDriveConnection, verifyGoogleRecoveryRequest, writeGoogleDriveFile } from "./drive-google.js";
 import { listMockDriveFileRevisions, listMockDriveFiles, readMockDriveFile, readMockDriveFileRevision, removeMockDriveFile, writeMockDriveFile } from "./drive-mock.js";
 
 export async function writeDriveFile(name, content) {
@@ -76,6 +76,8 @@ export async function createDriveRecoveryRequest(values) { assertGoogleDriveRead
 export async function listDriveRecoveryRequests() { assertGoogleDriveReady(); return listGoogleRecoveryRequests(); }
 export async function getDriveRecoveryRequest(requestId) { assertGoogleDriveReady(); return getGoogleRecoveryRequest(requestId); }
 export async function approveDriveRecoveryRequest(requestId, values) { assertGoogleDriveReady(); return approveGoogleRecoveryRequest(requestId, values); }
+export async function verifyDriveRecoveryRequest(requestId, values) { assertGoogleDriveReady(); return verifyGoogleRecoveryRequest(requestId, values); }
+export async function completeDriveRecoveryRequest(requestId, values) { assertGoogleDriveReady(); return completeGoogleRecoveryRequest(requestId, values); }
 
 function assertGoogleDriveReady() {
   const readiness = googleDriveReadiness();

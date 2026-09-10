@@ -4,7 +4,7 @@ import { verifyOAuthState } from "./oauth-state.js";
 import { decryptTokenEnvelope, encryptTokenEnvelope } from "./token-envelope.js";
 import { consumeHandoff, createHandoff, createSession, revokeSession, saveAccount, sessionAccount } from "./oauth-store.js";
 import { executeDriveOperation } from "./drive-proxy.js";
-import { approveRecoveryRequest, createRecoveryRequest, listRecoveryRequests, recoveryRequest } from "./recovery-store.js";
+import { approveRecoveryRequest, completeRecoveryRequest, createRecoveryRequest, listRecoveryRequests, recordFailedVerification, recoveryRequest, recoveryVerificationRecord } from "./recovery-store.js";
 
 const SERVICE_NAME = "forget-me-not-oauth";
 const REQUIRED_SECRETS = ["GOOGLE_WEB_CLIENT_SECRET", "OAUTH_STATE_SIGNING_KEY", "TOKEN_ENCRYPTION_KEY"];
@@ -163,8 +163,10 @@ export default {
           const vaultId = bounded(body?.vaultId, 200);
           const requesterDeviceId = bounded(body?.requesterDeviceId, 200);
           const pairingCode = bounded(body?.pairingCode, 80);
-          if (!vaultId || !requesterDeviceId || !pairingCode) return json({ error: "recovery-request-invalid" }, 400, corsHeaders(origin));
-          return json(await createRecoveryRequest(env.OAUTH_DB, { requestId: crypto.randomUUID(), subject: account.google_subject, vaultId, requesterDeviceId, pairingCode, now }), 201, corsHeaders(origin));
+          const requesterPublicKey = validRecoveryPublicKey(body?.requesterPublicKey) ? body.requesterPublicKey : null;
+          const baseSessionEpoch = Number(body?.baseSessionEpoch);
+          if (!vaultId || !requesterDeviceId || !pairingCode || !requesterPublicKey || !Number.isSafeInteger(baseSessionEpoch) || baseSessionEpoch < 1) return json({ error: "recovery-request-invalid" }, 400, corsHeaders(origin));
+          return json(await createRecoveryRequest(env.OAUTH_DB, { requestId: crypto.randomUUID(), subject: account.google_subject, vaultId, requesterDeviceId, pairingCode, requesterPublicKey, baseSessionEpoch, now }), 201, corsHeaders(origin));
         }
         if (request.method === "GET" && url.pathname === "/v1/recovery/requests") return json({ requests: await listRecoveryRequests(env.OAUTH_DB, { subject: account.google_subject, now }) }, 200, corsHeaders(origin));
         if (request.method === "GET" && suffix && !suffix.includes("/")) {
@@ -176,9 +178,35 @@ export default {
           const body = await request.json();
           const approverDeviceId = bounded(body?.approverDeviceId, 200);
           const sessionEpoch = Number(body?.sessionEpoch);
-          if (!approverDeviceId || !Number.isSafeInteger(sessionEpoch) || sessionEpoch < 1) return json({ error: "recovery-approval-invalid" }, 400, corsHeaders(origin));
-          const item = await approveRecoveryRequest(env.OAUTH_DB, { requestId: approveId, subject: account.google_subject, approverDeviceId, sessionEpoch, now });
-          return item ? json({ request: item }, 200, corsHeaders(origin)) : json({ error: "recovery-request-not-pending" }, 409, corsHeaders(origin));
+          const transferEnvelope = validTransferEnvelope(body?.transferEnvelope) ? body.transferEnvelope : null;
+          if (!approverDeviceId || !Number.isSafeInteger(sessionEpoch) || sessionEpoch < 1 || !transferEnvelope) return json({ error: "recovery-approval-invalid" }, 400, corsHeaders(origin));
+          const verificationCode = recoveryVerificationCode();
+          const verificationCodeSalt = base64Url(crypto.getRandomValues(new Uint8Array(16)));
+          const verificationCodeHash = await recoveryVerificationHash(env.OAUTH_STATE_SIGNING_KEY, verificationCodeSalt, verificationCode);
+          const item = await approveRecoveryRequest(env.OAUTH_DB, { requestId: approveId, subject: account.google_subject, approverDeviceId, sessionEpoch, transferEnvelope, verificationCodeHash, verificationCodeSalt, now });
+          return item ? json({ request: item, verificationCode }, 200, corsHeaders(origin)) : json({ error: "recovery-request-not-pending-or-stale" }, 409, corsHeaders(origin));
+        }
+        const verifyId = suffix.endsWith("/verify") ? suffix.slice(0, -"/verify".length) : "";
+        if (request.method === "POST" && verifyId) {
+          const body = await request.json();
+          const verificationCode = bounded(body?.verificationCode, 32).replace(/\s/g, "");
+          const record = await recoveryVerificationRecord(env.OAUTH_DB, { requestId: verifyId, subject: account.google_subject, now });
+          if (!record || record.status !== "transfer_ready" || !verificationCode) return json({ error: record?.status === "expired" ? "recovery-request-expired" : "recovery-request-not-ready" }, 409, corsHeaders(origin));
+          const actualHash = await recoveryVerificationHash(env.OAUTH_STATE_SIGNING_KEY, record.verification_code_salt, verificationCode);
+          if (!sameText(actualHash, record.verification_code_hash)) {
+            const failed = await recordFailedVerification(env.OAUTH_DB, { requestId: verifyId, subject: account.google_subject });
+            return json({ error: failed?.status === "expired" ? "recovery-verification-locked" : "recovery-verification-invalid", attemptsRemaining: Math.max(0, 5 - Number(failed?.verification_attempts ?? 5)) }, 401, corsHeaders(origin));
+          }
+          return json({ transferEnvelope: JSON.parse(record.transfer_envelope), baseSessionEpoch: record.base_session_epoch }, 200, corsHeaders(origin));
+        }
+        const completeId = suffix.endsWith("/complete") ? suffix.slice(0, -"/complete".length) : "";
+        if (request.method === "POST" && completeId) {
+          const body = await request.json();
+          const baseSessionEpoch = Number(body?.baseSessionEpoch);
+          const completedSessionEpoch = Number(body?.completedSessionEpoch);
+          if (!Number.isSafeInteger(baseSessionEpoch) || !Number.isSafeInteger(completedSessionEpoch) || completedSessionEpoch <= baseSessionEpoch) return json({ error: "recovery-completion-invalid" }, 400, corsHeaders(origin));
+          const item = await completeRecoveryRequest(env.OAUTH_DB, { requestId: completeId, subject: account.google_subject, baseSessionEpoch, completedSessionEpoch, now });
+          return item ? json({ request: item }, 200, corsHeaders(origin)) : json({ error: "recovery-request-not-completable" }, 409, corsHeaders(origin));
         }
       } catch {
         return json({ error: "recovery-request-failed" }, 500, corsHeaders(origin));
@@ -194,7 +222,7 @@ export default {
         oauthReady: hasRequiredConfiguration(env),
         storageReady: storage.ready,
         schemaReady: storage.schemaReady,
-        recoveryPolicy: "recovery-code-authorizes-reset-only"
+        recoveryPolicy: "recovery-v3-code-or-sealed-device-transfer"
       });
     }
 
@@ -235,6 +263,15 @@ function missingNativeConfiguration(env) { return REQUIRED_NATIVE_VALUES.filter(
 function hasNativeConfiguration(env) { return missingNativeConfiguration(env).length === 0; }
 function validCodeChallenge(value) { return /^[A-Za-z0-9_-]{43,128}$/.test(value); }
 function validCodeVerifier(value) { return /^[A-Za-z0-9._~-]{43,128}$/.test(value); }
+function validRecoveryPublicKey(value) { return value?.kty === "RSA" && value?.alg === "RSA-OAEP-256" && typeof value?.n === "string" && value.n.length > 300 && typeof value?.e === "string"; }
+function validTransferEnvelope(value) { return value?.version === 1 && value?.algorithm === "RSA-OAEP-256" && typeof value?.ciphertext === "string" && value.ciphertext.length > 100 && value.ciphertext.length < 4096; }
+function recoveryVerificationCode() { return String(crypto.getRandomValues(new Uint32Array(1))[0] % 100000000).padStart(8, "0"); }
+async function recoveryVerificationHash(secret, salt, code) {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(`${salt}:${code}`));
+  return base64Url(new Uint8Array(signature));
+}
 async function pkceChallenge(verifier) { return base64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)))); }
 function sameText(left, right) { const a = new TextEncoder().encode(String(left)); const b = new TextEncoder().encode(String(right)); if (a.length !== b.length) return false; let result = 0; for (let index = 0; index < a.length; index += 1) result |= a[index] ^ b[index]; return result === 0; }
 function base64Url(bytes) { return btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", ""); }
@@ -257,7 +294,10 @@ async function recoveryDatabaseStatus(database) {
   if (!database?.prepare) return { ready: false };
   try {
     const result = await database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'recovery_requests'").all();
-    return { ready: (result.results ?? []).some((row) => row.name === "recovery_requests") };
+    if (!(result.results ?? []).some((row) => row.name === "recovery_requests")) return { ready: false };
+    const columns = await database.prepare("PRAGMA table_info(recovery_requests)").all();
+    const names = new Set((columns.results ?? []).map((row) => row.name));
+    return { ready: ["requester_public_key", "base_session_epoch", "verification_code_hash", "transfer_envelope", "completed_at"].every((name) => names.has(name)) };
   } catch { return { ready: false }; }
 }
 
