@@ -146,6 +146,35 @@ await check("password changes force one password-only unlock across devices", as
   });
 });
 
+await check("PWA locks after background timeout and on a fresh launch", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  [
+    "PWA_RUNTIME_SESSION_KEY",
+    "PWA_BACKGROUND_AT_KEY",
+    "registerPwaRuntimeSession",
+    "rememberPwaBackgroundStart",
+    "handlePwaReturnFromBackground",
+    "freshPwaLaunch",
+    "App 已重新開啟，請驗證身分以繼續使用"
+  ].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing PWA lock support: ${text}`);
+  });
+});
+
+await check("Drive security writes require a current remote key package", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  [
+    "openSecurityWriteOAuthPopup",
+    "prepareSecurityWrite",
+    "securityWriteFailureMessage",
+    "recoveryChangeId",
+    "globalLogoutId",
+    "password-reset-cloud-verification-failed"
+  ].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing Drive security preflight support: ${text}`);
+  });
+});
+
 await check("native Android back button exits only from root routes", async () => {
   const appSource = await readFile("src/app.js", "utf8");
   ["registerNativeBackButton", "addListener(\"backButton\"", "nativeApp.exitApp()", "navigateBack({ name: \"home\" })"].forEach((text) => {
