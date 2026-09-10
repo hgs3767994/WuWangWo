@@ -11,6 +11,10 @@
 
 ## Recovery v3 流程
 
+### 更改主密碼
+
+更改主密碼時，App 會先確認現有密碼與遠端 vault，再寫入帶有唯一 `passwordChangeId` 且提高 `sessionEpoch` 的 key package。只有從 Google Drive 讀回相同版本、並以新密碼確認仍可取得同一把 DEK 後，才清除本機可信工作階段並鎖定。裝置 A 與其他偵測到新版 epoch 的裝置都必須先使用新密碼登入一次；Google Drive OAuth 保持連線。離線裝置則於下次連線檢查時套用鎖定。
+
 ### 使用救援碼
 
 1. 使用者輸入救援碼、新密碼及再次輸入新密碼。

@@ -75,6 +75,7 @@ const NATIVE_BACKGROUND_LOCK_MS = 2 * 60 * 1000;
 // devices, while returning to this page later happens to work.
 const NATIVE_BIOMETRIC_PROMPT_DELAY_MS = 300;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
+const REMOTE_SECURITY_CHECK_INTERVAL_MS = 30 * 1000;
 const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
 const OAUTH_RETURN_ROUTE_STORAGE_KEY = "forget-me-not-oauth-return-route";
 const NO_SLIDE_ROUTE_NAMES = new Set([
@@ -127,6 +128,8 @@ let state = {
   nativeBackgroundLockTimer: null,
   nativeBackgroundAt: 0,
   lastSessionTouchAt: 0,
+  lastRemoteSecurityCheckAt: 0,
+  remoteSecurityCheckRunning: false,
   installPromptEvent: null,
   installDismissed: localStorage.getItem("forget-me-not-install-dismissed") === "true",
   isInstalled: isPwaInstalled()
@@ -264,7 +267,7 @@ async function boot() {
   if (!appState || (appState.mode === "localOnly" && !storedKeyPackage) || (!vault && !(appState.mode === "localOnly" && storedKeyPackage))) {
     state = { ...state, route: { name: "welcome" } };
   } else if ((appState.mode === "driveSync" || appState.mode === "localOnly") && storedKeyPackage && !trustedSession) {
-    state = { ...state, appState, vault: appState.mode === "localOnly" ? null : normalizeVault(pruneDeleted(vault)), route: { name: "unlock", showForgotPassword: true, allowBiometric: appState.mode === "localOnly" } };
+    state = { ...state, appState, vault: appState.mode === "localOnly" ? null : normalizeVault(pruneDeleted(vault)), route: { name: "unlock", showForgotPassword: true, allowBiometric: !passwordOnlyUnlockRequired(appState) && appState.mode === "localOnly" } };
     render();
     registerHistoryNavigation();
     registerServiceWorker();
@@ -277,7 +280,22 @@ async function boot() {
       // unlock screen first so Android can attach that prompt to a resumed
       // Activity instead of leaving the WebView on the loading screen.
       if (isNativeTrustedSession(trustedSession)) {
-        state = { ...state, appState, vault: appState.mode === "localOnly" ? null : normalizeVault(pruneDeleted(vault)), route: { name: "unlock", showForgotPassword: true, allowBiometric: true } };
+        const sessionCheck = await checkTrustedSessionStillValid(appState, trustedSession, storedKeyPackage);
+        if (!sessionCheck.valid) {
+          if (!sessionCheck.keepTrustedSession) await clearTrustedSession();
+          appState = await persistPasswordOnlyRequirement(appState, sessionCheck.passwordRequiredEpoch);
+        }
+        state = {
+          ...state,
+          appState,
+          vault: appState.mode === "localOnly" ? null : normalizeVault(pruneDeleted(vault)),
+          route: {
+            name: "unlock",
+            message: sessionCheck.valid ? undefined : sessionCheck.message,
+            showForgotPassword: true,
+            allowBiometric: !passwordOnlyUnlockRequired(appState) && (sessionCheck.valid || Boolean(sessionCheck.keepTrustedSession))
+          }
+        };
         render();
         registerHistoryNavigation();
         registerServiceWorker();
@@ -288,11 +306,12 @@ async function boot() {
       const sessionCheck = await checkTrustedSessionStillValid(appState, trustedSession, storedKeyPackage);
       if (!sessionCheck.valid) {
         if (!sessionCheck.keepTrustedSession) await clearTrustedSession();
+        appState = await persistPasswordOnlyRequirement(appState, sessionCheck.passwordRequiredEpoch);
         state = {
           ...state,
           appState,
           vault: normalizeVault(pruneDeleted(vault)),
-          route: { name: "unlock", message: sessionCheck.message, showForgotPassword: true, allowBiometric: Boolean(sessionCheck.keepTrustedSession) }
+          route: { name: "unlock", message: sessionCheck.message, showForgotPassword: true, allowBiometric: Boolean(sessionCheck.keepTrustedSession) && !passwordOnlyUnlockRequired(appState) }
         };
         render();
         registerHistoryNavigation();
@@ -438,6 +457,7 @@ function registerAutoLock() {
     } else {
       if (handleNativeReturnFromBackground()) return;
       recordUserActivity();
+      void checkForRemoteSecurityChange();
       resumeNativeDeviceVerificationAfterBackground();
     }
   });
@@ -506,6 +526,7 @@ function recordUserActivity() {
   if (state.route?.name === "unlock") return;
   resetIdleLockTimer();
   void touchTrustedSessionNow();
+  if (Date.now() - state.lastRemoteSecurityCheckAt >= REMOTE_SECURITY_CHECK_INTERVAL_MS) void checkForRemoteSecurityChange();
 }
 
 function resetIdleLockTimer() {
@@ -566,9 +587,6 @@ async function lockApp(message = "請重新輸入密碼以繼續使用", options
 
 async function checkTrustedSessionStillValid(appState, trustedSession, alreadyLoadedKeyPackage = null) {
   if (!trustedSession) return { valid: false, message: "請輸入密碼以繼續使用" };
-  if (shouldLockForAwayTimeout(trustedSession)) {
-    return { valid: false, keepTrustedSession: true, message: "離開 App 時間較久，請重新輸入密碼" };
-  }
   const localKeyPackage = alreadyLoadedKeyPackage ?? await getKeyPackage();
   let remoteKeyPackage = null;
   if (appState.googleDrive?.connected && driveAuthStatus().hasAccessToken) {
@@ -578,13 +596,97 @@ async function checkTrustedSessionStillValid(appState, trustedSession, alreadyLo
   }
   const keyPackage = remoteKeyPackage ?? localKeyPackage;
   if (!keyPackage?.securityMeta) return { valid: true };
-  if ((keyPackage.securityMeta.sessionEpoch ?? 0) <= (trustedSession.sessionEpoch ?? 0)) return { valid: true };
+  if ((keyPackage.securityMeta.sessionEpoch ?? 0) <= (trustedSession.sessionEpoch ?? 0)) {
+    if (shouldLockForAwayTimeout(trustedSession)) return { valid: false, keepTrustedSession: true, message: "離開 App 時間較久，請重新輸入密碼" };
+    return { valid: true };
+  }
   try {
     await setItem("keyPackage", keyPackage);
   } catch (error) {
     console.warn("無法更新較新的本機加密設定，將在解鎖時重新確認。", error);
   }
-  return { valid: false, message: securityEventMessage(keyPackage.securityMeta) };
+  return { valid: false, message: securityEventMessage(keyPackage.securityMeta), passwordRequiredEpoch: keyPackage.securityMeta.sessionEpoch ?? 0 };
+}
+
+function passwordOnlyUnlockRequired(appState = state.appState) {
+  return Number(appState?.security?.passwordRequiredEpoch ?? 0) > 0;
+}
+
+async function persistPasswordOnlyRequirement(appState, epoch) {
+  const requiredEpoch = Number(epoch ?? 0);
+  if (!requiredEpoch) return appState;
+  const updated = {
+    ...appState,
+    security: {
+      ...(appState?.security ?? {}),
+      passwordRequiredEpoch: Math.max(Number(appState?.security?.passwordRequiredEpoch ?? 0), requiredEpoch)
+    }
+  };
+  await setItem("appState", updated);
+  return updated;
+}
+
+async function lockForRemoteSecurityChange(remoteKeyPackage) {
+  const epoch = Number(remoteKeyPackage?.securityMeta?.sessionEpoch ?? 0);
+  if (!epoch) return false;
+  await setItem("keyPackage", remoteKeyPackage);
+  await clearTrustedSession();
+  state.appState = await persistPasswordOnlyRequirement({
+    ...state.appState,
+    googleDrive: {
+      ...(state.appState?.googleDrive ?? {}),
+      syncStatus: "synced",
+      syncStartedAt: "",
+      lastSyncError: ""
+    }
+  }, epoch);
+  state.dekBytes = null;
+  state.route = {
+    name: "unlock",
+    message: securityEventMessage(remoteKeyPackage.securityMeta),
+    showForgotPassword: true,
+    allowBiometric: false
+  };
+  render();
+  return true;
+}
+
+async function checkForRemoteSecurityChange(options = {}) {
+  if (state.remoteSecurityCheckRunning || state.appState?.mode !== "driveSync" || !state.appState?.googleDrive?.connected || !driveAuthStatus().hasAccessToken) return false;
+  if (!options.allowWhileLocked && state.route?.name === "unlock" && !options.trustedSession) return false;
+  state.remoteSecurityCheckRunning = true;
+  state.lastRemoteSecurityCheckAt = Date.now();
+  try {
+    return await enforceRemoteSecurityEpoch(options.trustedSession, { ignoreUnavailable: true });
+  } finally {
+    state.remoteSecurityCheckRunning = false;
+  }
+}
+
+async function enforceRemoteSecurityEpoch(trustedSession = null, options = {}) {
+  if (state.appState?.mode !== "driveSync" || !state.appState?.googleDrive?.connected || !driveAuthStatus().hasAccessToken) return false;
+  const session = trustedSession ?? await getItem("trustedSession");
+  const localKeyPackage = await getKeyPackage();
+  const referenceEpoch = Number(session?.sessionEpoch ?? localKeyPackage?.securityMeta?.sessionEpoch ?? 0);
+  let remoteKeyPackage;
+  try {
+    remoteKeyPackage = await readDriveFile(driveFileName("keyPackage"));
+  } catch (error) {
+    if (!options.ignoreUnavailable) throw error;
+    // Offline devices retain their current session and retry on the next
+    // foreground, biometric unlock, or sync.
+    return false;
+  }
+  if (Number(remoteKeyPackage?.securityMeta?.sessionEpoch ?? 0) <= referenceEpoch) return false;
+  try {
+    return await lockForRemoteSecurityChange(remoteKeyPackage);
+  } catch (error) {
+    state.dekBytes = null;
+    state.route = { name: "unlock", message: "偵測到密碼設定已更新，請使用新密碼登入", showForgotPassword: true, allowBiometric: false };
+    render();
+    console.warn("無法完整保存遠端密碼更新狀態，已先停用本次生物辨識。", error);
+    return true;
+  }
 }
 
 function shouldLockForAwayTimeout(trustedSession) {
@@ -721,6 +823,10 @@ async function disableBiometricUnlock() {
 async function unlockWithBiometric(options = {}) {
   const silent = options.silent === true;
   const trustedSession = await getItem("trustedSession");
+  if (passwordOnlyUnlockRequired() || await enforceRemoteSecurityEpoch(trustedSession, { ignoreUnavailable: true })) {
+    if (!silent && passwordOnlyUnlockRequired()) alert("密碼已變更，這次請使用新密碼登入。");
+    return;
+  }
   if (isNativeTrustedSession(trustedSession)) {
     try {
       state.dekBytes = await restoreDekFromTrustedSession(trustedSession);
@@ -1550,6 +1656,7 @@ async function syncNow(options = {}) {
     if (!options.silent && !driveAuthStatus().hasAccessToken) rememberOAuthReturnRoute(state.route);
     const driveConnection = await connectDrive({ interactive: !options.silent, popupWindow: options.oauthPopup, requirePopup: options.requireOAuthPopup });
     rememberDriveAccount(driveConnection);
+    if (await enforceRemoteSecurityEpoch(null, { ignoreUnavailable: false })) return;
     const remoteEnvelope = await readDriveFile(driveFileName("vault"));
     let conflicts = [];
     const localBeforeSync = structuredClone(state.vault);
@@ -1896,7 +2003,11 @@ async function unlockWithMasterPassword(event) {
     );
     state.appState = {
       ...state.appState,
-      currentVaultId: keyPackage.vaultId
+      currentVaultId: keyPackage.vaultId,
+      security: {
+        ...(state.appState?.security ?? {}),
+        passwordRequiredEpoch: 0
+      }
     };
     await save();
     await touchTrustedSessionNow({ force: true });
@@ -1911,9 +2022,16 @@ async function changeMasterPassword(event) {
   event.preventDefault();
   const draft = state.route.securityDraft ?? {};
   if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
+  const needsDriveCommit = state.appState?.mode === "driveSync";
+  const oauthOptions = needsDriveCommit && !globalThis.Capacitor?.isNativePlatform?.()
+    ? openGoogleOAuthPopup()
+    : { oauthPopup: null, requireOAuthPopup: false };
+  let currentPasswordAccepted = false;
   try {
     const { keyPackage, dekBytes } = await unwrapCurrentDek(draft.currentPassword);
+    currentPasswordAccepted = true;
     const now = new Date().toISOString();
+    const passwordChangeId = crypto.randomUUID();
     const masterPasswordWrapper = await wrapDekForSecret(dekBytes, draft.newPassword, keyPackage.crypto.iterations);
     const updatedKeyPackage = {
       ...keyPackage,
@@ -1925,26 +2043,52 @@ async function changeMasterPassword(event) {
         ...keyPackage.securityMeta,
         passwordChangedAt: now,
         passwordChangedByDeviceId: state.appState.deviceId,
+        passwordChangeId,
         sessionEpoch: keyPackage.securityMeta.sessionEpoch + 1,
         updatedAt: now
       }
     };
-    await setItem("keyPackage", updatedKeyPackage);
-    await uploadKeyPackageToDrive();
-    await setItem(
-      "trustedSession",
-      await createTrustedSessionWithDek({
-        vaultId: updatedKeyPackage.vaultId,
-        deviceId: state.appState.deviceId,
-        sessionEpoch: updatedKeyPackage.securityMeta.sessionEpoch,
-        dekBytes
-      })
-    );
-    alert("密碼已更新");
-    navigate({ name: "settings" }, { replace: true, force: true });
-  } catch {
-    alert("目前密碼不正確，請再試一次");
+    let committedKeyPackage = updatedKeyPackage;
+    if (needsDriveCommit) {
+      const connection = await connectDrive({ interactive: true, ...oauthOptions });
+      rememberDriveAccount(connection);
+      const remoteKeyPackageBeforeChange = await readDriveFile(driveFileName("keyPackage"));
+      if (Number(remoteKeyPackageBeforeChange?.securityMeta?.sessionEpoch ?? 0) > Number(keyPackage.securityMeta?.sessionEpoch ?? 0)) {
+        await lockForRemoteSecurityChange(remoteKeyPackageBeforeChange);
+        return;
+      }
+      if (remoteKeyPackageBeforeChange?.vaultId !== keyPackage.vaultId || Number(remoteKeyPackageBeforeChange?.securityMeta?.sessionEpoch ?? 0) !== Number(keyPackage.securityMeta?.sessionEpoch ?? 0)) {
+        throw new Error("password-change-key-package-stale");
+      }
+      const remoteVaultEnvelope = await readDriveFile(driveFileName("vault"));
+      if (!remoteVaultEnvelope) throw new Error("password-change-vault-missing");
+      await decryptVaultEnvelope(remoteVaultEnvelope, dekBytes);
+      await writeDriveFile(driveFileName("keyPackage"), updatedKeyPackage);
+      const verifiedKeyPackage = await readDriveFile(driveFileName("keyPackage"));
+      if (verifiedKeyPackage?.securityMeta?.passwordChangeId !== passwordChangeId || verifiedKeyPackage?.securityMeta?.sessionEpoch !== updatedKeyPackage.securityMeta.sessionEpoch) {
+        throw new Error("password-change-cloud-verification-failed");
+      }
+      const verifiedDek = await unwrapDek(verifiedKeyPackage.masterPasswordWrapper, draft.newPassword, verifiedKeyPackage.crypto.iterations);
+      if (!sameByteValues(verifiedDek, dekBytes)) throw new Error("password-change-dek-mismatch");
+      committedKeyPackage = verifiedKeyPackage;
+    }
+    await setItem("keyPackage", committedKeyPackage);
+    state.appState = await persistPasswordOnlyRequirement(state.appState, committedKeyPackage.securityMeta.sessionEpoch);
+    await clearTrustedSession();
+    state.dekBytes = null;
+    navigate({ name: "unlock", message: "密碼已更新，請使用新密碼重新登入", showForgotPassword: true, allowBiometric: false }, { replace: true, force: true });
+  } catch (error) {
+    closeOAuthPopup(oauthOptions.oauthPopup);
+    console.warn("更改密碼失敗", error);
+    alert(currentPasswordAccepted ? driveErrorMessage(error, "密碼尚未變更。無法完成 Google Drive 寫入與讀回驗證，請確認網路或重新連結 Google Drive 後再試一次。") : "目前密碼不正確，請再試一次");
   }
+}
+
+function sameByteValues(left, right) {
+  if (!(left instanceof Uint8Array) || !(right instanceof Uint8Array) || left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) difference |= left[index] ^ right[index];
+  return difference === 0;
 }
 
 async function resetForgottenPassword(event) {

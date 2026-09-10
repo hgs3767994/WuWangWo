@@ -131,6 +131,21 @@ await check("unlock page renders before an encrypted local vault is loaded", asy
   }
 });
 
+await check("password changes force one password-only unlock across devices", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  [
+    "passwordRequiredEpoch",
+    "passwordChangeId",
+    "checkForRemoteSecurityChange",
+    "lockForRemoteSecurityChange",
+    'allowBiometric: false',
+    'await writeDriveFile(driveFileName("keyPackage"), updatedKeyPackage)',
+    'await readDriveFile(driveFileName("keyPackage"))'
+  ].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing password-change invalidation support: ${text}`);
+  });
+});
+
 await check("native Android back button exits only from root routes", async () => {
   const appSource = await readFile("src/app.js", "utf8");
   ["registerNativeBackButton", "addListener(\"backButton\"", "nativeApp.exitApp()", "navigateBack({ name: \"home\" })"].forEach((text) => {
