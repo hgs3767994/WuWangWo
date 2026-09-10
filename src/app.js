@@ -4249,7 +4249,7 @@ function inputField(label, field, value, type = "text") {
     return `
       <section class="${panelClass}">
         <h2 class="section-title">${label}</h2>
-        <div class="basic-inline-control">
+        <div class="basic-inline-control" data-national-id-control>
           <input type="${type}" data-field="${field}" data-validate-national-id="true" value="${escapeAttr(value)}" />
           <span class="field-error" data-national-id-message>${nationalIdErrorText(value)}</span>
         </div>
@@ -6214,7 +6214,7 @@ function formatSearchValue(value) {
 }
 
 function updateNationalIdFeedback(input) {
-  const message = input.closest(".input-status-row")?.querySelector("[data-national-id-message]");
+  const message = input.closest("[data-national-id-control]")?.querySelector("[data-national-id-message]");
   if (!message) return;
   message.textContent = nationalIdErrorText(input.value);
 }

@@ -1170,6 +1170,11 @@ button:focus-visible,
   min-width: 0;
 }
 
+.basic-inline-control .field-error {
+  justify-self: end;
+  text-align: right;
+}
+
 .basic-inline-gender .chip-list {
   justify-content: flex-start;
 }
