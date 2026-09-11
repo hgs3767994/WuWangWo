@@ -76,6 +76,7 @@ const NATIVE_BACKGROUND_LOCK_MS = 2 * 60 * 1000;
 const NATIVE_BIOMETRIC_PROMPT_DELAY_MS = 300;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 const REMOTE_SECURITY_CHECK_INTERVAL_MS = 30 * 1000;
+const GOOGLE_REAUTHORIZATION_NOTICE = "需重新取得google授權，請先到設定頁並點擊【立即同步】，再回來繼續操作";
 const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
 const OAUTH_RETURN_ROUTE_STORAGE_KEY = "forget-me-not-oauth-return-route";
 const PWA_RUNTIME_SESSION_KEY = "forget-me-not-pwa-runtime-session";
@@ -1812,28 +1813,52 @@ function closeOAuthPopup(oauthPopup) {
   } catch {}
 }
 
-function openSecurityWriteOAuthPopup() {
-  if (state.appState?.mode !== "driveSync" || isSimulatedDrive() || globalThis.Capacitor?.isNativePlatform?.()) {
-    return { oauthPopup: null, requireOAuthPopup: false };
-  }
-  return openGoogleOAuthPopup();
+function notifyGoogleReauthorizationRequired() {
+  alert(GOOGLE_REAUTHORIZATION_NOTICE);
 }
 
-async function prepareSecurityWrite(oauthOptions = {}) {
+async function reuseDriveAuthorizationOrNotify() {
+  if (!driveAuthStatus().hasAccessToken) {
+    notifyGoogleReauthorizationRequired();
+    return null;
+  }
+  try {
+    const connection = await connectDrive({ interactive: false });
+    // connectDrive can reuse a locally cached Worker session without a
+    // network request.  Read the current key package once so a server-side
+    // expired or revoked session is detected before the operation proceeds.
+    await readDriveFile(driveFileName("keyPackage"));
+    return connection;
+  } catch (error) {
+    if (!isDriveAuthRequiredError(error)) throw error;
+    notifyGoogleReauthorizationRequired();
+    return null;
+  }
+}
+
+async function prepareSecurityWrite() {
   const localKeyPackage = await getKeyPackage();
-  if (state.appState?.mode !== "driveSync" || isSimulatedDrive()) return { keyPackage: localKeyPackage, locked: false };
-  const connection = await connectDrive({ interactive: true, ...oauthOptions });
+  if (state.appState?.mode !== "driveSync" || isSimulatedDrive()) return { keyPackage: localKeyPackage, blocked: false };
+  const connection = await reuseDriveAuthorizationOrNotify();
+  if (!connection) return { keyPackage: localKeyPackage, blocked: true };
   rememberDriveAccount(connection);
-  const remoteKeyPackage = await readDriveFile(driveFileName("keyPackage"));
+  let remoteKeyPackage;
+  try {
+    remoteKeyPackage = await readDriveFile(driveFileName("keyPackage"));
+  } catch (error) {
+    if (!isDriveAuthRequiredError(error)) throw error;
+    notifyGoogleReauthorizationRequired();
+    return { keyPackage: localKeyPackage, blocked: true };
+  }
   if (!remoteKeyPackage?.vaultId || !remoteKeyPackage?.securityMeta) throw new Error("security-key-package-missing");
   if (localKeyPackage?.vaultId && remoteKeyPackage.vaultId !== localKeyPackage.vaultId) throw new Error("security-key-package-vault-mismatch");
   const trustedSession = await getItem("trustedSession");
   const referenceEpoch = Number(trustedSession?.sessionEpoch ?? localKeyPackage?.securityMeta?.sessionEpoch ?? 0);
   if (Number(remoteKeyPackage.securityMeta.sessionEpoch ?? 0) > referenceEpoch) {
     await lockForRemoteSecurityChange(remoteKeyPackage);
-    return { keyPackage: remoteKeyPackage, locked: true };
+    return { keyPackage: remoteKeyPackage, blocked: true };
   }
-  return { keyPackage: remoteKeyPackage, locked: false };
+  return { keyPackage: remoteKeyPackage, blocked: false };
 }
 
 function securityWriteFailureMessage(error, fallback) {
@@ -2127,12 +2152,11 @@ async function changeMasterPassword(event) {
   const draft = state.route.securityDraft ?? {};
   if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
   const needsDriveCommit = state.appState?.mode === "driveSync" && !isSimulatedDrive();
-  const oauthOptions = openSecurityWriteOAuthPopup();
   let drivePreflightCompleted = !needsDriveCommit;
   let currentPasswordAccepted = false;
   try {
-    const prepared = await prepareSecurityWrite(oauthOptions);
-    if (prepared.locked) return;
+    const prepared = await prepareSecurityWrite();
+    if (prepared.blocked) return;
     drivePreflightCompleted = true;
     const keyPackage = prepared.keyPackage;
     if (!keyPackage) throw new Error("missing-key-package");
@@ -2158,7 +2182,7 @@ async function changeMasterPassword(event) {
     };
     let committedKeyPackage = updatedKeyPackage;
     if (needsDriveCommit) {
-      const connection = await connectDrive({ interactive: true, ...oauthOptions });
+      const connection = await connectDrive({ interactive: false });
       rememberDriveAccount(connection);
       const remoteKeyPackageBeforeChange = await readDriveFile(driveFileName("keyPackage"));
       if (Number(remoteKeyPackageBeforeChange?.securityMeta?.sessionEpoch ?? 0) > Number(keyPackage.securityMeta?.sessionEpoch ?? 0)) {
@@ -2186,7 +2210,6 @@ async function changeMasterPassword(event) {
     state.dekBytes = null;
     navigate({ name: "unlock", message: "密碼已更新，請使用新密碼重新登入", showForgotPassword: true, allowBiometric: false }, { replace: true, force: true });
   } catch (error) {
-    closeOAuthPopup(oauthOptions.oauthPopup);
     console.warn("更改密碼失敗", error);
     if (!drivePreflightCompleted) {
       alert(securityWriteFailureMessage(error, "必須先完成 Google Drive 授權並讀取最新安全設定，才能更改密碼。"));
@@ -2208,13 +2231,12 @@ async function resetForgottenPassword(event) {
   const draft = state.route.securityDraft ?? {};
   if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
   const needsDriveCommit = state.appState?.mode === "driveSync" && !isSimulatedDrive();
-  const oauthOptions = openSecurityWriteOAuthPopup();
   let drivePreflightCompleted = !needsDriveCommit;
   let recoveryCodeAccepted = false;
   try {
     const recoveryCode = normalizeRecoveryCode(draft.recoveryCode ?? "");
-    const prepared = await prepareSecurityWrite(oauthOptions);
-    if (prepared.locked) return;
+    const prepared = await prepareSecurityWrite();
+    if (prepared.blocked) return;
     drivePreflightCompleted = true;
     const currentKeyPackage = prepared.keyPackage;
     if (!currentKeyPackage) throw new Error("missing-key-package");
@@ -2257,7 +2279,6 @@ async function resetForgottenPassword(event) {
     await save();
     showRecoveryCodeRoute(updated.recoveryCode, { oldInvalid: true, returnTo: { name: state.appState?.mode === "localOnly" ? "home" : "settings" } });
   } catch (error) {
-    closeOAuthPopup(oauthOptions.oauthPopup);
     console.warn("救援碼重設失敗", error);
     if (!drivePreflightCompleted) {
       alert(securityWriteFailureMessage(error, "必須先完成 Google Drive 授權並讀取最新安全設定，才能重設密碼。"));
@@ -2294,8 +2315,8 @@ async function resetCloudPasswordWithRecovery(event) {
     }
     dekBytes = await unwrapDek(keyPackage.recoveryCodeWrapper, recoveryCode, keyPackage.crypto.iterations);
     remoteVault = normalizeVault(pruneDeleted(await decryptVaultEnvelope(vaultEnvelope, dekBytes)));
-  } catch {
-    alert("救援碼不正確，請確認後再試一次");
+  } catch (error) {
+    alert(isDriveAuthRequiredError(error) ? GOOGLE_REAUTHORIZATION_NOTICE : "救援碼不正確，請確認後再試一次");
     return;
   }
 
@@ -2369,10 +2390,9 @@ async function resetCloudPasswordWithRecovery(event) {
 
 async function startDeviceApprovalRecovery(event) {
   event.preventDefault();
-  const oauthOptions = openSecurityWriteOAuthPopup();
   try {
-    const prepared = await prepareSecurityWrite(oauthOptions);
-    if (prepared.locked) return;
+    const prepared = await prepareSecurityWrite();
+    if (prepared.blocked) return;
     const pending = await getItem("pendingRecoveryRequest");
     if (pending?.requestId && Date.parse(pending.expiresAt ?? "") > Date.now() && await getItem(`recoveryTransferPrivateKey:${pending.requestId}`)) {
       const remote = await getDriveRecoveryRequest(pending.requestId);
@@ -2388,7 +2408,6 @@ async function startDeviceApprovalRecovery(event) {
     if (!keyPackage?.vaultId) throw new Error("missing-key-package");
     await beginDeviceApprovalRequest(keyPackage, state.route.mode === "merge" ? "merge" : "existing");
   } catch (error) {
-    closeOAuthPopup(oauthOptions.oauthPopup);
     alert(driveErrorMessage(error, "無法建立舊裝置授權請求。請先完成 Google Drive 授權並讀取最新安全設定。"));
   }
 }
@@ -2449,6 +2468,9 @@ async function completeRecoveryV3(event) {
   const requestId = state.route.recoveryRequestId;
   const baseSessionEpoch = Number(state.route.baseSessionEpoch);
   try {
+    const connection = await reuseDriveAuthorizationOrNotify();
+    if (!connection) return;
+    rememberDriveAccount(connection);
     const keyPackage = await readDriveFile(driveFileName("keyPackage"));
     if ((keyPackage.securityMeta?.sessionEpoch ?? 1) !== baseSessionEpoch) throw new Error("recovery-key-package-stale");
     const vaultEnvelope = await readDriveFile(driveFileName("vault"));
@@ -2486,30 +2508,27 @@ async function completeRecoveryV3(event) {
     showRecoveryCodeRoute(updated.recoveryCode, { oldInvalid: true, returnTo: conflicts.length ? { name: "syncConflicts" } : { name: "home" } });
   } catch (error) {
     console.warn("完成救援失敗", error);
-    alert(error?.message === "recovery-key-package-stale" ? "雲端密碼設定已由其他裝置更新，這筆救援請求無法繼續，請重新登入或重新發起救援。" : "未能安全完成密碼重設，原雲端資料沒有被覆蓋。請確認網路後重試。");
+    alert(error?.message === "recovery-key-package-stale" ? "雲端密碼設定已由其他裝置更新，這筆救援請求無法繼續，請重新登入或重新發起救援。" : driveErrorMessage(error, "未能安全完成密碼重設，原雲端資料沒有被覆蓋。請確認網路後重試。"));
   }
 }
 
 async function refreshRecoveryRequests() {
-  const oauthOptions = openSecurityWriteOAuthPopup();
   try {
-    const prepared = await prepareSecurityWrite(oauthOptions);
-    if (prepared.locked) return;
+    const prepared = await prepareSecurityWrite();
+    if (prepared.blocked) return;
     const result = await listDriveRecoveryRequests();
     state.route = { name: "recoveryRequests", requests: result.requests ?? [] };
     render();
   } catch (error) {
-    closeOAuthPopup(oauthOptions.oauthPopup);
     alert(driveErrorMessage(error, "無法讀取救援請求。請先完成 Google Drive 授權並讀取最新安全設定。"));
   }
 }
 
 async function approveRecoveryRequest(requestId, pairingCode) {
   if (!state.dekBytes) { alert("此裝置必須維持已解鎖狀態才能核准救援。 "); return; }
-  const oauthOptions = openSecurityWriteOAuthPopup();
   try {
-    const prepared = await prepareSecurityWrite(oauthOptions);
-    if (prepared.locked) return;
+    const prepared = await prepareSecurityWrite();
+    if (prepared.blocked) return;
     const keyPackage = prepared.keyPackage;
     if (!(await confirmDialog(`請確認新裝置顯示的配對碼也是「${pairingCode}」。核准後會產生一組只顯示在此裝置的短效驗證碼。`, { confirmLabel: "核准" }))) return;
     const request = (state.route.requests ?? []).find((item) => item.request_id === requestId);
@@ -2521,7 +2540,6 @@ async function approveRecoveryRequest(requestId, pairingCode) {
     state.route = { name: "recoveryApprovalWaiting", recoveryRequestId: requestId, pairingCode, verificationCode: result.verificationCode, expiresAt: result.request?.expires_at, baseSessionEpoch: Number(request.base_session_epoch) };
     render();
   } catch (error) {
-    closeOAuthPopup(oauthOptions.oauthPopup);
     alert(driveErrorMessage(error, "無法核准救援請求，請先完成 Google Drive 授權並讀取最新安全設定。"));
   }
 }
@@ -2593,7 +2611,13 @@ async function scanDriveRevisionRecovery(event) {
   state.route.revisionRecoveryCandidate = null;
   render();
   try {
-    await connectDrive({ interactive: true });
+    const connection = await reuseDriveAuthorizationOrNotify();
+    if (!connection) {
+      state.route.revisionRecoveryReport = null;
+      render();
+      return;
+    }
+    rememberDriveAccount(connection);
     const keyCandidates = await driveRevisionCandidates("keyPackage");
     const vaultCandidates = await driveRevisionCandidates("vault");
     const attempts = [];
@@ -2606,7 +2630,8 @@ async function scanDriveRevisionRecovery(event) {
         if (!wrapper || !keyPackage?.crypto?.iterations) throw new Error("invalid-key-package");
         dekBytes = await unwrapDek(wrapper, secret, keyPackage.crypto.iterations);
         attempts.push(`金鑰檔 ${revisionLabel(keyCandidate)}：可解開`);
-      } catch {
+      } catch (error) {
+        if (isDriveAuthRequiredError(error)) throw error;
         attempts.push(`金鑰檔 ${revisionLabel(keyCandidate)}：不可用`);
         continue;
       }
@@ -2630,7 +2655,8 @@ async function scanDriveRevisionRecovery(event) {
           };
           render();
           return;
-        } catch {
+        } catch (error) {
+          if (isDriveAuthRequiredError(error)) throw error;
           attempts.push(`資料檔 ${revisionLabel(vaultCandidate)}：無法搭配此金鑰解開`);
         }
       }
@@ -2642,6 +2668,12 @@ async function scanDriveRevisionRecovery(event) {
     };
     render();
   } catch (error) {
+    if (isDriveAuthRequiredError(error)) {
+      state.route.revisionRecoveryReport = null;
+      render();
+      notifyGoogleReauthorizationRequired();
+      return;
+    }
     state.route.revisionRecoveryReport = {
       status: "error",
       message: driveErrorMessage(error, "雲端歷史版本掃描失敗，請稍後再試。"),
@@ -2659,6 +2691,9 @@ async function applyDriveRevisionRecovery() {
     return;
   }
   if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
+  const connection = await reuseDriveAuthorizationOrNotify();
+  if (!connection) return;
+  rememberDriveAccount(connection);
   const confirmed = await confirmDialog(
     `確定要使用找到的歷史版本重建雲端同步資料嗎？\n\n金鑰檔：${candidate.keyRevision.label}\n資料檔：${candidate.vaultRevision.label}\n人物：${candidate.vault.people.length} 位\n\n此操作會覆蓋目前 Google Drive 中的莫忘同步資料，並產生新的密碼與救援碼。`,
     { confirmLabel: "重建", danger: true }
@@ -2720,12 +2755,11 @@ async function regenerateRecoveryCode(event) {
   event.preventDefault();
   const draft = state.route.securityDraft ?? {};
   const needsDriveCommit = state.appState?.mode === "driveSync" && !isSimulatedDrive();
-  const oauthOptions = openSecurityWriteOAuthPopup();
   let drivePreflightCompleted = !needsDriveCommit;
   let currentPasswordAccepted = false;
   try {
-    const prepared = await prepareSecurityWrite(oauthOptions);
-    if (prepared.locked) return;
+    const prepared = await prepareSecurityWrite();
+    if (prepared.blocked) return;
     drivePreflightCompleted = true;
     const keyPackage = prepared.keyPackage;
     if (!keyPackage) throw new Error("missing-key-package");
@@ -2745,7 +2779,6 @@ async function regenerateRecoveryCode(event) {
     state.recoveryVersion = 3;
     showRecoveryCodeRoute(updated.recoveryCode, { oldInvalid: true, returnTo: { name: "settings" } });
   } catch (error) {
-    closeOAuthPopup(oauthOptions.oauthPopup);
     console.warn("重新產生救援碼失敗", error);
     if (!drivePreflightCompleted) {
       alert(securityWriteFailureMessage(error, "必須先完成 Google Drive 授權並讀取最新安全設定，才能重新產生救援碼。"));
@@ -2759,12 +2792,11 @@ async function logoutAllDevices(event) {
   event.preventDefault();
   const draft = state.route.securityDraft ?? {};
   const needsDriveCommit = state.appState?.mode === "driveSync" && !isSimulatedDrive();
-  const oauthOptions = openSecurityWriteOAuthPopup();
   let drivePreflightCompleted = !needsDriveCommit;
   let currentPasswordAccepted = false;
   try {
-    const prepared = await prepareSecurityWrite(oauthOptions);
-    if (prepared.locked) return;
+    const prepared = await prepareSecurityWrite();
+    if (prepared.blocked) return;
     drivePreflightCompleted = true;
     const keyPackage = prepared.keyPackage;
     if (!keyPackage) throw new Error("missing-key-package");
@@ -2796,7 +2828,6 @@ async function logoutAllDevices(event) {
     await clearTrustedSession();
     navigate({ name: "unlock", message: "已從所有裝置登出，請重新輸入密碼", showForgotPassword: true, allowBiometric: false }, { replace: true, force: true });
   } catch (error) {
-    closeOAuthPopup(oauthOptions.oauthPopup);
     console.warn("登出所有裝置失敗", error);
     if (!drivePreflightCompleted) {
       alert(securityWriteFailureMessage(error, "必須先完成 Google Drive 授權並讀取最新安全設定，才能登出所有裝置。"));
@@ -5210,10 +5241,51 @@ function bindSecurityForms() {
     "regenerate-recovery": regenerateRecoveryCode,
     "logout-all-devices": logoutAllDevices
   };
+  const pendingLabels = {
+    unlock: "登入中…",
+    "drive-recovery-reset": "重設中…",
+    "recovery-v3-complete": "重設中…",
+    "change-password": "更改中…",
+    "forgot-password": "重設中…",
+    "regenerate-recovery": "產生中…"
+  };
   Object.entries(handlers).forEach(([formName, handler]) => {
     const form = app.querySelector(`[data-form='${formName}']`);
-    if (form) form.addEventListener("submit", handler);
+    if (!form) return;
+    const pendingLabel = pendingLabels[formName];
+    form.addEventListener("submit", pendingLabel
+      ? (event) => runSingleSecuritySubmission(event, form, handler, pendingLabel)
+      : handler);
   });
+}
+
+async function runSingleSecuritySubmission(event, form, handler, pendingLabel) {
+  event.preventDefault();
+  if (form.dataset.submitting === "true") return;
+  const submitButton = event.submitter?.matches?.("button[type='submit'], input[type='submit']")
+    ? event.submitter
+    : form.querySelector("button[type='submit'], input[type='submit']");
+  if (!submitButton) return handler(event);
+  const originalLabel = submitButton.textContent;
+  const wasDisabled = submitButton.disabled;
+  form.dataset.submitting = "true";
+  form.setAttribute("aria-busy", "true");
+  submitButton.disabled = true;
+  submitButton.setAttribute("aria-busy", "true");
+  submitButton.classList.add("is-processing");
+  submitButton.textContent = pendingLabel;
+  try {
+    await handler(event);
+  } finally {
+    if (form.isConnected) {
+      delete form.dataset.submitting;
+      form.removeAttribute("aria-busy");
+      submitButton.disabled = wasDisabled;
+      submitButton.removeAttribute("aria-busy");
+      submitButton.classList.remove("is-processing");
+      submitButton.textContent = originalLabel;
+    }
+  }
 }
 
 async function handleAction(event, el) {
@@ -6596,9 +6668,10 @@ function driveErrorMessage(error, fallback) {
   if (message.includes("access_denied")) return "Google Drive 授權已取消，尚未完成連結。";
   if (message.includes("popup")) return "Google 授權視窗被阻擋，請允許彈出視窗後再試。";
   if (message.includes("google-drive-auth-required") || message.includes("interaction_required") || message.includes("login_required") || message.includes("consent_required")) {
-    return "Google Drive 需要重新授權，請在設定頁重新同步或重新連結 Google Drive。";
+    return GOOGLE_REAUTHORIZATION_NOTICE;
   }
-  if (message.includes("google-drive-request-failed:401")) return "Google Drive 授權已失效，請重新連結 Google Drive。";
+  if (message.includes("session-required") || message.includes("session-expired") || message.includes("google-refresh-token-missing") || message.includes("google-token-refresh-failed")) return GOOGLE_REAUTHORIZATION_NOTICE;
+  if (message.includes("google-drive-request-failed:401")) return GOOGLE_REAUTHORIZATION_NOTICE;
   if (message.includes("google-drive-request-failed:403")) return "Google Drive 權限不足，請確認授權範圍後再試。";
   if (message.includes("google-drive-request-failed")) return "Google Drive 連線失敗，請稍後再試。";
   return fallback;
@@ -6608,6 +6681,10 @@ function isDriveAuthRequiredError(error) {
   const message = error?.message ?? "";
   return (
     message.includes("google-drive-auth-required") ||
+    message.includes("session-required") ||
+    message.includes("session-expired") ||
+    message.includes("google-refresh-token-missing") ||
+    message.includes("google-token-refresh-failed") ||
     message.includes("interaction_required") ||
     message.includes("login_required") ||
     message.includes("consent_required") ||

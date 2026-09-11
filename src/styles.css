@@ -401,6 +401,37 @@ button:disabled {
   color: var(--disabled-text);
 }
 
+button.is-processing:disabled {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--action-soft-bg);
+  border-color: var(--action-soft-border);
+  color: var(--action-soft-text);
+  cursor: wait;
+  opacity: 1;
+}
+
+button.is-processing:disabled::before {
+  content: "";
+  width: 0.9em;
+  height: 0.9em;
+  flex: 0 0 auto;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: processing-button-spin 0.75s linear infinite;
+}
+
+@keyframes processing-button-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button.is-processing:disabled::before { animation: none; }
+}
+
 input,
 textarea,
 select {

@@ -164,15 +164,39 @@ await check("PWA locks after background timeout and on a fresh launch", async ()
 await check("Drive security writes require a current remote key package", async () => {
   const appSource = await readFile("src/app.js", "utf8");
   [
-    "openSecurityWriteOAuthPopup",
+    "reuseDriveAuthorizationOrNotify",
     "prepareSecurityWrite",
     "securityWriteFailureMessage",
+    "需重新取得google授權，請先到設定頁並點擊【立即同步】，再回來繼續操作",
+    "connectDrive({ interactive: false })",
     "recoveryChangeId",
     "globalLogoutId",
     "password-reset-cloud-verification-failed"
   ].forEach((text) => {
     if (!appSource.includes(text)) throw new Error(`src/app.js is missing Drive security preflight support: ${text}`);
   });
+  if (appSource.includes("openSecurityWriteOAuthPopup")) throw new Error("security operations must not open an OAuth window automatically");
+});
+
+await check("sensitive security forms show a non-repeatable processing state", async () => {
+  const [appSource, styleSource] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("src/styles.css", "utf8")
+  ]);
+  [
+    "runSingleSecuritySubmission",
+    'unlock: "登入中…"',
+    '"change-password": "更改中…"',
+    '"regenerate-recovery": "產生中…"',
+    '"forgot-password": "重設中…"',
+    '"drive-recovery-reset": "重設中…"',
+    '"recovery-v3-complete": "重設中…"',
+    'form.dataset.submitting === "true"',
+    'submitButton.disabled = true'
+  ].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing security-form processing support: ${text}`);
+  });
+  if (!styleSource.includes("button.is-processing:disabled")) throw new Error("src/styles.css is missing the processing button style");
 });
 
 await check("native Android back button exits only from root routes", async () => {
