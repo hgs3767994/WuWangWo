@@ -134,6 +134,7 @@ let state = {
   lastSessionTouchAt: 0,
   lastRemoteSecurityCheckAt: 0,
   remoteSecurityCheckRunning: false,
+  suspendedRouteAfterIdleLock: null,
   installPromptEvent: null,
   installDismissed: localStorage.getItem("forget-me-not-install-dismissed") === "true",
   isInstalled: isPwaInstalled()
@@ -649,6 +650,7 @@ async function lockApp(message = "請重新輸入密碼以繼續使用", options
   }
   if (!["driveSync", "localOnly"].includes(state.appState.mode)) return;
   await touchTrustedSessionNow({ force: true });
+  state.suspendedRouteAfterIdleLock = captureRouteForIdleUnlock();
   state.dekBytes = null;
   state.route = {
     name: "unlock",
@@ -658,6 +660,24 @@ async function lockApp(message = "請重新輸入密碼以繼續使用", options
     autoBiometricAttempted: options.suppressAutoBiometric === true
   };
   render();
+}
+
+function captureRouteForIdleUnlock() {
+  const route = { ...state.route, scrollY: window.scrollY };
+  try {
+    return structuredClone(route);
+  } catch {
+    // Route data is plain application state.  A shallow fallback still keeps
+    // the live draft intact if a future browser cannot clone a newly added
+    // route value.
+    return route;
+  }
+}
+
+async function resumeRouteAfterIdleUnlock() {
+  const returnRoute = state.suspendedRouteAfterIdleLock;
+  state.suspendedRouteAfterIdleLock = null;
+  return navigate(returnRoute ?? { name: "home" }, { replace: true, force: true });
 }
 
 async function checkTrustedSessionStillValid(appState, trustedSession, alreadyLoadedKeyPackage = null) {
@@ -715,6 +735,7 @@ async function lockForRemoteSecurityChange(remoteKeyPackage) {
       lastSyncError: ""
     }
   }, epoch);
+  state.suspendedRouteAfterIdleLock = null;
   state.dekBytes = null;
   state.route = {
     name: "unlock",
@@ -756,6 +777,7 @@ async function enforceRemoteSecurityEpoch(trustedSession = null, options = {}) {
   try {
     return await lockForRemoteSecurityChange(remoteKeyPackage);
   } catch (error) {
+    state.suspendedRouteAfterIdleLock = null;
     state.dekBytes = null;
     state.route = { name: "unlock", message: "偵測到密碼設定已更新，請使用新密碼登入", showForgotPassword: true, allowBiometric: false };
     render();
@@ -869,7 +891,7 @@ async function enableBiometricUnlock() {
     await save();
     alert("已啟用生物辨識解鎖");
     if (enablingFromUnlock) {
-      navigate({ name: "home" }, { replace: true, force: true });
+      await resumeRouteAfterIdleUnlock();
       void resumeDriveSyncInBackground();
       return;
     }
@@ -909,7 +931,7 @@ async function unlockWithBiometric(options = {}) {
         state.vault = normalizeVault(pruneDeleted(await loadLocalVault()));
       }
       await touchTrustedSessionNow({ force: true });
-      navigate({ name: "home" }, { replace: true, force: true });
+      await resumeRouteAfterIdleUnlock();
       void resumeDriveSyncInBackground();
     } catch {
       if (!silent) alert("裝置驗證未完成，請改用密碼登入。");
@@ -949,7 +971,7 @@ async function unlockWithBiometric(options = {}) {
       state.vault = normalizeVault(pruneDeleted(await loadLocalVault()));
     }
     await touchTrustedSessionNow({ force: true });
-    navigate({ name: "home" }, { replace: true, force: true });
+    await resumeRouteAfterIdleUnlock();
     void resumeDriveSyncInBackground();
   } catch {
     if (!silent) alert("生物辨識解鎖未完成，請改用密碼登入。");
@@ -2140,7 +2162,7 @@ async function unlockWithMasterPassword(event) {
     };
     await save();
     await touchTrustedSessionNow({ force: true });
-    navigate({ name: "home" }, { replace: true, force: true });
+    await resumeRouteAfterIdleUnlock();
     void resumeDriveSyncInBackground();
   } catch {
     alert("密碼不正確，請再試一次");

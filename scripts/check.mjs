@@ -199,6 +199,18 @@ await check("sensitive security forms show a non-repeatable processing state", a
   if (!styleSource.includes("button.is-processing:disabled")) throw new Error("src/styles.css is missing the processing button style");
 });
 
+await check("idle unlock restores the in-memory route and unsaved draft", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  [
+    "suspendedRouteAfterIdleLock",
+    "captureRouteForIdleUnlock",
+    "resumeRouteAfterIdleUnlock",
+    "scrollY: window.scrollY"
+  ].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing idle route restoration support: ${text}`);
+  });
+});
+
 await check("native Android back button exits only from root routes", async () => {
   const appSource = await readFile("src/app.js", "utf8");
   ["registerNativeBackButton", "addListener(\"backButton\"", "nativeApp.exitApp()", "navigateBack({ name: \"home\" })"].forEach((text) => {
