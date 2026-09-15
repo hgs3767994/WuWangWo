@@ -6282,7 +6282,24 @@ async function restorePerson(id) {
 async function purgePerson(id) {
   const item = state.vault.deletedItems.find((entry) => entry.id === id);
   if (!item || !(await confirmDialog(`確定要永久刪除「${item.snapshot.name}」嗎？\n此操作無法復原。`, { confirmLabel: "永久刪除", danger: true }))) return;
-  const vault = { ...state.vault, deletedItems: state.vault.deletedItems.filter((entry) => entry.id !== id) };
+  const now = new Date().toISOString();
+  const previousTombstone = state.vault.tombstones.find((entry) => entry.type === "person" && entry.id === id);
+  const permanentTombstone = {
+    id,
+    type: "person",
+    deletedAt: previousTombstone?.deletedAt ?? item.deletedAt ?? now,
+    purgedAt: now,
+    updatedAt: now,
+    deletedByDeviceId: state.appState.deviceId
+  };
+  const vault = {
+    ...state.vault,
+    deletedItems: state.vault.deletedItems.filter((entry) => !(entry.type === "person" && entry.id === id)),
+    tombstones: [
+      ...state.vault.tombstones.filter((entry) => !(entry.type === "person" && entry.id === id)),
+      permanentTombstone
+    ]
+  };
   await commitVault(vault);
 }
 
@@ -6798,13 +6815,22 @@ function fieldLabel(field) {
 
 function pruneDeleted(vault) {
   const now = Date.now();
+  const tombstones = (vault.tombstones ?? []).filter((item) => {
+    if (item?.purgedAt || !item?.expiresAt) return true;
+    return new Date(item.expiresAt).getTime() > now;
+  });
+  const permanentlyDeleted = new Set(
+    tombstones
+      .filter((item) => item?.purgedAt)
+      .map((item) => `${item.type}:${item.id}`)
+  );
   return {
     ...vault,
-    deletedItems: (vault.deletedItems ?? []).filter((item) => new Date(item.restoreUntil).getTime() > now),
-    tombstones: (vault.tombstones ?? []).filter((item) => {
-      if (!item?.expiresAt) return true;
-      return new Date(item.expiresAt).getTime() > now;
-    })
+    deletedItems: (vault.deletedItems ?? []).filter((item) =>
+      new Date(item.restoreUntil).getTime() > now
+      && !permanentlyDeleted.has(`${item.type}:${item.id}`)
+    ),
+    tombstones
   };
 }
 

@@ -8,8 +8,13 @@ function byId(items) {
   return new Map(asArray(items).filter((item) => item?.id).map((item) => [item.id, item]));
 }
 
+function itemTimestamp(item) {
+  const time = new Date(item?.updatedAt ?? item?.purgedAt ?? item?.deletedAt ?? item?.createdAt ?? 0).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
 function newer(a, b) {
-  return new Date(a?.updatedAt ?? a?.createdAt ?? 0).getTime() >= new Date(b?.updatedAt ?? b?.createdAt ?? 0).getTime() ? a : b;
+  return itemTimestamp(a) >= itemTimestamp(b) ? a : b;
 }
 
 function uniqueBy(items, keyFn) {
@@ -35,8 +40,14 @@ function mergeTombstones(localVault, remoteVault) {
   return mergeById(localVault.tombstones ?? [], remoteVault.tombstones ?? []);
 }
 
-function mergeDeletedItems(localVault, remoteVault) {
-  return mergeById(localVault.deletedItems ?? [], remoteVault.deletedItems ?? []);
+function mergeDeletedItems(localVault, remoteVault, tombstones) {
+  const permanentlyDeleted = new Set(
+    asArray(tombstones)
+      .filter((item) => item?.purgedAt)
+      .map((item) => `${item.type}:${item.id}`)
+  );
+  return mergeById(localVault.deletedItems ?? [], remoteVault.deletedItems ?? [])
+    .filter((item) => !permanentlyDeleted.has(`${item.type}:${item.id}`));
 }
 
 function isTombstoned(tombstones, type, id) {
@@ -230,7 +241,7 @@ function mergePerson(localPerson, remotePerson, conflicts) {
 export function mergeVaults(localVault, remoteVault, deviceId) {
   const conflicts = [];
   const tombstones = mergeTombstones(localVault, remoteVault);
-  const deletedItems = mergeDeletedItems(localVault, remoteVault);
+  const deletedItems = mergeDeletedItems(localVault, remoteVault, tombstones);
   const { interestTags, idRedirects } = mergeInterestTags(localVault, remoteVault, tombstones);
   const { personGroupTags, groupIdRedirects } = mergePersonGroupTags(localVault, remoteVault, tombstones);
   const now = new Date().toISOString();

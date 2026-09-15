@@ -7,6 +7,7 @@ const tests = [
   ["config defaults stay safe", testConfigDefaults],
   ["sync merge combines duplicate interest names and detects conflicts", testSyncMerge],
   ["sync merge supports legacy customValues object", testLegacyCustomValues],
+  ["permanently deleted people cannot return through sync", testPermanentPersonDeletion],
   ["xlsx export produces an Excel workbook blob", testXlsxExport],
   ["local snapshot encryption supports large payloads", testLargeLocalSnapshotEnvelope],
   ["Recovery v3 code wrapper and sealed device transfer restore the same DEK", testRecoveryV3],
@@ -91,6 +92,47 @@ function testLegacyCustomValues() {
   assert(result.vault.people[0].customValues[0].value === "新格式", "newer custom value should win");
 }
 
+function testPermanentPersonDeletion() {
+  const deletedPerson = person({ id: "person-purged", name: "已永久刪除人物" });
+  const staleDeletedItem = {
+    id: deletedPerson.id,
+    type: "person",
+    deletedAt: "2026-09-01T00:00:00.000Z",
+    restoreUntil: "2099-09-06T00:00:00.000Z",
+    snapshot: deletedPerson
+  };
+  const staleTombstone = {
+    id: deletedPerson.id,
+    type: "person",
+    deletedAt: "2026-09-01T00:00:00.000Z",
+    expiresAt: "2099-10-01T00:00:00.000Z"
+  };
+  const permanentTombstone = {
+    id: deletedPerson.id,
+    type: "person",
+    deletedAt: "2026-09-01T00:00:00.000Z",
+    purgedAt: "2026-09-02T00:00:00.000Z",
+    updatedAt: "2026-09-02T00:00:00.000Z",
+    deletedByDeviceId: "device-local"
+  };
+  const purgedVault = vault({ tombstones: [permanentTombstone], revision: 3 });
+  const staleVault = vault({
+    people: [deletedPerson],
+    deletedItems: [staleDeletedItem],
+    tombstones: [staleTombstone],
+    revision: 2
+  });
+
+  [
+    mergeVaults(purgedVault, staleVault, "device-test").vault,
+    mergeVaults(staleVault, purgedVault, "device-test").vault
+  ].forEach((merged) => {
+    assert(!merged.people.some((item) => item.id === deletedPerson.id), "purged person should not return from sync");
+    assert(!merged.deletedItems.some((item) => item.id === deletedPerson.id), "purged recently-deleted item should not return from sync");
+    assert(merged.tombstones.some((item) => item.id === deletedPerson.id && item.purgedAt), "permanent tombstone should survive sync");
+  });
+}
+
 async function testXlsxExport() {
   const blob = buildVaultXlsx(
     vault({
@@ -162,15 +204,15 @@ async function testNativeTrustedSessionRecord() {
   }
 }
 
-function vault({ people = [], interestTags = [], customFieldDefs = [], revision = 1 }) {
+function vault({ people = [], interestTags = [], customFieldDefs = [], deletedItems = [], tombstones = [], revision = 1 }) {
   return {
     schemaVersion: 1,
     vaultId: "vault-test",
     people,
     interestTags,
     customFieldDefs,
-    deletedItems: [],
-    tombstones: [],
+    deletedItems,
+    tombstones,
     syncMeta: {
       updatedAt: "2026-01-01T00:00:00.000Z",
       updatedByDeviceId: "device-test",
