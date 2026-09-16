@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#24443D" />
     <title>莫忘 隱私權政策</title>
+    <link rel="canonical" href="https://wuwangwo.shawnghong.com/privacy.html" />
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>
@@ -15,14 +16,15 @@
         <span></span>
       </header>
       <section class="panel stack">
-        <p>最後更新：2026-08-21</p>
+        <p>最後更新：2026-09-16</p>
         <p>莫忘是一個用來記錄人物資料、興趣喜好、自訂欄位與備註的 PWA。資料會優先保存在使用者自己的裝置中；若使用者啟用 Google Drive 同步，資料會在本機加密後儲存在使用者自己的 Google Drive appDataFolder。</p>
         <h2 class="section-title">我們存取的 Google 資料</h2>
         <p>莫忘要求 Google Drive appDataFolder 權限，用於建立、讀取、更新與刪除莫忘自己的同步檔案。App 也會要求 Google 帳號 Email 權限，用於在設定頁顯示目前連結的 Google 帳號。App 不會要求讀取使用者一般 Google Drive 檔案的權限。</p>
         <h2 class="section-title">資料如何使用</h2>
-        <p>Google Drive 權限只用於提供跨裝置同步、資料備份、資料還原與同步診斷。Google 帳號 Email 只用於本機顯示目前同步帳號。同步資料會先在使用者裝置上加密，才寫入 Google Drive。</p>
+        <p>Google Drive 權限只用於提供跨裝置同步、資料備份、資料還原與同步診斷。Google 帳號 Email 只用於在 App 內顯示目前同步帳號。同步資料會先在使用者裝置上加密，才透過莫忘的 Cloudflare Worker 寫入 Google Drive。</p>
         <h2 class="section-title">資料儲存與分享</h2>
-        <p>莫忘目前沒有後端伺服器，不會把使用者資料傳送到開發者伺服器。使用者資料保存在瀏覽器本機 IndexedDB，以及使用者自行授權的 Google Drive appDataFolder。資料不會出售、出租或提供給廣告平台。</p>
+        <p>人物資料保存在裝置本機 IndexedDB，以及使用者自行授權的 Google Drive appDataFolder。傳送至 Cloudflare Worker 的人物同步檔在使用者裝置上即已加密；Worker 只代理讀寫加密檔案，沒有解密人物資料所需的密碼或資料金鑰。</p>
+        <p>為完成 Google OAuth 與同步，Worker 會處理 Google 帳號識別碼、短效存取權杖與更新權杖。更新權杖經加密後儲存在 Cloudflare D1；莫忘的短效登入 session 只以雜湊形式保存。這些資料只用於使用者要求的同步，不會出售、出租、用於廣告或提供給廣告平台。</p>
         <h2 class="section-title">使用者控制</h2>
         <p>使用者可在 App 中匯出 JSON 或 Excel、匯入備份、登出 Google Drive、刪除人物資料，或到 Google 帳戶安全性設定中移除莫忘的 Google Drive 存取權。移除授權後，App 將無法再同步 Google Drive。</p>
         <h2 class="section-title">安全性</h2>

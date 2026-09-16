@@ -9,8 +9,8 @@
 ## 安全邊界
 
 - 原生 App 仍只取得短效 Worker session；Google access token、refresh token、DEK、主密碼與救援碼不得進入 Web bundle、Android resources、iOS plist 或 Git。
-- 原生 OAuth 已有程式骨架：只在 Capacitor 原生環境採系統瀏覽器 + Authorization Code + PKCE，不能沿用 Web PWA 的 popup flow；未設定正式 App Link 時會明確拒絕連結，不會降級到 WebView popup。
-- Worker 已有 native start／exchange endpoint；以 native public client + PKCE verifier 驗證 authorization code 後才建立短效 Worker session。本階段不會以 Web client secret 冒充原生 client。
+- Android 原生 OAuth 只在 Capacitor 原生環境呼叫 Google Play services `AuthorizationClient`；以 `requestOfflineAccess(serverClientId)` 取得一次性 server auth code，再送到 Worker 交換 refresh token。Google 密碼、access token、refresh token與 Web client secret都不會進入 WebView bundle。
+- Worker 的 native exchange endpoint只接受一次性 server auth code，並以伺服器端 Web client secret完成交換後建立短效 Worker session。Android OAuth client仍以 package name與簽章 SHA-1識別正式 App。
 - Android trusted session 已改為 Android Keystore：DEK 僅以 Keystore 的不可匯出 AES 金鑰加密，IndexedDB 只保存 vault／裝置／session epoch 中繼資料；每次重新開啟，或離開背景滿2分鐘後回到前景，均要求生物辨識或裝置螢幕鎖。iOS Keychain 仍待實作。
 - 這項 Android 實作已通過 Java 編譯、Web 安全邊界測試與 debug APK 建置；但完整實機解鎖驗證需等待原生 OAuth + PKCE 完成，讓 App 可建立真實的 Drive trusted session。
 
@@ -29,15 +29,15 @@
 
 ## 尚待建立前的外部設定
 
-- Android：Google 已停止支援 Android custom URI scheme OAuth 回跳。必須先有自有 HTTPS 網域，建立並驗證 Android App Link，才可安全完成系統瀏覽器 + PKCE；不能以目前的 `workers.dev` 或自訂 scheme 冒充正式回跳。
-- iOS：登入 Apple Developer、註冊 bundle ID，建立 iOS OAuth client；其回跳設定要與日後 Android 的正式 HTTPS callback 策略一併確認。
-- Google Cloud：原生 client callback 與 Worker PKCE exchange 設計完成後才新增，不把 web client secret 複製到原生端。
+- Android：在 Google Auth Platform建立 Android OAuth client，package name為 `io.github.hgs3767994.wuwangwo`，正式 SHA-1為 `CA:83:23:D0:02:68:C0:00:22:70:0B:59:BF:6E:26:42:4C:B5:14:AA`。若用 debug APK測試，還要另建一個相同 package name、debug SHA-1的 client。
+- iOS：登入 Apple Developer、註冊 bundle ID，建立 iOS OAuth client並改用 Google Sign-In for iOS／AppAuth支援的原生流程；Windows無法完成 Xcode簽署與真機驗證。
+- Google Cloud：Android `requestOfflineAccess` 使用既有 Cloudflare Web backend client ID 作為 server client ID。Web client secret只存在 Worker secret；Android bundle只包含公開 client ID。
 
-## 購買自有網域後：啟用原生 OAuth 的順序
+## `shawnghong.com` 正式環境啟用順序
 
-1. 選定唯一 HTTPS App Link，例如 `https://auth.example.com/oauth/native/complete`；不可在不同平台臨時改用不同路徑。
-2. 在 Android manifest 加入該 host/path 的 `autoVerify` App Link intent filter，並在 `https://auth.example.com/.well-known/assetlinks.json` 放入正式簽章的 SHA-256；Google Play App Signing 啟用後也需加入 Play 的 app-signing certificate 指紋。
-3. 在 Google Cloud 建立 Android OAuth client（App ID `io.github.hgs3767994.wuwangwo` + 正式 SHA-1），並把相同 HTTPS App Link 設為授權 redirect URI。
-4. 在 Worker 設定 `GOOGLE_NATIVE_CLIENT_ID`、`NATIVE_OAUTH_APP_LINK_URI`，並在 `APP_ORIGINS` 加入 Android Capacitor origin `http://localhost`（iOS 啟用時另加入 `capacitor://localhost`）。這些不是 secret；`TOKEN_ENCRYPTION_KEY` 等既有 secret 保持只在 Worker。
-5. 在原生 bundle runtime config 設定同一個 `googleDrive.nativeOAuthCallbackUrl`。App 啟動系統瀏覽器後，只有與此 URL 完全相符的 App Link callback 才會被接受。
-6. 實機測試取消、逾時、拒絕授權、成功回跳、關閉重開、背景鎖定與 session epoch 失效；通過後才允許 Android 版 Google Drive 同步上線。
+1. PWA 使用 `https://wuwangwo.shawnghong.com`；Worker 使用 `https://wuwangwo-api.shawnghong.com`，Web callback固定為 `https://wuwangwo-api.shawnghong.com/v1/oauth/google/callback`。
+2. 在 Cloudflare把 `wuwangwo-api.shawnghong.com` 設成 `forget-me-not-oauth` 的 Custom Domain；在 DNS建立 `wuwangwo` 指向 `hgs3767994.github.io`，再到 GitHub Pages設定相同 Custom domain。
+3. 在 Google Auth Platform的 Cloudflare Web backend client加入新的 callback；OAuth品牌頁的首頁、隱私權政策與服務條款改用 `wuwangwo.shawnghong.com`。
+4. 建立 Android OAuth client（package name + 正式 SHA-1）。原生 App不使用任意 HTTPS App Link作為 Google redirect URI；Google Play services會把結果直接交回原生 Activity。
+5. Android bundle設定 `GOOGLE_OAUTH_API_URL=https://wuwangwo-api.shawnghong.com` 與公开的 `GOOGLE_OAUTH_SERVER_CLIENT_ID`，再執行 `npm run cap:sync`。
+6. 實機測試取消、拒絕授權、成功交換、關閉重開、背景鎖定、Worker session到期與 `sessionEpoch` 失效；通過後才產生正式 AAB／APK。

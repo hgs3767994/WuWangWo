@@ -2,8 +2,11 @@ import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const outputDir = "dist";
-const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
-const oauthApiUrl = process.env.GOOGLE_OAUTH_API_URL?.trim().replace(/\/$/, "") ?? "";
+const customDomain = process.env.PWA_CUSTOM_DOMAIN?.trim() || "wuwangwo.shawnghong.com";
+const GOOGLE_OAUTH_CLIENT_ID = "302767053218-d30fo5htqjldfip8nfo9nbm53bdn8nah.apps.googleusercontent.com";
+const GOOGLE_OAUTH_API_URL = "https://wuwangwo-api.shawnghong.com";
+const clientId = GOOGLE_OAUTH_CLIENT_ID;
+const oauthApiUrl = GOOGLE_OAUTH_API_URL;
 const driveProvider = oauthApiUrl ? "google" : "mock";
 const entries = [
   "index.html",
@@ -24,6 +27,7 @@ for (const entry of entries) {
 }
 
 await writeFile(join(outputDir, ".nojekyll"), "");
+await writeFile(join(outputDir, "CNAME"), `${customDomain}\n`);
 await writeFile(join(outputDir, "404.html"), redirectPage());
 await writeFile(join(outputDir, "src", "runtime-config.js"), runtimeConfigSource({ clientId, oauthApiUrl, driveProvider }));
 

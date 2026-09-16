@@ -2,12 +2,12 @@ const userConfig = globalThis.window?.FORGET_ME_NOT_CONFIG ?? {};
 
 export const APP_CONFIG = {
   appVersion: "0.1.0",
-  cacheName: "forget-me-not-v164",
+  cacheName: "forget-me-not-v165",
   driveProvider: "mock",
   googleDrive: {
     clientId: "",
     oauthApiUrl: "",
-    nativeOAuthCallbackUrl: "",
+    nativeServerClientId: "",
     appFolderName: "勿忘我",
     fileNames: {
       keyPackage: "key-package.enc",
@@ -18,7 +18,7 @@ export const APP_CONFIG = {
   googleDrive: {
     clientId: "",
     oauthApiUrl: "",
-    nativeOAuthCallbackUrl: "",
+    nativeServerClientId: "",
     appFolderName: "勿忘我",
     fileNames: {
       keyPackage: "key-package.enc",

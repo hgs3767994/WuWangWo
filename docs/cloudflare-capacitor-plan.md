@@ -54,15 +54,15 @@ Recovery v2 的 key package 只有 `recoveryAuthorizationVerifier`，不能在�
 - `GOOGLE_WEB_CLIENT_SECRET`：僅以 Worker secret 保存。
 - `OAUTH_STATE_SIGNING_KEY`：僅以 Worker secret 保存；用於 state／一次性登入授權。
 - `TOKEN_ENCRYPTION_KEY`：僅以 Worker secret 保存；用於資料庫中的 refresh token envelope。
-- `GOOGLE_NATIVE_CLIENT_ID`：Android/iOS public OAuth client ID；可公開，但尚未設定前 native OAuth endpoint 會保持停用。
-- `NATIVE_OAUTH_APP_LINK_URI`：唯一的正式 HTTPS App Link callback；native start endpoint 只接受 PKCE code challenge，native exchange endpoint 只接受同一 state 所對應的 verifier。
+- Android 原生端使用 Google Play services `AuthorizationClient.requestOfflineAccess()`；Android OAuth client以 package name與簽章 SHA-1識別 App，公開的 Web backend client ID用來要求一次性 server auth code。
+- native exchange endpoint只接收 Google Play services回傳的一次性 server auth code；Worker以既有 `GOOGLE_WEB_CLIENT_ID`／`GOOGLE_WEB_CLIENT_SECRET`交換並保存加密 refresh token。
 
 在沒有自有網域時，可將 `https://<worker>.<account-subdomain>.workers.dev` 作為開發 callback。它不應作為正式 OAuth 或上架的長期網址；正式環境應採已驗證的自有網域。
 
 ## 下一階段的 API 邊界
 
 1. Web OAuth BFF：`/v1/oauth/google/start`、`/callback`、`/session`、`/logout`。
-2. 原生 OAuth：Android/iOS 從系統瀏覽器啟動 Authorization Code + PKCE，回傳 app deep link；不在 WebView 載入 GIS popup。
+2. 原生 OAuth：Android使用 Google Play services AuthorizationClient；iOS日後使用 Google Sign-In for iOS／AppAuth支援流程。兩者都不在 WebView載入 GIS popup。
 3. 共用同步 API：只接受與回傳已加密的 key package、vault 和 recovery request；所有 API session 都採短效、可撤銷憑證。
 4. Token store：採 D1 schema 保存加密 token envelope、Google subject、scope、更新時間與撤銷狀態；不保存 DEK、主密碼、救援碼或 vault 明文。
 

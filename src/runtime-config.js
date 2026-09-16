@@ -4,7 +4,8 @@
 // window.FORGET_ME_NOT_CONFIG = {
 //   driveProvider: "google",
 //   googleDrive: {
-//     oauthApiUrl: "https://YOUR-WORKER.workers.dev"
+//     oauthApiUrl: "https://wuwangwo-api.shawnghong.com",
+//     nativeServerClientId: "YOUR-WEB-SERVER-CLIENT-ID.apps.googleusercontent.com"
 //   }
 // };
 

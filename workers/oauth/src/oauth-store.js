@@ -5,6 +5,13 @@ export async function saveAccount(database, { subject, envelope, scopes, expires
     .bind(subject, envelope.ciphertext, envelope.iv, scopes, expiresAt, refreshTokenPresent ? 1 : 0, now, now).run();
 }
 
+export async function accountBySubject(database, { subject }) {
+  return database
+    .prepare("SELECT google_subject, token_ciphertext, token_iv, scopes, token_expires_at, refresh_token_present FROM oauth_accounts WHERE google_subject = ? AND revoked_at IS NULL")
+    .bind(subject)
+    .first();
+}
+
 export async function createHandoff(database, { code, subject, now }) {
   const hash = await sha256(code);
   const expiresAt = new Date(new Date(now).getTime() + 2 * 60 * 1000).toISOString();

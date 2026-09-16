@@ -53,34 +53,14 @@ test("OAuth start remains unavailable without complete configuration", async () 
   assert.deepEqual(await response.json(), { error: "oauth-not-configured" });
 });
 
-test("native OAuth remains unavailable until an App Link and native client are configured", async () => {
-  const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/native/start?code_challenge=" + "a".repeat(43)), {});
-  assert.equal(response.status, 503);
+test("native OAuth reports the same secure backend prerequisites as web OAuth", async () => {
+  const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/native/configuration"), {});
+  assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.error, "native-oauth-not-configured");
-  assert(body.missing.includes("NATIVE_OAUTH_APP_LINK_URI"));
-});
-
-test("native OAuth start redirects to Google with PKCE and an App Link redirect URI", async () => {
-  const database = {
-    prepare: (query) => query === "SELECT 1 AS ready"
-      ? { first: async () => ({ ready: 1 }) }
-      : { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) }
-  };
-  const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/native/start?code_challenge=" + "a".repeat(43)), {
-    APP_ORIGINS: "http://localhost",
-    GOOGLE_NATIVE_CLIENT_ID: "android-client-id",
-    NATIVE_OAUTH_APP_LINK_URI: "https://app.example/oauth/native/complete",
-    OAUTH_STATE_SIGNING_KEY: "state-key",
-    TOKEN_ENCRYPTION_KEY: "encryption-key",
-    OAUTH_DB: database
-  });
-  assert.equal(response.status, 302);
-  const location = new URL(response.headers.get("location"));
-  assert.equal(location.origin, "https://accounts.google.com");
-  assert.equal(location.searchParams.get("redirect_uri"), "https://app.example/oauth/native/complete");
-  assert.equal(location.searchParams.get("code_challenge"), "a".repeat(43));
-  assert.equal(location.searchParams.get("code_challenge_method"), "S256");
+  assert.equal(body.nativeOAuthReady, false);
+  assert(body.missing.includes("GOOGLE_WEB_CLIENT_ID"));
+  assert(body.missing.includes("GOOGLE_WEB_CLIENT_SECRET"));
+  assert.match(body.message, /AuthorizationClient/);
 });
 
 test("OAuth start refuses to begin before the D1 session schema is ready", async () => {
@@ -115,6 +95,72 @@ test("OAuth start redirects with a nonce cookie instead of throwing", async () =
   assert.equal(response.status, 302);
   assert.equal(new URL(response.headers.get("location")).origin, "https://accounts.google.com");
   assert.match(response.headers.get("set-cookie"), /^forget_me_not_oauth_nonce=/);
+});
+
+test("native OAuth exchanges a one-time server auth code without exposing Google tokens", async () => {
+  const writes = [];
+  const database = {
+    prepare(query) {
+      if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
+      if (query.includes("sqlite_master")) {
+        return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      }
+      if (query.startsWith("SELECT google_subject")) {
+        return { bind: () => ({ first: async () => null }) };
+      }
+      return {
+        bind: (...values) => ({
+          run: async () => { writes.push({ query, values }); }
+        })
+      };
+    }
+  };
+  const requests = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    if (String(url) === "https://oauth2.googleapis.com/token") {
+      return Response.json({ access_token: "google-access-token", refresh_token: "google-refresh-token", expires_in: 3600, scope: "drive.appdata openid email" });
+    }
+    if (String(url) === "https://openidconnect.googleapis.com/v1/userinfo") {
+      return Response.json({ sub: "google-subject", email: "person@example.test" });
+    }
+    return new Response(null, { status: 404 });
+  };
+
+  try {
+    const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/native/exchange", {
+      method: "POST",
+      headers: { Origin: "https://example.test", "content-type": "application/json" },
+      body: JSON.stringify({ server_auth_code: "single-use-code" })
+    }), {
+      APP_ORIGINS: "https://example.test",
+      GOOGLE_WEB_CLIENT_ID: "server-client.apps.googleusercontent.com",
+      GOOGLE_OAUTH_REDIRECT_URI: "https://example.test/callback",
+      GOOGLE_WEB_CLIENT_SECRET: "worker-only-secret",
+      OAUTH_STATE_SIGNING_KEY: "state-key",
+      TOKEN_ENCRYPTION_KEY: "encryption-key",
+      OAUTH_DB: database
+    });
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.accountEmail, "person@example.test");
+    assert.equal(typeof payload.sessionToken, "string");
+    assert.equal(requests.length, 2);
+    const tokenBody = new URLSearchParams(requests[0].options.body);
+    assert.equal(tokenBody.get("code"), "single-use-code");
+    assert.equal(tokenBody.get("client_secret"), "worker-only-secret");
+    assert.equal(tokenBody.get("redirect_uri"), "");
+    assert.equal(requests[1].options.headers.Authorization, "Bearer google-access-token");
+    assert.equal(writes.length, 2);
+    assert(!JSON.stringify(writes).includes("google-refresh-token"));
+    assert(!JSON.stringify(writes).includes("google-access-token"));
+    assert(!JSON.stringify(payload).includes("google-refresh-token"));
+    assert(!JSON.stringify(payload).includes("google-access-token"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("session revoke accepts an opaque Bearer token and does not store its plaintext", async () => {

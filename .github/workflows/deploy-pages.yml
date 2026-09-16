@@ -41,6 +41,7 @@ jobs:
         env:
           GOOGLE_OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_API_URL: ${{ vars.GOOGLE_OAUTH_API_URL }}
+          PWA_CUSTOM_DOMAIN: ${{ vars.PWA_CUSTOM_DOMAIN }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

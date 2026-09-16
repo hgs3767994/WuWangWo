@@ -32,7 +32,9 @@ const requiredFiles = [
   "src/styles.css",
   "android/app/src/main/res/xml/backup_rules.xml",
   "android/app/src/main/res/xml/data_extraction_rules.xml",
-  "android/app/src/main/java/io/github/hgs3767994/wuwangwo/NativeFileExportPlugin.java"
+  "android/app/src/main/java/io/github/hgs3767994/wuwangwo/NativeFileExportPlugin.java",
+  "android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationPlugin.java",
+  "android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationActivity.java"
 ];
 const appShellRequiredFiles = requiredFiles.filter((file) => ![
   "README.md",
@@ -47,7 +49,9 @@ const appShellRequiredFiles = requiredFiles.filter((file) => ![
   "scripts/smoke-test.mjs",
   "android/app/src/main/res/xml/backup_rules.xml",
   "android/app/src/main/res/xml/data_extraction_rules.xml",
-  "android/app/src/main/java/io/github/hgs3767994/wuwangwo/NativeFileExportPlugin.java"
+  "android/app/src/main/java/io/github/hgs3767994/wuwangwo/NativeFileExportPlugin.java",
+  "android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationPlugin.java",
+  "android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationActivity.java"
 ].includes(file));
 
 const checks = [];
@@ -218,11 +222,19 @@ await check("native Android back button exits only from root routes", async () =
   });
 });
 
-await check("native OAuth uses system browser, App Link, and PKCE", async () => {
+await check("native Android OAuth uses Google AuthorizationClient and a one-time server auth code", async () => {
   const nativeOAuthSource = await readFile("src/native-oauth.js", "utf8");
   const driveGoogleSource = await readFile("src/drive-google.js", "utf8");
-  ["Browser.open", "appUrlOpen", "code_challenge", "code_verifier", "nativeOAuthCallbackUrl"].forEach((text) => {
+  const pluginSource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationPlugin.java", "utf8");
+  const activitySource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationActivity.java", "utf8");
+  ["GoogleDriveAuthorization.authorize", "nativeServerClientId", "server_auth_code"].forEach((text) => {
     if (!nativeOAuthSource.includes(text)) throw new Error(`native OAuth adapter is missing ${text}.`);
+  });
+  ["GoogleDriveAuthorizationActivity", "serverAuthCode"].forEach((text) => {
+    if (!pluginSource.includes(text)) throw new Error(`native OAuth Capacitor plugin is missing ${text}.`);
+  });
+  ["AuthorizationClient", "requestOfflineAccess", "drive.appdata", "getServerAuthCode"].forEach((text) => {
+    if (!activitySource.includes(text)) throw new Error(`native OAuth Android activity is missing ${text}.`);
   });
   if (!driveGoogleSource.includes("isNativeOAuthRuntime()")) throw new Error("Google Drive adapter must select native OAuth outside the WebView popup flow.");
 });

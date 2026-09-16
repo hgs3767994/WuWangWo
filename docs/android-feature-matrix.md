@@ -15,13 +15,13 @@
 | 背景鎖定 | 程式已完成，待真實 Drive session | 有 trusted session 後，切到背景再回來 | 回到前景應要求裝置驗證。 |
 | 重開／生物辨識或螢幕鎖解鎖 | 程式已完成，待真實 Drive session | 強制關閉後重新開啟 | Android Keystore session 不會把 DEK 放到 IndexedDB。 |
 | 登出所有裝置／session epoch | 程式已完成，待真實 Drive session | 使用兩台測試裝置 | 舊 session 必須失效。 |
-| Google Drive 連結與同步 | 原生 OAuth + PKCE 骨架完成，尚不可端到端測試 | 等待自有網域、App Link、Google Cloud 設定與 Worker 部署 | 未設定時顯示明確提示，不會退回 WebView popup。 |
+| Google Drive 連結與同步 | Google Play services AuthorizationClient橋接與 Worker server-auth-code exchange已建立，尚待外部設定後端到端測試 | 建立 Android OAuth client、啟用正式 Worker domain並重建 APK | 未設定時顯示明確提示，不會退回 WebView popup。 |
 | 更新後資料保留 | 可測試 | 建立測試人物，再以 `adb install -r` 安裝新版 APK | 不可先解除安裝；解除安裝會移除 App 私有資料。 |
 
 ## 每次 debug APK 的可重複流程
 
 1. 連接手機，開啟 USB 偵錯；在 PowerShell 執行 `adb devices`，狀態必須是 `device`。
-2. 在專案根目錄設定 `GOOGLE_OAUTH_API_URL` 為 Worker URL，執行 `npm run cap:sync`。
+2. 在專案根目錄設定 `GOOGLE_OAUTH_API_URL` 為 Worker URL、`GOOGLE_OAUTH_SERVER_CLIENT_ID` 為公開 Web backend client ID，再執行 `npm run cap:sync`。
 3. 以 JDK 21 建置：`./android/gradlew.bat -p ./android :app:assembleDebug --no-daemon`。
 4. 安裝但保留資料：`adb install -r ./android/app/build/outputs/apk/debug/app-debug.apk`。
 5. 核對安全旗標：`adb shell dumpsys package io.github.hgs3767994.wuwangwo`；輸出應顯示 `allowBackup=false`。
