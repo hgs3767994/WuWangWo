@@ -7,6 +7,7 @@ import { executeDriveOperation } from "./drive-proxy.js";
 import { approveRecoveryRequest, completeRecoveryRequest, createRecoveryRequest, listRecoveryRequests, recordFailedVerification, recoveryRequest, recoveryVerificationRecord } from "./recovery-store.js";
 
 const SERVICE_NAME = "forget-me-not-oauth";
+const WORKER_SESSION_COOKIE = "forget_me_not_worker_session";
 const REQUIRED_SECRETS = ["GOOGLE_WEB_CLIENT_SECRET", "OAUTH_STATE_SIGNING_KEY", "TOKEN_ENCRYPTION_KEY"];
 const REQUIRED_PUBLIC_VALUES = ["APP_ORIGINS", "GOOGLE_WEB_CLIENT_ID", "GOOGLE_OAUTH_REDIRECT_URI"];
 
@@ -87,7 +88,11 @@ export default {
         if (!subject) return json({ error: "handoff-invalid-or-expired" }, 400, corsHeaders(origin));
         const token = crypto.randomUUID();
         const session = await createSession(env.OAUTH_DB, { token, subject, now });
-        return json({ sessionToken: token, expiresAt: session.expiresAt }, 200, corsHeaders(origin));
+        return json(
+          { sessionToken: token, expiresAt: session.expiresAt },
+          200,
+          { ...corsHeaders(origin), "set-cookie": workerSessionCookie(token, session.expiresAt) }
+        );
       } catch (error) {
         if (error?.message === "handoff-invalid") return json({ error: "handoff-invalid-or-expired" }, 400, corsHeaders(origin));
         return json({ error: "handoff-exchange-failed" }, 500, corsHeaders(origin));
@@ -101,11 +106,11 @@ export default {
       const storage = await databaseStatus(env.OAUTH_DB);
       if (!storage.schemaReady) return json({ error: "storage-not-ready" }, 503, corsHeaders(origin));
       try {
-        const token = bearerToken(request.headers.get("Authorization"));
-        if (!token) return json({ error: "session-required" }, 401, corsHeaders(origin));
+        const token = requestSessionToken(request);
+        if (!token) return sessionError("session-required", origin);
         const now = new Date().toISOString();
         const account = await sessionAccount(env.OAUTH_DB, { token, now });
-        if (!account) return json({ error: "session-expired" }, 401, corsHeaders(origin));
+        if (!account) return sessionError("session-expired", origin);
         const accessToken = await currentAccessToken(env, account, now);
         const body = await request.json();
         const result = await executeDriveOperation({ ...body, accessToken });
@@ -123,12 +128,12 @@ export default {
       if (!hasRequiredConfiguration(env)) return json({ error: "oauth-not-configured" }, 503, corsHeaders(origin));
       const storage = await databaseStatus(env.OAUTH_DB);
       if (!storage.schemaReady) return json({ error: "storage-not-ready" }, 503, corsHeaders(origin));
-      const token = bearerToken(request.headers.get("Authorization"));
-      if (!token) return json({ error: "session-required" }, 401, corsHeaders(origin));
+      const token = requestSessionToken(request);
+      if (!token) return sessionError("session-required", origin);
       try {
         await revokeSession(env.OAUTH_DB, { token, now: new Date().toISOString() });
         // Treat repeated logout as successful without revealing whether a token was valid.
-        return json({ revoked: true }, 200, corsHeaders(origin));
+        return json({ revoked: true }, 200, { ...corsHeaders(origin), "set-cookie": clearWorkerSessionCookie() });
       } catch {
         return json({ error: "session-revoke-failed" }, 500, corsHeaders(origin));
       }
@@ -139,9 +144,9 @@ export default {
       if (!isAllowedOrigin(origin, env.APP_ORIGINS)) return json({ error: "origin-not-allowed" }, 403);
       if (!hasRequiredConfiguration(env)) return json({ error: "oauth-not-configured" }, 503, corsHeaders(origin));
       if (!(await recoveryDatabaseStatus(env.OAUTH_DB)).ready) return json({ error: "recovery-storage-not-ready" }, 503, corsHeaders(origin));
-      const token = bearerToken(request.headers.get("Authorization"));
+      const token = requestSessionToken(request);
       const account = token ? await sessionAccount(env.OAUTH_DB, { token, now: new Date().toISOString() }) : null;
-      if (!account) return json({ error: "session-expired" }, 401, corsHeaders(origin));
+      if (!account) return sessionError("session-expired", origin);
       const now = new Date().toISOString();
       const suffix = url.pathname.slice("/v1/recovery/requests/".length);
       try {
@@ -240,8 +245,12 @@ function allowedReturnTo(value, origins) {
   try { return String(origins).split(",").map((item) => item.trim()).includes(new URL(value).origin); } catch { return false; }
 }
 function isAllowedOrigin(origin, origins) { return Boolean(origin) && String(origins ?? "").split(",").map((item) => item.trim()).includes(origin); }
-function cookie(header, name) { return String(header ?? "").split(";").map((item) => item.trim()).find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1) ?? ""; }
+function cookie(header, name) {
+  const value = String(header ?? "").split(";").map((item) => item.trim()).find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1) ?? "";
+  try { return decodeURIComponent(value); } catch { return ""; }
+}
 function bearerToken(header) { const match = /^Bearer\s+(.+)$/i.exec(String(header ?? "")); return match?.[1] ?? ""; }
+function requestSessionToken(request) { return bearerToken(request.headers.get("Authorization")) || cookie(request.headers.get("Cookie"), WORKER_SESSION_COOKIE); }
 
 function missingConfiguration(env) {
   return [...REQUIRED_PUBLIC_VALUES, ...REQUIRED_SECRETS].filter((name) => !String(env?.[name] ?? "").trim());
@@ -283,9 +292,22 @@ async function recoveryDatabaseStatus(database) {
   } catch { return { ready: false }; }
 }
 
-function corsHeaders(origin) { return { "access-control-allow-origin": origin, "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type, authorization", vary: "Origin" }; }
+function corsHeaders(origin) { return { "access-control-allow-origin": origin, "access-control-allow-credentials": "true", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type, authorization", vary: "Origin" }; }
 function bounded(value, maxLength) { const text = String(value ?? "").trim(); return text && text.length <= maxLength ? text : ""; }
 function redirect(location, status, setCookie) { return new Response(null, { status, headers: { location, "set-cookie": setCookie, "cache-control": "no-store" } }); }
+
+function workerSessionCookie(token, expiresAt) {
+  const maxAge = Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000));
+  return `${WORKER_SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=None; Path=/v1; Max-Age=${maxAge}`;
+}
+
+function clearWorkerSessionCookie() {
+  return `${WORKER_SESSION_COOKIE}=; HttpOnly; Secure; SameSite=None; Path=/v1; Max-Age=0`;
+}
+
+function sessionError(error, origin) {
+  return json({ error }, 401, { ...corsHeaders(origin), "set-cookie": clearWorkerSessionCookie() });
+}
 
 function popupHandoff(destination, handoff) {
   return popupPage(destination, { type: "forget-me-not-oauth-handoff", handoff });

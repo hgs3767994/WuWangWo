@@ -33,6 +33,7 @@ const requiredFiles = [
   "android/app/src/main/res/xml/backup_rules.xml",
   "android/app/src/main/res/xml/data_extraction_rules.xml",
   "android/app/src/main/java/io/github/hgs3767994/wuwangwo/NativeFileExportPlugin.java",
+  "android/app/src/main/java/io/github/hgs3767994/wuwangwo/OAuthSessionPlugin.java",
   "android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationPlugin.java",
   "android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationActivity.java"
 ];
@@ -50,6 +51,7 @@ const appShellRequiredFiles = requiredFiles.filter((file) => ![
   "android/app/src/main/res/xml/backup_rules.xml",
   "android/app/src/main/res/xml/data_extraction_rules.xml",
   "android/app/src/main/java/io/github/hgs3767994/wuwangwo/NativeFileExportPlugin.java",
+  "android/app/src/main/java/io/github/hgs3767994/wuwangwo/OAuthSessionPlugin.java",
   "android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationPlugin.java",
   "android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationActivity.java"
 ].includes(file));
@@ -250,15 +252,23 @@ await check("native Android OAuth uses Google AuthorizationClient and a one-time
   const driveGoogleSource = await readFile("src/drive-google.js", "utf8");
   const pluginSource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationPlugin.java", "utf8");
   const activitySource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationActivity.java", "utf8");
+  const oauthSessionPluginSource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/OAuthSessionPlugin.java", "utf8");
   ["GoogleDriveAuthorization.authorize", "nativeServerClientId", "server_auth_code"].forEach((text) => {
     if (!nativeOAuthSource.includes(text)) throw new Error(`native OAuth adapter is missing ${text}.`);
   });
-  ["GoogleDriveAuthorizationActivity", "serverAuthCode"].forEach((text) => {
+  ["GoogleDriveAuthorizationActivity", "serverAuthCode", "AuthorizationClient", "requestOfflineAccess", "drive.appdata", "result.hasResolution()"].forEach((text) => {
     if (!pluginSource.includes(text)) throw new Error(`native OAuth Capacitor plugin is missing ${text}.`);
   });
-  ["AuthorizationClient", "requestOfflineAccess", "drive.appdata", "getServerAuthCode"].forEach((text) => {
+  ["EXTRA_PENDING_INTENT", "PendingIntent", "getAuthorizationResultFromIntent"].forEach((text) => {
     if (!activitySource.includes(text)) throw new Error(`native OAuth Android activity is missing ${text}.`);
   });
+  ["AndroidKeyStore", "AES/GCM/NoPadding", "OAuthSession"].forEach((text) => {
+    if (!oauthSessionPluginSource.includes(text)) throw new Error(`native OAuth session storage is missing ${text}.`);
+  });
+  if (!nativeOAuthSource.includes("restoreNativeGoogleOAuthSession")) throw new Error("native OAuth adapter must restore the short-lived Worker session from Android Keystore.");
+  if (!driveGoogleSource.includes('credentials: "include"') || !driveGoogleSource.includes("PERSISTENT_SESSION_MARKER_KEY")) {
+    throw new Error("PWA OAuth must reuse the HttpOnly Worker session without persisting its bearer token.");
+  }
   if (!appSource.includes("isNativeOAuthRuntime() || isSimulatedDrive() || sessionReusable")) {
     throw new Error("native OAuth must bypass the web popup reservation.");
   }

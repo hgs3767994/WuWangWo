@@ -97,6 +97,36 @@ test("OAuth start redirects with a nonce cookie instead of throwing", async () =
   assert.match(response.headers.get("set-cookie"), /^forget_me_not_oauth_nonce=/);
 });
 
+test("web OAuth handoff creates a short-lived HttpOnly Worker session cookie", async () => {
+  const database = {
+    prepare(query) {
+      if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      if (query.startsWith("UPDATE oauth_handoffs")) return { bind: () => ({ first: async () => ({ google_subject: "subject-1" }) }) };
+      if (query.startsWith("INSERT INTO oauth_sessions")) return { bind: () => ({ run: async () => ({ success: true }) }) };
+      throw new Error(`unexpected query: ${query}`);
+    }
+  };
+  const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/handoff/exchange", {
+    method: "POST",
+    headers: { Origin: "https://example.test", "content-type": "application/json" },
+    body: JSON.stringify({ handoff: "single-use-handoff" })
+  }), {
+    APP_ORIGINS: "https://example.test",
+    GOOGLE_WEB_CLIENT_ID: "public-client-id",
+    GOOGLE_OAUTH_REDIRECT_URI: "https://example.test/callback",
+    GOOGLE_WEB_CLIENT_SECRET: "secret",
+    OAUTH_STATE_SIGNING_KEY: "state-key",
+    TOKEN_ENCRYPTION_KEY: "encryption-key",
+    OAUTH_DB: database
+  });
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(typeof payload.sessionToken, "string");
+  assert.match(response.headers.get("set-cookie"), /^forget_me_not_worker_session=.*HttpOnly; Secure; SameSite=None; Path=\/v1; Max-Age=/);
+  assert.equal(response.headers.get("access-control-allow-credentials"), "true");
+});
+
 test("native OAuth exchanges a one-time server auth code without exposing Google tokens", async () => {
   const writes = [];
   const database = {
@@ -188,4 +218,29 @@ test("session revoke accepts an opaque Bearer token and does not store its plain
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { revoked: true });
   assert(calls.some((query) => query.includes("UPDATE oauth_sessions SET revoked_at")));
+});
+
+test("session revoke accepts the HttpOnly PWA session cookie", async () => {
+  const database = {
+    prepare(query) {
+      if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      return { bind: () => ({ first: async () => ({ google_subject: "subject-1" }) }) };
+    }
+  };
+  const response = await worker.fetch(new Request("https://example.test/v1/oauth/session/revoke", {
+    method: "POST",
+    headers: { Origin: "https://example.test", Cookie: "forget_me_not_worker_session=opaque-cookie-session" }
+  }), {
+    APP_ORIGINS: "https://example.test",
+    GOOGLE_WEB_CLIENT_ID: "public-client-id",
+    GOOGLE_OAUTH_REDIRECT_URI: "https://example.test/callback",
+    GOOGLE_WEB_CLIENT_SECRET: "secret",
+    OAUTH_STATE_SIGNING_KEY: "state-key",
+    TOKEN_ENCRYPTION_KEY: "encryption-key",
+    OAUTH_DB: database
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { revoked: true });
+  assert.match(response.headers.get("set-cookie"), /Max-Age=0$/);
 });

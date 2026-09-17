@@ -1,5 +1,5 @@
 import { getItem, removeItem, setItem } from "./db.js";
-import { approveDriveRecoveryRequest, completeDriveRecoveryRequest, connectDrive, createDriveRecoveryRequest, disconnectDrive, driveAuthStatus, driveReadiness, getDriveRecoveryRequest, listDriveFileRevisions, listDriveFiles, listDriveRecoveryRequests, readDriveFile, readDriveFileRevision, verifyDriveRecoveryRequest, writeDriveFile } from "./drive.js";
+import { approveDriveRecoveryRequest, completeDriveRecoveryRequest, connectDrive, createDriveRecoveryRequest, disconnectDrive, driveAuthStatus, driveReadiness, getDriveRecoveryRequest, listDriveFileRevisions, listDriveFiles, listDriveRecoveryRequests, readDriveFile, readDriveFileRevision, restoreDriveSession, verifyDriveRecoveryRequest, writeDriveFile } from "./drive.js";
 import { completeGoogleOAuthHandoff } from "./drive-google.js";
 import { APP_CONFIG, driveFileName, driveProviderLabel } from "./config.js";
 import { nativeFileExportAvailable, saveNativeExport } from "./native-file-export.js";
@@ -227,6 +227,8 @@ async function boot() {
   registerAutoLock();
   registerNativeBackButton();
   const freshPwaLaunch = registerPwaRuntimeSession();
+  bootStage = { code: "BOOT-OAUTH-SESSION", label: "還原 Google Drive 短效連線" };
+  try { await restoreDriveSession(); } catch (error) { console.warn("無法還原 Google Drive 短效連線", error); }
   let oauthHandoffCompleted = false;
   let oauthHandoffError = null;
   bootStage = { code: "BOOT-OAUTH-HANDOFF", label: "處理 Google Drive 授權回跳" };

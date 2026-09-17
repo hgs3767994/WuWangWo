@@ -2,6 +2,12 @@ import { APP_CONFIG, isGoogleDriveConfigured } from "./config.js";
 
 const SESSION_STORAGE_KEY = "forget-me-not-oauth-session";
 
+function sessionPlugin() {
+  const capacitor = globalThis.Capacitor;
+  if (!capacitor?.isNativePlatform?.()) return null;
+  return capacitor.Plugins?.OAuthSession ?? null;
+}
+
 export function isNativeOAuthRuntime() {
   const plugins = globalThis.Capacitor?.Plugins;
   return Boolean(globalThis.Capacitor?.isNativePlatform?.() && plugins?.GoogleDriveAuthorization?.authorize);
@@ -17,7 +23,7 @@ export function nativeOAuthReadiness() {
 }
 
 export async function connectNativeGoogleDrive({ interactive = true } = {}) {
-  const existing = readSession();
+  const existing = readSession() ?? await restoreNativeGoogleOAuthSession();
   if (existing && Date.parse(existing.expiresAt) > Date.now() + 30_000) {
     return { connected: true, accountEmail: existing.accountEmail ?? "" };
   }
@@ -54,7 +60,36 @@ export async function connectNativeGoogleDrive({ interactive = true } = {}) {
     accountEmail: payload.accountEmail ?? ""
   };
   sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  await storeNativeGoogleOAuthSession(session);
   return { connected: true, accountEmail: session.accountEmail };
+}
+
+export async function restoreNativeGoogleOAuthSession() {
+  const bridge = sessionPlugin();
+  if (!bridge?.load) return null;
+  try {
+    const session = await bridge.load();
+    if (!session?.sessionToken || Date.parse(session.expiresAt ?? "") <= Date.now() + 30_000) {
+      await clearNativeGoogleOAuthSession();
+      return null;
+    }
+    const restored = {
+      sessionToken: String(session.sessionToken),
+      expiresAt: String(session.expiresAt),
+      accountEmail: String(session.accountEmail ?? "")
+    };
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(restored));
+    return restored;
+  } catch (error) {
+    console.warn("無法還原原生 Google Drive 短效 session", error);
+    return null;
+  }
+}
+
+export async function clearNativeGoogleOAuthSession() {
+  const bridge = sessionPlugin();
+  if (!bridge?.clear) return;
+  try { await bridge.clear(); } catch (error) { console.warn("無法清除原生 Google Drive 短效 session", error); }
 }
 
 // AuthorizationClient returns directly to the Android activity; there is no
@@ -65,6 +100,18 @@ export async function completeNativeGoogleOAuthLaunch() {
 
 function readSession() {
   try { return JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEY) ?? "null"); } catch { return null; }
+}
+
+async function storeNativeGoogleOAuthSession(session) {
+  const bridge = sessionPlugin();
+  if (!bridge?.store) return;
+  try {
+    await bridge.store(session);
+  } catch (error) {
+    // The current in-memory session remains usable even if secure persistence
+    // is temporarily unavailable; the next launch will simply authorize again.
+    console.warn("無法保存原生 Google Drive 短效 session", error);
+  }
 }
 
 function apiUrl() {

@@ -1,7 +1,8 @@
 import { APP_CONFIG, isGoogleDriveConfigured } from "./config.js";
-import { completeNativeGoogleOAuthLaunch, connectNativeGoogleDrive, isNativeOAuthRuntime } from "./native-oauth.js";
+import { clearNativeGoogleOAuthSession, completeNativeGoogleOAuthLaunch, connectNativeGoogleDrive, isNativeOAuthRuntime, restoreNativeGoogleOAuthSession } from "./native-oauth.js";
 
 const SESSION_STORAGE_KEY = "forget-me-not-oauth-session";
+const PERSISTENT_SESSION_MARKER_KEY = "forget-me-not-oauth-session-marker-v1";
 
 export async function writeGoogleDriveFile(name, content) { await execute("write", { name, content }); }
 export async function readGoogleDriveFile(name) { return execute("read", { name }); }
@@ -54,13 +55,23 @@ export async function connectGoogleDrive({ interactive = true, popupWindow = nul
 
 export async function disconnectGoogleDrive() {
   const session = readSession();
-  if (session?.sessionToken) await apiFetch("/v1/oauth/session/revoke", {}, session.sessionToken);
-  sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  try {
+    if (session) await apiFetch("/v1/oauth/session/revoke", {}, session.sessionToken ?? "");
+  } finally {
+    await clearClientSession();
+  }
 }
 
 export function googleDriveAuthStatus() {
   const session = readSession();
   return { hasAccessToken: Boolean(session && Date.parse(session.expiresAt) > Date.now()), expiresAt: session?.expiresAt ?? "", accountEmail: session?.accountEmail ?? "" };
+}
+
+export async function restoreGoogleDriveSession() {
+  const existing = readSession();
+  if (existing && Date.parse(existing.expiresAt) > Date.now() + 30_000) return existing;
+  if (!isNativeOAuthRuntime()) return null;
+  return restoreNativeGoogleOAuthSession();
 }
 
 export function googleDriveReadiness() {
@@ -134,14 +145,14 @@ async function exchangeOAuthHandoff(handoff) {
   const response = await apiFetch("/v1/oauth/google/handoff/exchange", { handoff }, false);
   const profile = await execute("profile", {}, response.sessionToken);
   const session = { sessionToken: response.sessionToken, expiresAt: response.expiresAt, accountEmail: profile?.email ?? "" };
-  sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  await storeClientSession(session);
   return session;
 }
 
 async function execute(operation, values = {}, overrideToken = "") {
   const session = overrideToken ? { sessionToken: overrideToken } : readSession();
-  if (!session?.sessionToken) throw new Error("google-drive-auth-required");
-  const response = await apiFetch("/v1/drive/execute", { operation, ...values }, session.sessionToken);
+  if (!session?.sessionToken && !session?.cookieSession) throw new Error("google-drive-auth-required");
+  const response = await apiFetch("/v1/drive/execute", { operation, ...values }, session.sessionToken ?? "");
   return response.result;
 }
 
@@ -149,27 +160,64 @@ async function apiFetch(path, body, sessionToken) {
   if (!isGoogleDriveConfigured()) throw new Error(googleDriveReadiness().message);
   const response = await fetch(`${apiUrl()}${path}`, {
     method: "POST",
+    credentials: "include",
     headers: { "content-type": "application/json", ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}) },
     body: JSON.stringify(body)
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error ?? "google-drive-request-failed");
+  if (!response.ok) {
+    if (response.status === 401) await clearClientSession();
+    throw new Error(payload.error ?? "google-drive-request-failed");
+  }
   return payload;
 }
 
 async function workerApiFetch(path, body, method = "POST") {
   const session = readSession();
-  if (!session?.sessionToken) throw new Error("google-drive-auth-required");
+  if (!session?.sessionToken && !session?.cookieSession) throw new Error("google-drive-auth-required");
   if (!isGoogleDriveConfigured()) throw new Error(googleDriveReadiness().message);
   const response = await fetch(`${apiUrl()}${path}`, {
     method,
-    headers: { "content-type": "application/json", Authorization: `Bearer ${session.sessionToken}` },
+    credentials: "include",
+    headers: { "content-type": "application/json", ...(session.sessionToken ? { Authorization: `Bearer ${session.sessionToken}` } : {}) },
     ...(method === "GET" ? {} : { body: JSON.stringify(body ?? {}) })
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error ?? "recovery-request-failed");
+  if (!response.ok) {
+    if (response.status === 401) await clearClientSession();
+    throw new Error(payload.error ?? "recovery-request-failed");
+  }
   return payload;
 }
 
 function apiUrl() { return String(APP_CONFIG.googleDrive.oauthApiUrl).replace(/\/$/, ""); }
-function readSession() { try { return JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEY) ?? "null"); } catch { return null; } }
+function readSession() {
+  const active = parseStoredSession(sessionStorage, SESSION_STORAGE_KEY);
+  if (active && Date.parse(active.expiresAt ?? "") > Date.now()) return active;
+  if (active) sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  if (isNativeOAuthRuntime()) return null;
+  const marker = parseStoredSession(localStorage, PERSISTENT_SESSION_MARKER_KEY);
+  if (marker?.cookieSession && Date.parse(marker.expiresAt ?? "") > Date.now()) return marker;
+  if (marker) localStorage.removeItem(PERSISTENT_SESSION_MARKER_KEY);
+  return null;
+}
+
+async function storeClientSession(session) {
+  sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  if (isNativeOAuthRuntime()) return;
+  localStorage.setItem(PERSISTENT_SESSION_MARKER_KEY, JSON.stringify({
+    cookieSession: true,
+    expiresAt: session.expiresAt,
+    accountEmail: session.accountEmail ?? ""
+  }));
+}
+
+async function clearClientSession() {
+  sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  localStorage.removeItem(PERSISTENT_SESSION_MARKER_KEY);
+  await clearNativeGoogleOAuthSession();
+}
+
+function parseStoredSession(storage, key) {
+  try { return JSON.parse(storage.getItem(key) ?? "null"); } catch { return null; }
+}

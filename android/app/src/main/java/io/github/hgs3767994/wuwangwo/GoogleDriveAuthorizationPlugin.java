@@ -5,12 +5,19 @@ import android.content.Intent;
 
 import androidx.activity.result.ActivityResult;
 
+import com.google.android.gms.auth.api.identity.AuthorizationRequest;
+import com.google.android.gms.auth.api.identity.AuthorizationResult;
+import com.google.android.gms.auth.api.identity.Identity;
+import com.google.android.gms.common.api.Scope;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
+
+import java.util.Arrays;
+import java.util.List;
 
 @CapacitorPlugin(name = "GoogleDriveAuthorization")
 public class GoogleDriveAuthorizationPlugin extends Plugin {
@@ -21,9 +28,27 @@ public class GoogleDriveAuthorizationPlugin extends Plugin {
             call.reject("native-oauth-server-client-id-invalid");
             return;
         }
-        Intent intent = new Intent(getContext(), GoogleDriveAuthorizationActivity.class);
-        intent.putExtra(GoogleDriveAuthorizationActivity.EXTRA_SERVER_CLIENT_ID, serverClientId);
-        startActivityForResult(call, intent, "handleAuthorizationResult");
+        List<Scope> scopes = Arrays.asList(
+            new Scope("https://www.googleapis.com/auth/drive.appdata"),
+            new Scope("openid"),
+            new Scope("email")
+        );
+        AuthorizationRequest request = AuthorizationRequest.builder()
+            .setRequestedScopes(scopes)
+            .requestOfflineAccess(serverClientId)
+            .build();
+
+        Identity.getAuthorizationClient(getActivity()).authorize(request)
+            .addOnSuccessListener(result -> {
+                if (result.hasResolution() && result.getPendingIntent() != null) {
+                    Intent intent = new Intent(getContext(), GoogleDriveAuthorizationActivity.class);
+                    intent.putExtra(GoogleDriveAuthorizationActivity.EXTRA_PENDING_INTENT, result.getPendingIntent());
+                    startActivityForResult(call, intent, "handleAuthorizationResult");
+                    return;
+                }
+                resolveAuthorization(call, result);
+            })
+            .addOnFailureListener(error -> call.reject("native-oauth-authorization-failed", error));
     }
 
     @ActivityCallback
@@ -36,6 +61,17 @@ public class GoogleDriveAuthorizationPlugin extends Plugin {
             return;
         }
         String serverAuthCode = data.getStringExtra(GoogleDriveAuthorizationActivity.EXTRA_SERVER_AUTH_CODE);
+        if (serverAuthCode == null || serverAuthCode.trim().isEmpty()) {
+            call.reject("native-oauth-authorization-code-missing");
+            return;
+        }
+        JSObject response = new JSObject();
+        response.put("serverAuthCode", serverAuthCode);
+        call.resolve(response);
+    }
+
+    private void resolveAuthorization(PluginCall call, AuthorizationResult result) {
+        String serverAuthCode = result.getServerAuthCode();
         if (serverAuthCode == null || serverAuthCode.trim().isEmpty()) {
             call.reject("native-oauth-authorization-code-missing");
             return;

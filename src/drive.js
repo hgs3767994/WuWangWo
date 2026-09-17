@@ -1,5 +1,5 @@
 import { isMockDrive } from "./config.js";
-import { approveGoogleRecoveryRequest, completeGoogleRecoveryRequest, connectGoogleDrive, createGoogleRecoveryRequest, disconnectGoogleDrive, getGoogleRecoveryRequest, googleDriveAuthStatus, googleDriveReadiness, listGoogleDriveFileRevisions, listGoogleDriveFiles, listGoogleRecoveryRequests, readGoogleDriveFile, readGoogleDriveFileRevision, removeGoogleDriveFile, testGoogleDriveConnection, verifyGoogleRecoveryRequest, writeGoogleDriveFile } from "./drive-google.js";
+import { approveGoogleRecoveryRequest, completeGoogleRecoveryRequest, connectGoogleDrive, createGoogleRecoveryRequest, disconnectGoogleDrive, getGoogleRecoveryRequest, googleDriveAuthStatus, googleDriveReadiness, listGoogleDriveFileRevisions, listGoogleDriveFiles, listGoogleRecoveryRequests, readGoogleDriveFile, readGoogleDriveFileRevision, removeGoogleDriveFile, restoreGoogleDriveSession, testGoogleDriveConnection, verifyGoogleRecoveryRequest, writeGoogleDriveFile } from "./drive-google.js";
 import { listMockDriveFileRevisions, listMockDriveFiles, readMockDriveFile, readMockDriveFileRevision, removeMockDriveFile, writeMockDriveFile } from "./drive-mock.js";
 
 export async function writeDriveFile(name, content) {
@@ -52,6 +52,12 @@ export async function disconnectDrive() {
 export function driveAuthStatus() {
   if (isMockDrive()) return { hasAccessToken: false, expiresAt: "", accountEmail: "" };
   return googleDriveAuthStatus();
+}
+
+export async function restoreDriveSession() {
+  if (isMockDrive()) return null;
+  assertGoogleDriveReady();
+  return restoreGoogleDriveSession();
 }
 
 export async function testDriveConnection() {

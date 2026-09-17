@@ -1,7 +1,9 @@
 package io.github.hgs3767994.wuwangwo;
 
 import android.app.Activity;
+import android.app.PendingIntent;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -10,17 +12,12 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.google.android.gms.auth.api.identity.AuthorizationRequest;
 import com.google.android.gms.auth.api.identity.AuthorizationResult;
 import com.google.android.gms.auth.api.identity.Identity;
 import com.google.android.gms.common.api.ApiException;
-import com.google.android.gms.common.api.Scope;
-
-import java.util.Arrays;
-import java.util.List;
 
 public class GoogleDriveAuthorizationActivity extends AppCompatActivity {
-    public static final String EXTRA_SERVER_CLIENT_ID = "serverClientId";
+    public static final String EXTRA_PENDING_INTENT = "pendingIntent";
     public static final String EXTRA_SERVER_AUTH_CODE = "serverAuthCode";
     public static final String EXTRA_ERROR = "error";
     private final ActivityResultLauncher<IntentSenderRequest> authorizationLauncher = registerForActivityResult(
@@ -42,31 +39,17 @@ public class GoogleDriveAuthorizationActivity extends AppCompatActivity {
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         if (savedInstanceState != null) return;
-        String serverClientId = getIntent().getStringExtra(EXTRA_SERVER_CLIENT_ID);
-        if (serverClientId == null || !serverClientId.endsWith(".apps.googleusercontent.com")) {
-            reject("native-oauth-server-client-id-invalid");
+        PendingIntent pendingIntent;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pendingIntent = getIntent().getParcelableExtra(EXTRA_PENDING_INTENT, PendingIntent.class);
+        } else {
+            pendingIntent = getIntent().getParcelableExtra(EXTRA_PENDING_INTENT);
+        }
+        if (pendingIntent == null) {
+            reject("native-oauth-authorization-failed");
             return;
         }
-
-        List<Scope> scopes = Arrays.asList(
-            new Scope("https://www.googleapis.com/auth/drive.appdata"),
-            new Scope("openid"),
-            new Scope("email")
-        );
-        AuthorizationRequest request = AuthorizationRequest.builder()
-            .setRequestedScopes(scopes)
-            .requestOfflineAccess(serverClientId)
-            .build();
-
-        Identity.getAuthorizationClient(this).authorize(request)
-            .addOnSuccessListener(result -> {
-                if (result.hasResolution() && result.getPendingIntent() != null) {
-                    authorizationLauncher.launch(new IntentSenderRequest.Builder(result.getPendingIntent().getIntentSender()).build());
-                    return;
-                }
-                resolve(result);
-            })
-            .addOnFailureListener(error -> reject("native-oauth-authorization-failed"));
+        authorizationLauncher.launch(new IntentSenderRequest.Builder(pendingIntent.getIntentSender()).build());
     }
 
     private void resolve(AuthorizationResult result) {
