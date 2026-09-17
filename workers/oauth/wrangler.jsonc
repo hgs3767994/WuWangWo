@@ -12,7 +12,7 @@
     }
   ],
   "vars": {
-    "APP_ORIGINS": "https://hgs3767994.github.io,https://wuwangwo.shawnghong.com,http://localhost,capacitor://localhost",
+    "APP_ORIGINS": "https://hgs3767994.github.io,https://wuwangwo.shawnghong.com,https://localhost,http://localhost,capacitor://localhost",
     "GOOGLE_WEB_CLIENT_ID": "302767053218-g8vn882h0o5iijh0ckr49s6csjrkmlno.apps.googleusercontent.com",
     "GOOGLE_OAUTH_REDIRECT_URI": "https://wuwangwo-api.shawnghong.com/v1/oauth/google/callback"
   },

@@ -248,6 +248,10 @@ await check("native Android OAuth uses Google AuthorizationClient and a one-time
   if (!authorizationActivityDeclaration.includes('android:theme="@style/AppTheme.NoActionBar"')) {
     throw new Error("Google Drive authorization activity must use an AppCompat theme.");
   }
+  const workerConfigSource = await readFile("workers/oauth/wrangler.jsonc", "utf8");
+  if (!workerConfigSource.includes("https://localhost")) {
+    throw new Error("Worker APP_ORIGINS must allow the Android Capacitor https origin.");
+  }
 });
 
 await check("Android backup and device transfer exclude app data", async () => {
