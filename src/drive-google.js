@@ -27,7 +27,15 @@ export async function verifyGoogleRecoveryRequest(requestId, values) { return wo
 export async function completeGoogleRecoveryRequest(requestId, values) { return workerApiFetch(`/v1/recovery/requests/${encodeURIComponent(requestId)}/complete`, values); }
 
 export async function connectGoogleDrive({ interactive = true, popupWindow = null, requirePopup = false } = {}) {
-  if (isNativeOAuthRuntime()) return connectNativeGoogleDrive({ interactive });
+  if (isNativeOAuthRuntime()) {
+    // Native authorization is rendered by Google Play services inside the
+    // Android app. Close a stale reserved web popup defensively so a caller
+    // can never leave an external about:blank tab behind.
+    try {
+      if (popupWindow && !popupWindow.closed) popupWindow.close();
+    } catch {}
+    return connectNativeGoogleDrive({ interactive });
+  }
   const session = await completeGoogleOAuthHandoff();
   if (session) return { connected: true, accountEmail: session.accountEmail };
   const existing = readSession();

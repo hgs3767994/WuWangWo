@@ -3,6 +3,7 @@ import { approveDriveRecoveryRequest, completeDriveRecoveryRequest, connectDrive
 import { completeGoogleOAuthHandoff } from "./drive-google.js";
 import { APP_CONFIG, driveFileName, driveProviderLabel } from "./config.js";
 import { nativeFileExportAvailable, saveNativeExport } from "./native-file-export.js";
+import { isNativeOAuthRuntime } from "./native-oauth.js";
 import { clearNativeTrustedSession, isNativeTrustedSession, nativeTrustedSessionAuthenticationError, nativeTrustedSessionAvailable } from "./native-trusted-session.js";
 import { mergeVaults } from "./sync.js";
 import { buildVaultXlsx } from "./xlsx.js";
@@ -1824,7 +1825,11 @@ async function syncNow(options = {}) {
 function openGoogleOAuthPopup() {
   const authStatus = driveAuthStatus();
   const sessionReusable = authStatus.hasAccessToken && Date.parse(authStatus.expiresAt || "") > Date.now() + 30_000;
-  if (isSimulatedDrive() || sessionReusable) return { oauthPopup: null, requireOAuthPopup: false };
+  // Android uses Google AuthorizationClient inside the app. Reserving a web
+  // popup here would send the user to an orphaned about:blank browser tab.
+  if (isNativeOAuthRuntime() || isSimulatedDrive() || sessionReusable) {
+    return { oauthPopup: null, requireOAuthPopup: false };
+  }
   const oauthPopup = window.open("about:blank", "forget-me-not-google-oauth", "popup=yes,width=520,height=720");
   return { oauthPopup, requireOAuthPopup: true };
 }

@@ -223,6 +223,7 @@ await check("native Android back button exits only from root routes", async () =
 });
 
 await check("native Android OAuth uses Google AuthorizationClient and a one-time server auth code", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
   const nativeOAuthSource = await readFile("src/native-oauth.js", "utf8");
   const driveGoogleSource = await readFile("src/drive-google.js", "utf8");
   const pluginSource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationPlugin.java", "utf8");
@@ -236,6 +237,12 @@ await check("native Android OAuth uses Google AuthorizationClient and a one-time
   ["AuthorizationClient", "requestOfflineAccess", "drive.appdata", "getServerAuthCode"].forEach((text) => {
     if (!activitySource.includes(text)) throw new Error(`native OAuth Android activity is missing ${text}.`);
   });
+  if (!appSource.includes("isNativeOAuthRuntime() || isSimulatedDrive() || sessionReusable")) {
+    throw new Error("native OAuth must bypass the web popup reservation.");
+  }
+  if (!driveGoogleSource.includes("if (popupWindow && !popupWindow.closed) popupWindow.close()")) {
+    throw new Error("native OAuth must close any stale reserved web popup.");
+  }
   if (!driveGoogleSource.includes("isNativeOAuthRuntime()")) throw new Error("Google Drive adapter must select native OAuth outside the WebView popup flow.");
 });
 
