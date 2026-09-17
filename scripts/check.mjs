@@ -190,17 +190,39 @@ await check("sensitive security forms show a non-repeatable processing state", a
   [
     "runSingleSecuritySubmission",
     'unlock: "登入中…"',
+    '"drive-merge-unlock": "同步中…"',
     '"change-password": "更改中…"',
     '"regenerate-recovery": "產生中…"',
     '"forgot-password": "重設中…"',
     '"drive-recovery-reset": "重設中…"',
     '"recovery-v3-complete": "重設中…"',
+    '"logout-all-devices": "登出中…"',
     'form.dataset.submitting === "true"',
     'submitButton.disabled = true'
   ].forEach((text) => {
     if (!appSource.includes(text)) throw new Error(`src/app.js is missing security-form processing support: ${text}`);
   });
   if (!styleSource.includes("button.is-processing:disabled")) throw new Error("src/styles.css is missing the processing button style");
+});
+
+await check("long-running recovery actions cannot be submitted repeatedly", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  [
+    "runSingleAction",
+    'data-action="refresh-recovery-requests" data-pending-label="查詢中…"',
+    'data-action="approve-recovery-request" data-pending-label="核准中…"',
+    'button.dataset.processing === "true"',
+    "button.disabled = true"
+  ].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing action processing support: ${text}`);
+  });
+});
+
+await check("cloud restore copy explains local password and recovery-code replacement", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  const expected = "請輸入雲端同步資料<strong>原先設定的密碼</strong>；完成同步後，這台裝置原先設定的登入密碼與救援碼會失效。登入密碼會變更為原先設定的密碼，救援碼需手動至設定頁重新產生";
+  if (!appSource.includes(expected)) throw new Error("cloud restore password notice is not the approved text");
+  if (appSource.includes('data-action="check-version-update"')) throw new Error("settings must not show a manual version-check button");
 });
 
 await check("idle unlock restores the in-memory route and unsaved draft", async () => {

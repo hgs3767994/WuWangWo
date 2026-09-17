@@ -3200,52 +3200,6 @@ function applyUpdate() {
   window.location.reload();
 }
 
-async function checkVersionUpdate() {
-  const registration = state.serviceWorkerRegistration ?? await navigator.serviceWorker?.getRegistration?.();
-  if (!registration) {
-    alert("已是最新版本");
-    return;
-  }
-  try {
-    const updatePromise = waitForServiceWorkerUpdate(registration);
-    await registration.update();
-    await updatePromise;
-    const hasUpdate = Boolean(registration.waiting || state.waitingServiceWorker || state.updateAvailable);
-    if (!hasUpdate) {
-      alert("已是最新版本");
-      return;
-    }
-    if (await confirmDialog("發現新版本，是否更新？", { confirmLabel: "更新" })) applyUpdate();
-  } catch {
-    alert("暫時無法檢查更新，請稍後再試");
-  }
-}
-
-function waitForServiceWorkerUpdate(registration) {
-  if (registration.waiting || state.waitingServiceWorker || state.updateAvailable) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timeout = window.setTimeout(resolve, 2500);
-    registration.addEventListener(
-      "updatefound",
-      () => {
-        const installing = registration.installing;
-        if (!installing) {
-          window.clearTimeout(timeout);
-          resolve();
-          return;
-        }
-        installing.addEventListener("statechange", () => {
-          if (["installed", "activated", "redundant"].includes(installing.state)) {
-            window.clearTimeout(timeout);
-            resolve();
-          }
-        });
-      },
-      { once: true }
-    );
-  });
-}
-
 function view() {
   if (state.route.name === "welcome") return welcomeView();
   if (state.route.name === "startupRecovery") return startupRecoveryView();
@@ -3601,7 +3555,6 @@ function settingsView() {
         <p>版本：${escapeHtml(APP_CONFIG.appVersion)}</p>
         <p class="muted">快取版本：${escapeHtml(APP_CONFIG.cacheName)}</p>
       </div>
-      <button type="button" class="action-quiet" data-action="check-version-update">檢查版本更新</button>
       <div class="legal-links">
         <a href="./privacy.html">隱私權政策</a>
         <a href="./terms.html">服務條款</a>
@@ -3623,7 +3576,7 @@ function securitySettingsSection() {
       <button class="action-quiet" data-nav="changePassword">更改密碼</button>
       <button class="action-quiet" data-nav="forgotPassword">忘記密碼</button>
       <button class="action-quiet" data-nav="regenerateRecovery">重新產生救援碼</button>
-      <button class="action-quiet" data-action="refresh-recovery-requests">查看救援核准請求</button>
+      <button class="action-quiet" data-action="refresh-recovery-requests" data-pending-label="查詢中…">查看救援核准請求</button>
       ${nativeDeviceVerification}
       <button class="danger" data-nav="logoutAllDevices">登出所有裝置</button>
     </section>
@@ -4124,7 +4077,7 @@ function driveMergeUnlockView() {
     </header>
     <form class="panel stack" data-form="drive-merge-unlock">
       <p class="muted">請輸入雲端同步資料的密碼。通過後會合併本機與 Google Drive 資料，不會直接用其中一邊覆蓋另一邊。</p>
-      <p class="sync-password-notice">請輸入雲端同步資料<strong>原先設定的密碼</strong>；完成同步後，這台裝置原先設定的密碼與救援碼會失效。</p>
+      <p class="sync-password-notice">請輸入雲端同步資料<strong>原先設定的密碼</strong>；完成同步後，這台裝置原先設定的登入密碼與救援碼會失效。登入密碼會變更為原先設定的密碼，救援碼需手動至設定頁重新產生</p>
       <div class="field">
         <label>密碼</label>
         <input type="password" data-security-draft="password" autocomplete="current-password" />
@@ -4204,7 +4157,7 @@ function recoveryRequestsView() {
     <header class="topbar topbar-centered"><button class="secondary" data-nav="settings">返回</button><h1 class="section-title">救援核准請求</h1><span></span></header>
     <section class="panel stack">
       <p class="muted">只核准你親自發起且已核對配對碼的請求。核准後會產生一組短效驗證碼，但在新裝置完成重設前不會變更主密碼。</p>
-      ${requests.length ? requests.map((request) => `<div class="inline-item stack"><strong>新裝置：${escapeHtml(request.requester_device_id)}</strong><span>配對碼：${escapeHtml(request.pairing_code)}</span><span class="muted">到期：${escapeHtml(formatDateTime(request.expires_at))}</span><button data-action="approve-recovery-request" data-request-id="${escapeAttr(request.request_id)}" data-pairing-code="${escapeAttr(request.pairing_code)}">核准並產生驗證碼</button></div>`).join("") : `<p class="muted">目前沒有等待核准的請求。</p>`}
+      ${requests.length ? requests.map((request) => `<div class="inline-item stack"><strong>新裝置：${escapeHtml(request.requester_device_id)}</strong><span>配對碼：${escapeHtml(request.pairing_code)}</span><span class="muted">到期：${escapeHtml(formatDateTime(request.expires_at))}</span><button type="button" data-action="approve-recovery-request" data-pending-label="核准中…" data-request-id="${escapeAttr(request.request_id)}" data-pairing-code="${escapeAttr(request.pairing_code)}">核准並產生驗證碼</button></div>`).join("") : `<p class="muted">目前沒有等待核准的請求。</p>`}
       <button class="secondary" data-action="refresh-recovery-requests">重新整理</button>
     </section>
   `;
@@ -5105,7 +5058,12 @@ function bind() {
     el.addEventListener("click", () => navigate(detailRoute(el.dataset.detail)));
   });
   app.querySelectorAll("[data-action]").forEach((el) => {
-    el.addEventListener("click", (event) => handleAction(event, el));
+    el.addEventListener("click", (event) => {
+      const pendingLabel = el.dataset.pendingLabel;
+      return pendingLabel
+        ? runSingleAction(event, el, () => handleAction(event, el), pendingLabel)
+        : handleAction(event, el);
+    });
   });
   app.querySelectorAll("[data-field]").forEach((el) => {
     el.addEventListener("input", () => {
@@ -5270,11 +5228,13 @@ function bindSecurityForms() {
   };
   const pendingLabels = {
     unlock: "登入中…",
+    "drive-merge-unlock": "同步中…",
     "drive-recovery-reset": "重設中…",
     "recovery-v3-complete": "重設中…",
     "change-password": "更改中…",
     "forgot-password": "重設中…",
-    "regenerate-recovery": "產生中…"
+    "regenerate-recovery": "產生中…",
+    "logout-all-devices": "登出中…"
   };
   Object.entries(handlers).forEach(([formName, handler]) => {
     const form = app.querySelector(`[data-form='${formName}']`);
@@ -5284,6 +5244,29 @@ function bindSecurityForms() {
       ? (event) => runSingleSecuritySubmission(event, form, handler, pendingLabel)
       : handler);
   });
+}
+
+async function runSingleAction(event, button, handler, pendingLabel) {
+  event.preventDefault();
+  if (button.dataset.processing === "true") return;
+  const originalLabel = button.textContent;
+  const wasDisabled = button.disabled;
+  button.dataset.processing = "true";
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  button.classList.add("is-processing");
+  button.textContent = pendingLabel;
+  try {
+    await handler();
+  } finally {
+    if (button.isConnected) {
+      delete button.dataset.processing;
+      button.disabled = wasDisabled;
+      button.removeAttribute("aria-busy");
+      button.classList.remove("is-processing");
+      button.textContent = originalLabel;
+    }
+  }
 }
 
 async function runSingleSecuritySubmission(event, form, handler, pendingLabel) {
@@ -5320,7 +5303,6 @@ async function handleAction(event, el) {
   if (action === "retry-boot") return window.location.reload();
   if (action === "start-local") return initializeLocalMode();
   if (action === "apply-update") return applyUpdate();
-  if (action === "check-version-update") return checkVersionUpdate();
   if (action === "set-theme") return setTheme(el.dataset.themeId);
   if (action === "enable-biometric-unlock") return enableBiometricUnlock();
   if (action === "disable-biometric-unlock") return disableBiometricUnlock();
