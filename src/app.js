@@ -4077,7 +4077,7 @@ function driveMergeUnlockView() {
     </header>
     <form class="panel stack" data-form="drive-merge-unlock">
       <p class="muted">請輸入雲端同步資料的密碼。通過後會合併本機與 Google Drive 資料，不會直接用其中一邊覆蓋另一邊。</p>
-      <p class="sync-password-notice">請輸入雲端同步資料<strong>原先設定的密碼</strong>；完成同步後，這台裝置原先設定的登入密碼與救援碼會失效。登入密碼會變更為原先設定的密碼，救援碼需手動至設定頁重新產生</p>
+      <p class="sync-password-notice">請輸入雲端同步資料<strong>原先設定的密碼</strong>；完成同步後，這台裝置原先設定的登入密碼與救援碼會失效。登入密碼會變更為<strong>原先設定的密碼</strong>，救援碼需手動至設定頁重新產生</p>
       <div class="field">
         <label>密碼</label>
         <input type="password" data-security-draft="password" autocomplete="current-password" />
