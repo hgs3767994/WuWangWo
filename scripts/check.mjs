@@ -244,6 +244,10 @@ await check("native Android OAuth uses Google AuthorizationClient and a one-time
     throw new Error("native OAuth must close any stale reserved web popup.");
   }
   if (!driveGoogleSource.includes("isNativeOAuthRuntime()")) throw new Error("Google Drive adapter must select native OAuth outside the WebView popup flow.");
+  const authorizationActivityDeclaration = androidManifestSource.match(/<activity\s+[\s\S]*?android:name="\.GoogleDriveAuthorizationActivity"[\s\S]*?\/>/)?.[0] ?? "";
+  if (!authorizationActivityDeclaration.includes('android:theme="@style/AppTheme.NoActionBar"')) {
+    throw new Error("Google Drive authorization activity must use an AppCompat theme.");
+  }
 });
 
 await check("Android backup and device transfer exclude app data", async () => {
