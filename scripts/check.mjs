@@ -220,7 +220,7 @@ await check("long-running recovery actions cannot be submitted repeatedly", asyn
 
 await check("cloud restore copy explains local password and recovery-code replacement", async () => {
   const appSource = await readFile("src/app.js", "utf8");
-  const expected = "請輸入雲端同步資料<strong>原先設定的密碼</strong>；完成同步後，這台裝置原先設定的登入密碼與救援碼會失效。登入密碼會變更為<strong>原先設定的密碼</strong>，救援碼需手動至設定頁重新產生";
+  const expected = "請輸入雲端同步資料<strong>原先設定的密碼</strong>；完成同步後，這台裝置原先設定的登入密碼與救援碼會失效，一律同步成此雲端資料最後設定的密碼及最後產生的救援碼";
   if (!appSource.includes(expected)) throw new Error("cloud restore password notice is not the approved text");
   if (appSource.includes('data-action="check-version-update"')) throw new Error("settings must not show a manual version-check button");
 });
