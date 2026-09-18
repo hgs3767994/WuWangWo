@@ -112,7 +112,9 @@
 - [x] 只有使用者明確點擊「重新連結 Google Drive」才可重新授權；PWA 與原生 App 都會顯示 Google 帳戶選擇器。
 - [x] Worker 測試增加至 36 項，涵蓋明確重新連結的 `select_account`、有效 session status 與遭帳號刪除的 session status。
 - [x] 正式 Worker 已部署版本 `e27063c6-76fc-4ec1-834e-703edbcd1f17`；health 顯示 OAuth／D1 ready，未帶 session 的 status 請求回覆 `401 session-required`。
-- [ ] 部署 Worker 與 v174 PWA 後，再執行一次原生刪除、PWA 失效顯示及雙端不自動重建的實機驗收。
+- [x] Worker 與 v174 PWA 部署後再次由原生 App 刪除帳號、Drive 與原生本機資料；刪除完成時 D1 四表全為 0。
+- [x] 重新開啟 v174 PWA 後顯示「尚未啟用」與「重新連結 Google Drive」，保留 PWA 本機資料但不提供「立即同步」；再次查核 D1 四表仍全為 0，確認未自動重建帳號。
+- [x] v174 release APK SHA-256：`0CB0CAF2F506F287F1A56F4D4A70220FDAB032BF0B23F99290333180A64D46E1`；正式 release certificate SHA-256 維持不變。
 
 ## 第二階段：正式隱私政策與服務條款
 
