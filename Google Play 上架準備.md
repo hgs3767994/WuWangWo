@@ -35,9 +35,9 @@
   - 讓使用者明確選擇是否一併刪除 Google Drive `appDataFolder` 內的莫忘加密檔案。
   - 本機資料是否保留或刪除必須清楚分流，不可由模糊文字隱含決定。
 - [x] Worker 新增重新驗證後才能執行的帳號／資料刪除 API。
-- [ ] D1 刪除流程具備交易或可驗證的一致性，並避免殘留有效 session。
-- [ ] App 設定頁加入清楚且不易誤觸的「刪除雲端帳號與資料」入口。
-- [ ] 建立公開、無須登入即可閱讀的資料刪除說明／申請頁面。
+- [x] D1 刪除流程具備交易或可驗證的一致性，並避免殘留有效 session。
+- [x] App 設定頁加入清楚且不易誤觸的「刪除雲端帳號與資料」入口。
+- [x] 建立公開、無須登入即可閱讀的資料刪除說明／申請頁面。
 - [ ] 補齊 Worker 單元測試、PWA 測試及 Android 實機測試。
 
 驗收條件：刪除後舊 Worker session 無法使用、D1 無帳號關聯資料、Google 授權已撤銷；使用者選擇刪除 Drive 資料時，加密同步檔亦不存在。
@@ -59,7 +59,8 @@
 - [x] 最新 debug APK：`android/app/build/outputs/apk/debug/app-debug.apk`；SHA-256 `0EFEF1CE3C050E414DB9FECE1F2CA19137E0A562AC636C4D8FA20F5323DB8D52`。
 - [x] `assets/icon.svg` 工作樹 Git blob 與 `HEAD` 均為 `33a666d3ab71bc67608e339790eeaf85146edba6`，確認未被覆寫。
 - [x] 正式 Worker 已部署，版本 ID `68c5d212-c619-415e-a46f-c2c9ad921ea6`；`/health` 回報 OAuth、D1 schema 與 recovery storage 均 ready，未帶 session 的刪除請求回覆 `401`。
-- [ ] 正式網站尚待 GitHub Pages 發布完成，因此 App 入口與公開網頁主項目暫不勾選完成。
+- [x] GitHub 提交 `fd0dead` 已推送至 `main`；Pages workflow run `35297588180` 成功完成。
+- [x] 正式 `data-deletion.html` 回覆 HTTP 200 且包含自助刪除操作；正式 `service-worker.js` 為 v171，正式 `src/app.js` 包含 App 內刪除入口。
 - [ ] 目前 `adb devices -l` 無連線裝置；Android 實機刪除流程與刪除後遠端查核仍待執行。
 - [ ] 部署後須以測試 Google 帳號完成兩輪端到端驗收：保留 Drive／本機資料一次，以及刪除 Drive／本機資料一次；逐項查核舊 session、D1、Google 授權與 Drive 檔案。
 
