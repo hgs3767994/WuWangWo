@@ -28,7 +28,8 @@ export default {
       const nonce = crypto.randomUUID();
       const popup = url.searchParams.get("popup") === "1";
       const state = await createOAuthState({ returnTo, nonce, popup, secret: env.OAUTH_STATE_SIGNING_KEY });
-      const prompt = url.searchParams.get("reauth") === "account-deletion" ? "select_account" : "";
+      const reauthorization = url.searchParams.get("reauth");
+      const prompt = reauthorization === "account-deletion" || reauthorization === "account-selection" ? "select_account" : "";
       return redirect(authorizationUrl({ clientId: env.GOOGLE_WEB_CLIENT_ID, redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI, state, prompt }), 302, `forget_me_not_oauth_nonce=${nonce}; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=600`);
     }
 
@@ -139,6 +140,19 @@ export default {
       } catch {
         return json({ error: "session-revoke-failed" }, 500, corsHeaders(origin));
       }
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/oauth/session/status") {
+      const origin = request.headers.get("Origin");
+      if (!isAllowedOrigin(origin, env.APP_ORIGINS)) return json({ error: "origin-not-allowed" }, 403);
+      if (!hasRequiredConfiguration(env)) return json({ error: "oauth-not-configured" }, 503, corsHeaders(origin));
+      const storage = await databaseStatus(env.OAUTH_DB);
+      if (!storage.schemaReady) return json({ error: "storage-not-ready" }, 503, corsHeaders(origin));
+      const token = requestSessionToken(request);
+      if (!token) return sessionError("session-required", origin);
+      const account = await sessionAccount(env.OAUTH_DB, { token, now: new Date().toISOString() });
+      if (!account) return sessionError("session-expired", origin);
+      return json({ active: true }, 200, corsHeaders(origin));
     }
 
     if (request.method === "POST" && url.pathname === "/v1/account/delete") {

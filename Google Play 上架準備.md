@@ -104,6 +104,16 @@
 - [x] v173 已覆蓋安裝到 Android 實機；主動點擊「連結 Google Drive」後出現 Google Play services「選擇帳戶」畫面，列出裝置上的兩個帳號與「新增其他帳戶」。
 - [x] v173 release APK SHA-256：`A51D74EE9F15EC533EA8AEB5E5BC4B66E7D42E3AFB5E5209E00A9509A5593D86`；簽章 SHA-256 仍為 `6d4d32dbc1491f0de8f41569a92a9b6ee1b3cf680635ad8cbc875a6903f2596e`。
 
+### v174 跨端刪除後重新授權防護（2026-09-19）
+
+- [x] 重現原生 App 刪除成功後，PWA 因保留本機資料與舊連線顯示，可由「立即同步」重新完成 OAuth 並重建雲端資料。
+- [x] 新增 Worker `/v1/oauth/session/status`，App/PWA 啟動時只向 D1 驗證短效 session，不接觸 Google token 或 Drive 資料。
+- [x] session 已由其他裝置刪除或失效時，PWA 立即轉為未連結並保留本機資料，不再讓「立即同步」啟動 OAuth。
+- [x] 只有使用者明確點擊「重新連結 Google Drive」才可重新授權；PWA 與原生 App 都會顯示 Google 帳戶選擇器。
+- [x] Worker 測試增加至 36 項，涵蓋明確重新連結的 `select_account`、有效 session status 與遭帳號刪除的 session status。
+- [x] 正式 Worker 已部署版本 `e27063c6-76fc-4ec1-834e-703edbcd1f17`；health 顯示 OAuth／D1 ready，未帶 session 的 status 請求回覆 `401 session-required`。
+- [ ] 部署 Worker 與 v174 PWA 後，再執行一次原生刪除、PWA 失效顯示及雙端不自動重建的實機驗收。
+
 ## 第二階段：正式隱私政策與服務條款
 
 - [ ] 更新 `privacy.html`：

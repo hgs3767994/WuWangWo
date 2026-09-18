@@ -180,7 +180,7 @@ await check("Drive security writes require a current remote key package", async 
     "reuseDriveAuthorizationOrNotify",
     "prepareSecurityWrite",
     "securityWriteFailureMessage",
-    "需重新取得google授權，請先到設定頁並點擊【立即同步】，再回來繼續操作",
+    "Google Drive 連線已失效；本機資料仍安全保留。請到設定頁明確點擊【重新連結 Google Drive】並選擇帳號。",
     "connectDrive({ interactive: false })",
     "recoveryChangeId",
     "globalLogoutId",
@@ -282,6 +282,12 @@ await check("native Android OAuth uses Google AuthorizationClient and a one-time
   if (!appSource.includes("beginDriveSetup({ ...openGoogleOAuthPopup(), selectAccount: true })")) {
     throw new Error("a user-initiated Google Drive connection must show the native account selector.");
   }
+  ["connectDrive({ interactive: false })", "disconnectedDriveState(previousGoogleDrive)", "重新連結 Google Drive"].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`expired Drive sessions must require explicit relinking: ${text}`);
+  });
+  ["/v1/oauth/session/status", 'reauth: reauthorization'].forEach((text) => {
+    if (!driveGoogleSource.includes(text)) throw new Error(`PWA OAuth session validation is missing ${text}.`);
+  });
   if (!driveGoogleSource.includes("if (popupWindow && !popupWindow.closed) popupWindow.close()")) {
     throw new Error("native OAuth must close any stale reserved web popup.");
   }
@@ -397,6 +403,9 @@ await check("account deletion is available in-app and on a public self-service p
   if (!deletionSource.includes("deleteGoogleCloudAccount")) throw new Error("public deletion page must execute self-service account deletion");
   ["/v1/account/delete", "ACCOUNT_DELETION_REAUTH_MS", "revokeGoogleToken", "deleteAccountData"].forEach((text) => {
     if (!workerSource.includes(text)) throw new Error(`Worker is missing account deletion support: ${text}`);
+  });
+  ["/v1/oauth/session/status", 'reauthorization === "account-selection"'].forEach((text) => {
+    if (!workerSource.includes(text)) throw new Error(`Worker is missing cross-client session invalidation support: ${text}`);
   });
   if (!storeSource.includes("database.batch(statements)")) throw new Error("D1 account deletion must use an atomic batch");
 });

@@ -37,19 +37,22 @@ export async function connectGoogleDrive({ interactive = true, popupWindow = nul
     } catch {}
     return connectNativeGoogleDrive({ interactive, forceReauthorization, selectAccount });
   }
-  const session = forceReauthorization ? null : await completeGoogleOAuthHandoff();
+  const requireFreshAuthorization = forceReauthorization || selectAccount;
+  const session = requireFreshAuthorization ? null : await completeGoogleOAuthHandoff();
   if (session) return { connected: true, accountEmail: session.accountEmail };
   const existing = readSession();
-  if (!forceReauthorization && existing && Date.parse(existing.expiresAt) > Date.now() + 30_000) return { connected: true, accountEmail: existing.accountEmail ?? "" };
+  if (!requireFreshAuthorization && existing && Date.parse(existing.expiresAt) > Date.now() + 30_000) return { connected: true, accountEmail: existing.accountEmail ?? "" };
   if (!interactive) throw new Error("google-drive-auth-required");
   const returnTo = new URL(location.href);
   returnTo.searchParams.delete("oauth_handoff");
-  const startUrl = `${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ return_to: returnTo.toString(), popup: "1", ...(forceReauthorization ? { reauth: "account-deletion" } : {}) })}`;
+  const reauthorization = forceReauthorization ? "account-deletion" : selectAccount ? "account-selection" : "";
+  const startParameters = { return_to: returnTo.toString(), ...(reauthorization ? { reauth: reauthorization } : {}) };
+  const startUrl = `${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ ...startParameters, popup: "1" })}`;
   if (popupWindow && !popupWindow.closed) return connectGoogleDriveInPopup(popupWindow, startUrl);
   if (requirePopup) throw new Error("google-drive-popup-blocked");
   // Fallback for browsers that refuse a user-initiated popup.  The normal app
   // path supplies a popup, so this is only retained for compatibility.
-  location.replace(`${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ return_to: returnTo.toString() })}`);
+  location.replace(`${apiUrl()}/v1/oauth/google/start?${new URLSearchParams(startParameters)}`);
   return new Promise(() => {});
 }
 
@@ -79,10 +82,11 @@ export function googleDriveAuthStatus() {
 }
 
 export async function restoreGoogleDriveSession() {
-  const existing = readSession();
-  if (existing && Date.parse(existing.expiresAt) > Date.now() + 30_000) return existing;
-  if (!isNativeOAuthRuntime()) return null;
-  return restoreNativeGoogleOAuthSession();
+  let existing = readSession();
+  if (!existing && isNativeOAuthRuntime()) existing = await restoreNativeGoogleOAuthSession();
+  if (!existing || Date.parse(existing.expiresAt) <= Date.now() + 30_000) return null;
+  await apiFetch("/v1/oauth/session/status", {}, existing.sessionToken ?? "");
+  return existing;
 }
 
 export function googleDriveReadiness() {

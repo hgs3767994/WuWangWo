@@ -98,6 +98,17 @@ test("OAuth start redirects with a nonce cookie instead of throwing", async () =
   assert.match(response.headers.get("set-cookie"), /^forget_me_not_oauth_nonce=/);
 });
 
+test("explicit PWA relinking forces Google account selection", async () => {
+  const database = {
+    prepare: (query) => query === "SELECT 1 AS ready"
+      ? { first: async () => ({ ready: 1 }) }
+      : { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) }
+  };
+  const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/start?return_to=https://example.test/app&reauth=account-selection"), configuredEnv(database, "encryption-key"));
+  assert.equal(response.status, 302);
+  assert.equal(new URL(response.headers.get("location")).searchParams.get("prompt"), "select_account");
+});
+
 test("web OAuth handoff creates a short-lived HttpOnly Worker session cookie", async () => {
   const database = {
     prepare(query) {
@@ -243,6 +254,41 @@ test("session revoke accepts the HttpOnly PWA session cookie", async () => {
   });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { revoked: true });
+  assert.match(response.headers.get("set-cookie"), /Max-Age=0$/);
+});
+
+test("session status validates the server-side session without contacting Google", async () => {
+  const database = {
+    prepare(query) {
+      if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      if (query.startsWith("SELECT a.google_subject")) return { bind: () => ({ first: async () => ({ google_subject: "subject-1" }) }) };
+      throw new Error(`unexpected query: ${query}`);
+    }
+  };
+  const response = await worker.fetch(new Request("https://example.test/v1/oauth/session/status", {
+    method: "POST",
+    headers: { Origin: "https://example.test", Authorization: "Bearer active-session" }
+  }), configuredEnv(database, "encryption-key"));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { active: true });
+});
+
+test("session status rejects a session removed by account deletion", async () => {
+  const database = {
+    prepare(query) {
+      if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      if (query.startsWith("SELECT a.google_subject")) return { bind: () => ({ first: async () => null }) };
+      throw new Error(`unexpected query: ${query}`);
+    }
+  };
+  const response = await worker.fetch(new Request("https://example.test/v1/oauth/session/status", {
+    method: "POST",
+    headers: { Origin: "https://example.test", Cookie: "forget_me_not_worker_session=deleted-session" }
+  }), configuredEnv(database, "encryption-key"));
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "session-expired" });
   assert.match(response.headers.get("set-cookie"), /Max-Age=0$/);
 });
 

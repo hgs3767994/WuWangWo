@@ -77,7 +77,7 @@ const NATIVE_BACKGROUND_LOCK_MS = 2 * 60 * 1000;
 const NATIVE_BIOMETRIC_PROMPT_DELAY_MS = 300;
 const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 const REMOTE_SECURITY_CHECK_INTERVAL_MS = 30 * 1000;
-const GOOGLE_REAUTHORIZATION_NOTICE = "需重新取得google授權，請先到設定頁並點擊【立即同步】，再回來繼續操作";
+const GOOGLE_REAUTHORIZATION_NOTICE = "Google Drive 連線已失效；本機資料仍安全保留。請到設定頁明確點擊【重新連結 Google Drive】並選擇帳號。";
 const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
 const OAUTH_RETURN_ROUTE_STORAGE_KEY = "forget-me-not-oauth-return-route";
 const PWA_RUNTIME_SESSION_KEY = "forget-me-not-pwa-runtime-session";
@@ -229,7 +229,11 @@ async function boot() {
   registerNativeBackButton();
   const freshPwaLaunch = registerPwaRuntimeSession();
   bootStage = { code: "BOOT-OAUTH-SESSION", label: "還原 Google Drive 短效連線" };
-  try { await restoreDriveSession(); } catch (error) { console.warn("無法還原 Google Drive 短效連線", error); }
+  let driveSessionAvailable = null;
+  try { driveSessionAvailable = Boolean(await restoreDriveSession()); } catch (error) {
+    if (isDriveAuthRequiredError(error)) driveSessionAvailable = false;
+    console.warn("無法還原 Google Drive 短效連線", error);
+  }
   let oauthHandoffCompleted = false;
   let oauthHandoffError = null;
   bootStage = { code: "BOOT-OAUTH-HANDOFF", label: "處理 Google Drive 授權回跳" };
@@ -238,6 +242,12 @@ async function boot() {
   bootStage = { code: "BOOT-APP-STATE", label: "讀取本機設定" };
   const storedAppState = await getItem("appState");
   let appState = normalizeLoadedAppState(storedAppState);
+  if (!oauthHandoffCompleted && driveSessionAvailable === false && appState?.googleDrive?.connected) {
+    appState = {
+      ...appState,
+      googleDrive: disconnectedDriveState(appState.googleDrive)
+    };
+  }
   if (oauthHandoffCompleted && appState?.googleDrive?.syncStatus === "syncing") {
     appState = {
       ...appState,
@@ -1759,7 +1769,7 @@ async function syncNow(options = {}) {
 
   try {
     if (!options.silent && !driveAuthStatus().hasAccessToken) rememberOAuthReturnRoute(state.route);
-    const driveConnection = await connectDrive({ interactive: !options.silent, popupWindow: options.oauthPopup, requirePopup: options.requireOAuthPopup });
+    const driveConnection = await connectDrive({ interactive: false });
     rememberDriveAccount(driveConnection);
     if (await enforceRemoteSecurityEpoch(null, { ignoreUnavailable: false })) return;
     const remoteEnvelope = await readDriveFile(driveFileName("vault"));
@@ -1800,17 +1810,13 @@ async function syncNow(options = {}) {
   } catch (error) {
     closeOAuthPopup(options.oauthPopup);
     const message = driveErrorMessage(error, "同步失敗，請稍後再試");
-    if (options.silent && isDriveAuthRequiredError(error)) {
+    if (isDriveAuthRequiredError(error)) {
       state.appState = {
         ...state.appState,
-        googleDrive: {
-          ...previousGoogleDrive,
-          syncStatus: previousGoogleDrive.syncStatus === "syncing" ? syncStatusAfterLocalChange(previousGoogleDrive) : previousGoogleDrive.syncStatus,
-          syncStartedAt: "",
-          lastSyncError: "Google Drive 授權需要重新登入，請按「立即同步」完成授權。"
-        }
+        googleDrive: disconnectedDriveState(previousGoogleDrive)
       };
       await setItem("appState", state.appState);
+      if (!options.silent) alert(GOOGLE_REAUTHORIZATION_NOTICE);
       render();
       return;
     }
@@ -1900,9 +1906,7 @@ function securityWriteFailureMessage(error, fallback) {
 }
 
 function syncNowWithOAuthPopup() {
-  // Opening must occur in the click handler, before syncNow persists UI state,
-  // otherwise mobile browsers treat it as an unsolicited popup.
-  return syncNow(openGoogleOAuthPopup());
+  return syncNow();
 }
 
 function beginDriveSetupWithOAuthPopup() {
@@ -3591,7 +3595,7 @@ function settingsView() {
       ${syncSummaryView(gd.lastSyncSummary)}
       ${pendingConflicts.length ? `<button class="action-quiet" data-nav="syncConflicts">處理衝突資料</button>` : ""}
       <button class="action-quiet" data-nav="syncTroubleshooting">同步疑難排解</button>
-      ${gd.connected ? `<button class="action-quiet" data-action="sync-now" ${isDriveSyncRecentlyStarted(gd) ? "disabled" : ""}>立即同步</button><button class="action-quiet" data-action="drive-logout">登出 Google Drive</button>` : `<button class="action-quiet" data-action="drive-placeholder">連結 Google Drive</button>`}
+      ${gd.connected ? `<button class="action-quiet" data-action="sync-now" ${isDriveSyncRecentlyStarted(gd) ? "disabled" : ""}>立即同步</button><button class="action-quiet" data-action="drive-logout">登出 Google Drive</button>` : `<button class="action-quiet" data-action="drive-placeholder">${state.appState.mode === "driveSync" ? "重新連結 Google Drive" : "連結 Google Drive"}</button>`}
     </section>
     ${themeSettingsSection()}
     ${securitySettingsSection()}
@@ -6827,6 +6831,17 @@ function isDriveAuthRequiredError(error) {
     message.includes("consent_required") ||
     message.includes("google-drive-request-failed:401")
   );
+}
+
+function disconnectedDriveState(googleDrive = {}) {
+  return {
+    ...googleDrive,
+    connected: false,
+    syncStatus: "disabled",
+    syncStartedAt: "",
+    accountEmail: "",
+    lastSyncError: GOOGLE_REAUTHORIZATION_NOTICE
+  };
 }
 
 function markDriveSyncIssue(error) {
