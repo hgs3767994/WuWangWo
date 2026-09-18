@@ -24,6 +24,7 @@ public class GoogleDriveAuthorizationPlugin extends Plugin {
     @PluginMethod
     public void authorize(PluginCall call) {
         String serverClientId = call.getString("serverClientId", "").trim();
+        boolean selectAccount = Boolean.TRUE.equals(call.getBoolean("selectAccount"));
         if (!serverClientId.endsWith(".apps.googleusercontent.com")) {
             call.reject("native-oauth-server-client-id-invalid");
             return;
@@ -33,10 +34,13 @@ public class GoogleDriveAuthorizationPlugin extends Plugin {
             new Scope("openid"),
             new Scope("email")
         );
-        AuthorizationRequest request = AuthorizationRequest.builder()
+        AuthorizationRequest.Builder requestBuilder = AuthorizationRequest.builder()
             .setRequestedScopes(scopes)
-            .requestOfflineAccess(serverClientId)
-            .build();
+            .requestOfflineAccess(serverClientId);
+        if (selectAccount) {
+            requestBuilder.setPrompt(AuthorizationRequest.Prompt.SELECT_ACCOUNT);
+        }
+        AuthorizationRequest request = requestBuilder.build();
 
         Identity.getAuthorizationClient(getActivity()).authorize(request)
             .addOnSuccessListener(result -> {

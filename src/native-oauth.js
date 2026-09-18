@@ -35,7 +35,8 @@ export async function connectNativeGoogleDrive({ interactive = true, forceReauth
   let authorization;
   try {
     authorization = await globalThis.Capacitor.Plugins.GoogleDriveAuthorization.authorize({
-      serverClientId: readiness.serverClientId
+      serverClientId: readiness.serverClientId,
+      selectAccount: forceReauthorization
     });
   } catch (error) {
     const message = String(error?.message ?? error ?? "unknown");

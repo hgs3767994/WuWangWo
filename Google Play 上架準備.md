@@ -1,7 +1,7 @@
 # Google Play 上架準備
 
-最後更新：2026-09-18
-執行基準：Android v170／Git `e13638d`／套件名稱 `io.github.hgs3767994.wuwangwo`
+最後更新：2026-09-19
+執行基準：Android v172／套件名稱 `io.github.hgs3767994.wuwangwo`
 
 ## 文件用途
 
@@ -23,6 +23,24 @@
 - [x] v170 已完成 Android 實機功能測試，使用者回報功能正常。
 - [x] 隱私權政策與服務條款已有初版公開頁面。
 
+## 上架品牌圖示前置工程
+
+- [x] 確認 `assets/icon-512.png` 為 Android 與 Google Play 最終圖示設計。
+- [x] 以原圖為唯一母圖，未使用生成式重畫或改變文字、花朵構圖。
+- [x] 產生 Android mdpi／hdpi／xhdpi／xxhdpi／xxxhdpi launcher icon。
+- [x] 產生 Android 圓形 launcher icon。
+- [x] 產生具安全留白的 Android adaptive icon foreground，背景固定為 `#FAFAFA`。
+- [x] 產生 Google Play 專用 512 × 512、32-bit RGBA PNG。
+- [x] 從正式 Worker 設定重新產生 Web bundle、執行 Capacitor sync 並成功建置 release APK。
+- [x] 驗證 release APK 簽章仍為正式 release certificate，並從 APK 反向取出 launcher icon 核對內容。
+- [ ] 在 Android 實機確認桌面、圓形遮罩、最近使用程式及系統 App 資訊頁的圖示顯示。
+
+產出：
+
+- Android 圖示產生器：`scripts/generate-android-icons.ps1`
+- Google Play 圖示：`store-assets/google-play/icon-512.png`
+- v172 release APK：`android/app/build/outputs/apk/release/app-release.apk`
+
 ## 第一階段：帳號與資料刪除
 
 目標：滿足 Google Play 帳號刪除與使用者資料政策，讓 Google 帳號連結所建立的 Worker 後端記錄可由使用者真正刪除。
@@ -38,7 +56,7 @@
 - [x] D1 刪除流程具備交易或可驗證的一致性，並避免殘留有效 session。
 - [x] App 設定頁加入清楚且不易誤觸的「刪除雲端帳號與資料」入口。
 - [x] 建立公開、無須登入即可閱讀的資料刪除說明／申請頁面。
-- [ ] 補齊 Worker 單元測試、PWA 測試及 Android 實機測試。
+- [x] 補齊 Worker 單元測試、PWA 測試及 Android 實機測試。
 
 驗收條件：刪除後舊 Worker session 無法使用、D1 無帳號關聯資料、Google 授權已撤銷；使用者選擇刪除 Drive 資料時，加密同步檔亦不存在。
 
@@ -61,8 +79,21 @@
 - [x] 正式 Worker 已部署，版本 ID `68c5d212-c619-415e-a46f-c2c9ad921ea6`；`/health` 回報 OAuth、D1 schema 與 recovery storage 均 ready，未帶 session 的刪除請求回覆 `401`。
 - [x] GitHub 提交 `fd0dead` 已推送至 `main`；Pages workflow run `35297588180` 成功完成。
 - [x] 正式 `data-deletion.html` 回覆 HTTP 200 且包含自助刪除操作；正式 `service-worker.js` 為 v171，正式 `src/app.js` 包含 App 內刪除入口。
-- [ ] 目前 `adb devices -l` 無連線裝置；Android 實機刪除流程與刪除後遠端查核仍待執行。
-- [ ] 部署後須以測試 Google 帳號完成兩輪端到端驗收：保留 Drive／本機資料一次，以及刪除 Drive／本機資料一次；逐項查核舊 session、D1、Google 授權與 Drive 檔案。
+- [x] Android 實機已完成兩輪端到端驗收：第一輪保留 Drive／本機資料，第二輪刪除 Drive／本機資料。
+- [x] 刪除後已逐項查核 D1、Google 授權、Drive 加密檔與本機資料；詳見下方 2026-09-19 實機驗收紀錄。
+
+### 第一階段實機驗收與 v172 修正（2026-09-19）
+
+- [x] 第一輪刪除前 D1 為 `oauth_accounts=1`、`oauth_sessions=2`、`oauth_handoffs=1`、`recovery_requests=0`；選擇保留 Drive 與本機資料後四表均為 0。
+- [x] 第一輪完成後本機仍保留 27 位人物；重新連結相同 Google 帳號時顯示「偵測到雲端資料」，成功解密與合併後仍為 27 位，證明 `vault.enc` 與 `key-package.enc` 均被保留且可用。
+- [x] 實機發現 v171 原生刪除流程只繞過莫忘自己的 Worker session；Google Play services 若已有授權會靜默回傳 server auth code，未顯示畫面所承諾的帳號選擇器。
+- [x] v172 在原生 `forceReauthorization` 路徑傳入 `selectAccount`，Android `AuthorizationRequest` 設為 `Prompt.SELECT_ACCOUNT`；正常同步路徑維持原有靜默重用行為。
+- [x] v172 實機驗證顯示 Google Play services「選擇帳戶」畫面，列出裝置上的兩個 Google 帳號；取消後 App 顯示未刪除任何資料，D1 仍維持 `oauth_accounts=1`、`oauth_sessions=1`。
+- [x] 第二輪勾選刪除 Drive 與本機資料並重新選擇正確 Google 帳號；App 回報雲端帳號與選取資料已永久刪除，本機資料也已清除。
+- [x] 第二輪完成後 D1 四個帳號關聯表均為 0，App 重新載入後回到只有「開始使用」的初始頁。
+- [x] Worker 只有在依序成功刪除 Drive `vault.enc`、`key-package.enc`、撤銷 Google token 並以 D1 batch 清除帳號關聯資料後才回傳成功；任一步失敗均不會進入 App 的完成分支。
+- [x] `npm run check`、`npm test`、`npm run check:worker`、`npm run test:worker`（33 項）、正式設定 `npm run build:web`、Capacitor sync 與 `assembleRelease` 均通過。
+- [x] v172 release APK：`android/app/build/outputs/apk/release/app-release.apk`；SHA-256 `699425ED17968DDE2A85E2D7E98CA1BF0FB25F7FEA22DE88CCEE355F97FA6BF9`；簽章 SHA-256 與手機原安裝版本相同。
 
 ## 第二階段：正式隱私政策與服務條款
 

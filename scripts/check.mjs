@@ -1,4 +1,5 @@
 import { access, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 
 const requiredFiles = [
   "README.md",
@@ -12,6 +13,7 @@ const requiredFiles = [
   ".github/workflows/deploy-pages.yml",
   "scripts/build-pages.mjs",
   "scripts/build-web.mjs",
+  "scripts/generate-android-icons.ps1",
   "capacitor.config.json",
   "scripts/check.mjs",
   "scripts/dev-server.mjs",
@@ -34,6 +36,7 @@ const requiredFiles = [
   "src/styles.css",
   "android/app/src/main/res/xml/backup_rules.xml",
   "android/app/src/main/res/xml/data_extraction_rules.xml",
+  "store-assets/google-play/icon-512.png",
   "android/app/src/main/java/io/github/hgs3767994/wuwangwo/NativeFileExportPlugin.java",
   "android/app/src/main/java/io/github/hgs3767994/wuwangwo/OAuthSessionPlugin.java",
   "android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationPlugin.java",
@@ -46,12 +49,14 @@ const appShellRequiredFiles = requiredFiles.filter((file) => ![
   ".github/workflows/deploy-pages.yml",
   "scripts/build-pages.mjs",
   "scripts/build-web.mjs",
+  "scripts/generate-android-icons.ps1",
   "capacitor.config.json",
   "scripts/check.mjs",
   "scripts/dev-server.mjs",
   "scripts/smoke-test.mjs",
   "android/app/src/main/res/xml/backup_rules.xml",
   "android/app/src/main/res/xml/data_extraction_rules.xml",
+  "store-assets/google-play/icon-512.png",
   "android/app/src/main/java/io/github/hgs3767994/wuwangwo/NativeFileExportPlugin.java",
   "android/app/src/main/java/io/github/hgs3767994/wuwangwo/OAuthSessionPlugin.java",
   "android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationPlugin.java",
@@ -255,10 +260,10 @@ await check("native Android OAuth uses Google AuthorizationClient and a one-time
   const pluginSource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationPlugin.java", "utf8");
   const activitySource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationActivity.java", "utf8");
   const oauthSessionPluginSource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/OAuthSessionPlugin.java", "utf8");
-  ["GoogleDriveAuthorization.authorize", "nativeServerClientId", "server_auth_code"].forEach((text) => {
+  ["GoogleDriveAuthorization.authorize", "nativeServerClientId", "server_auth_code", "selectAccount: forceReauthorization"].forEach((text) => {
     if (!nativeOAuthSource.includes(text)) throw new Error(`native OAuth adapter is missing ${text}.`);
   });
-  ["GoogleDriveAuthorizationActivity", "serverAuthCode", "AuthorizationClient", "requestOfflineAccess", "drive.appdata", "result.hasResolution()"].forEach((text) => {
+  ["GoogleDriveAuthorizationActivity", "serverAuthCode", "AuthorizationClient", "requestOfflineAccess", "drive.appdata", "result.hasResolution()", "AuthorizationRequest.Prompt.SELECT_ACCOUNT"].forEach((text) => {
     if (!pluginSource.includes(text)) throw new Error(`native OAuth Capacitor plugin is missing ${text}.`);
   });
   ["EXTRA_PENDING_INTENT", "PendingIntent", "getAuthorizationResultFromIntent"].forEach((text) => {
@@ -337,6 +342,39 @@ await check("public legal pages exist for OAuth production readiness", async () 
   ["Google Drive", "服務條款"].forEach((text) => {
     if (!terms.includes(text)) throw new Error(`terms.html must mention ${text}.`);
   });
+});
+
+await check("approved Android and Google Play launcher icons are intact", async () => {
+  const densities = ["mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"];
+  const iconNames = ["ic_launcher.png", "ic_launcher_round.png", "ic_launcher_foreground.png"];
+  const generatedIcons = densities.flatMap((density) =>
+    iconNames.map((name) => `android/app/src/main/res/mipmap-${density}/${name}`)
+  );
+  const requiredIconFiles = [
+    "scripts/generate-android-icons.ps1",
+    "store-assets/google-play/icon-512.png",
+    "android/app/src/main/res/values/ic_launcher_background.xml",
+    ...generatedIcons
+  ];
+  const expectedHashes = new Map([
+    ["assets/icon-512.png", "BD7D55E737C9873BA63B7CD5D4CF92F6CC4B960FFB6DAD03638E48632AF2F6DB"],
+    ["store-assets/google-play/icon-512.png", "DF4D359BFDE79727723A2FD619061A89828F10BDE0109CA43BE5A12542BB2B6E"],
+    ["android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png", "6A2C9DF38BF50086F63FF63EAA658975A6D6978E3CC6ECE688EB20C7D97E06FA"],
+    ["android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png", "33A29A327705B53FEC8C02E1869233A58951BC5DA6DD4032436FCAC086658C70"],
+    ["android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png", "B039A4119B099EA33396BA35E4E434CD43D1EF9CC0EF372F11DCBB27B336F99F"]
+  ]);
+
+  try {
+    await Promise.all(requiredIconFiles.map((file) => access(file)));
+    const backgroundSource = await readFile("android/app/src/main/res/values/ic_launcher_background.xml", "utf8");
+    if (!backgroundSource.includes("#FAFAFA")) throw new Error("adaptive icon background must remain #FAFAFA");
+    for (const [file, expectedHash] of expectedHashes) {
+      const actualHash = createHash("sha256").update(await readFile(file)).digest("hex").toUpperCase();
+      if (actualHash !== expectedHash) throw new Error(`${file} SHA-256 changed`);
+    }
+  } catch (error) {
+    throw new Error(`Approved launcher icon assets are missing or changed (${error.message}). Re-run scripts/generate-android-icons.ps1 from the project root.`);
+  }
 });
 
 await check("account deletion is available in-app and on a public self-service page", async () => {
