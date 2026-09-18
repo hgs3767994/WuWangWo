@@ -27,7 +27,7 @@ export async function approveGoogleRecoveryRequest(requestId, values) { return w
 export async function verifyGoogleRecoveryRequest(requestId, values) { return workerApiFetch(`/v1/recovery/requests/${encodeURIComponent(requestId)}/verify`, values); }
 export async function completeGoogleRecoveryRequest(requestId, values) { return workerApiFetch(`/v1/recovery/requests/${encodeURIComponent(requestId)}/complete`, values); }
 
-export async function connectGoogleDrive({ interactive = true, popupWindow = null, requirePopup = false, forceReauthorization = false } = {}) {
+export async function connectGoogleDrive({ interactive = true, popupWindow = null, requirePopup = false, forceReauthorization = false, selectAccount = false } = {}) {
   if (isNativeOAuthRuntime()) {
     // Native authorization is rendered by Google Play services inside the
     // Android app. Close a stale reserved web popup defensively so a caller
@@ -35,7 +35,7 @@ export async function connectGoogleDrive({ interactive = true, popupWindow = nul
     try {
       if (popupWindow && !popupWindow.closed) popupWindow.close();
     } catch {}
-    return connectNativeGoogleDrive({ interactive, forceReauthorization });
+    return connectNativeGoogleDrive({ interactive, forceReauthorization, selectAccount });
   }
   const session = forceReauthorization ? null : await completeGoogleOAuthHandoff();
   if (session) return { connected: true, accountEmail: session.accountEmail };

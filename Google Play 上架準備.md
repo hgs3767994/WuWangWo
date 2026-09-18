@@ -95,6 +95,15 @@
 - [x] `npm run check`、`npm test`、`npm run check:worker`、`npm run test:worker`（33 項）、正式設定 `npm run build:web`、Capacitor sync 與 `assembleRelease` 均通過。
 - [x] v172 release APK：`android/app/build/outputs/apk/release/app-release.apk`；SHA-256 `699425ED17968DDE2A85E2D7E98CA1BF0FB25F7FEA22DE88CCEE355F97FA6BF9`；簽章 SHA-256 與手機原安裝版本相同。
 
+### v173 主動連結帳號選擇修正（2026-09-19）
+
+- [x] 實機確認 v172 的「連結 Google Drive」未要求帳戶選擇，Google Play services 直接沿用上次使用的帳號並顯示授權同意畫面。
+- [x] 將使用者主動點擊「連結 Google Drive」與刪除前重新驗證拆成獨立意圖；兩者都要求 Android 顯示帳戶選擇器，但一般連結不套用刪除專用重新驗證語意。
+- [x] 背景同步、App 啟動時的 Worker session 恢復與既有連線重用維持靜默，不會在一般同步時反覆要求選擇帳號。
+- [x] 新增靜態檢查，防止主動連結流程遺失 `selectAccount: true`，並將快取版本升為 v173。
+- [x] v173 已覆蓋安裝到 Android 實機；主動點擊「連結 Google Drive」後出現 Google Play services「選擇帳戶」畫面，列出裝置上的兩個帳號與「新增其他帳戶」。
+- [x] v173 release APK SHA-256：`A51D74EE9F15EC533EA8AEB5E5BC4B66E7D42E3AFB5E5209E00A9509A5593D86`；簽章 SHA-256 仍為 `6d4d32dbc1491f0de8f41569a92a9b6ee1b3cf680635ad8cbc875a6903f2596e`。
+
 ## 第二階段：正式隱私政策與服務條款
 
 - [ ] 更新 `privacy.html`：

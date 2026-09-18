@@ -22,9 +22,9 @@ export function nativeOAuthReadiness() {
   return { ready: true, serverClientId };
 }
 
-export async function connectNativeGoogleDrive({ interactive = true, forceReauthorization = false } = {}) {
+export async function connectNativeGoogleDrive({ interactive = true, forceReauthorization = false, selectAccount = false } = {}) {
   const existing = readSession() ?? await restoreNativeGoogleOAuthSession();
-  if (!forceReauthorization && existing && Date.parse(existing.expiresAt) > Date.now() + 30_000) {
+  if (!forceReauthorization && !selectAccount && existing && Date.parse(existing.expiresAt) > Date.now() + 30_000) {
     return { connected: true, accountEmail: existing.accountEmail ?? "" };
   }
   if (!interactive) throw new Error("google-drive-auth-required");
@@ -36,7 +36,7 @@ export async function connectNativeGoogleDrive({ interactive = true, forceReauth
   try {
     authorization = await globalThis.Capacitor.Plugins.GoogleDriveAuthorization.authorize({
       serverClientId: readiness.serverClientId,
-      selectAccount: forceReauthorization
+      selectAccount: forceReauthorization || selectAccount
     });
   } catch (error) {
     const message = String(error?.message ?? error ?? "unknown");

@@ -1209,7 +1209,11 @@ async function beginDriveSetup(options = {}) {
     return;
   }
   try {
-    const driveConnection = await connectDrive({ popupWindow: options.oauthPopup, requirePopup: options.requireOAuthPopup });
+    const driveConnection = await connectDrive({
+      popupWindow: options.oauthPopup,
+      requirePopup: options.requireOAuthPopup,
+      selectAccount: options.selectAccount === true
+    });
     rememberDriveAccount(driveConnection);
   } catch (error) {
     closeOAuthPopup(options.oauthPopup);
@@ -1904,7 +1908,7 @@ function syncNowWithOAuthPopup() {
 function beginDriveSetupWithOAuthPopup() {
   // Initial Drive setup performs IndexedDB reads before it starts OAuth, so it
   // needs the same user-gesture popup reservation as manual sync.
-  return beginDriveSetup(openGoogleOAuthPopup());
+  return beginDriveSetup({ ...openGoogleOAuthPopup(), selectAccount: true });
 }
 
 async function logoutGoogleDrive() {

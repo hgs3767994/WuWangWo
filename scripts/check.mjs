@@ -260,7 +260,7 @@ await check("native Android OAuth uses Google AuthorizationClient and a one-time
   const pluginSource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationPlugin.java", "utf8");
   const activitySource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/GoogleDriveAuthorizationActivity.java", "utf8");
   const oauthSessionPluginSource = await readFile("android/app/src/main/java/io/github/hgs3767994/wuwangwo/OAuthSessionPlugin.java", "utf8");
-  ["GoogleDriveAuthorization.authorize", "nativeServerClientId", "server_auth_code", "selectAccount: forceReauthorization"].forEach((text) => {
+  ["GoogleDriveAuthorization.authorize", "nativeServerClientId", "server_auth_code", "selectAccount: forceReauthorization || selectAccount"].forEach((text) => {
     if (!nativeOAuthSource.includes(text)) throw new Error(`native OAuth adapter is missing ${text}.`);
   });
   ["GoogleDriveAuthorizationActivity", "serverAuthCode", "AuthorizationClient", "requestOfflineAccess", "drive.appdata", "result.hasResolution()", "AuthorizationRequest.Prompt.SELECT_ACCOUNT"].forEach((text) => {
@@ -278,6 +278,9 @@ await check("native Android OAuth uses Google AuthorizationClient and a one-time
   }
   if (!appSource.includes("isNativeOAuthRuntime() || isSimulatedDrive() || sessionReusable")) {
     throw new Error("native OAuth must bypass the web popup reservation.");
+  }
+  if (!appSource.includes("beginDriveSetup({ ...openGoogleOAuthPopup(), selectAccount: true })")) {
+    throw new Error("a user-initiated Google Drive connection must show the native account selector.");
   }
   if (!driveGoogleSource.includes("if (popupWindow && !popupWindow.closed) popupWindow.close()")) {
     throw new Error("native OAuth must close any stale reserved web popup.");
