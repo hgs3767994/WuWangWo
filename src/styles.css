@@ -1222,6 +1222,24 @@ button:focus-visible,
   margin-bottom: 0;
 }
 
+.danger-zone {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--line));
+}
+
+.deletion-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  line-height: 1.5;
+}
+
+.deletion-choice input {
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+}
+
 .guide-list {
   margin: 0;
   padding-left: 22px;

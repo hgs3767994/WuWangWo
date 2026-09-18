@@ -1,5 +1,5 @@
 import { isMockDrive } from "./config.js";
-import { approveGoogleRecoveryRequest, completeGoogleRecoveryRequest, connectGoogleDrive, createGoogleRecoveryRequest, disconnectGoogleDrive, getGoogleRecoveryRequest, googleDriveAuthStatus, googleDriveReadiness, listGoogleDriveFileRevisions, listGoogleDriveFiles, listGoogleRecoveryRequests, readGoogleDriveFile, readGoogleDriveFileRevision, removeGoogleDriveFile, restoreGoogleDriveSession, testGoogleDriveConnection, verifyGoogleRecoveryRequest, writeGoogleDriveFile } from "./drive-google.js";
+import { approveGoogleRecoveryRequest, completeGoogleRecoveryRequest, connectGoogleDrive, createGoogleRecoveryRequest, deleteGoogleCloudAccount, disconnectGoogleDrive, getGoogleRecoveryRequest, googleDriveAuthStatus, googleDriveReadiness, listGoogleDriveFileRevisions, listGoogleDriveFiles, listGoogleRecoveryRequests, readGoogleDriveFile, readGoogleDriveFileRevision, removeGoogleDriveFile, restoreGoogleDriveSession, testGoogleDriveConnection, verifyGoogleRecoveryRequest, writeGoogleDriveFile } from "./drive-google.js";
 import { listMockDriveFileRevisions, listMockDriveFiles, readMockDriveFile, readMockDriveFileRevision, removeMockDriveFile, writeMockDriveFile } from "./drive-mock.js";
 
 export async function writeDriveFile(name, content) {
@@ -47,6 +47,12 @@ export async function connectDrive(options = {}) {
 export async function disconnectDrive() {
   if (isMockDrive()) return;
   await disconnectGoogleDrive();
+}
+
+export async function deleteCloudAccount(options) {
+  if (isMockDrive()) throw new Error("account-deletion-unavailable-in-mock-mode");
+  assertGoogleDriveReady();
+  return deleteGoogleCloudAccount(options);
 }
 
 export function driveAuthStatus() {

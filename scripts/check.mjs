@@ -5,6 +5,7 @@ const requiredFiles = [
   "index.html",
   "privacy.html",
   "terms.html",
+  "data-deletion.html",
   "manifest.webmanifest",
   "package.json",
   "service-worker.js",
@@ -16,6 +17,7 @@ const requiredFiles = [
   "scripts/dev-server.mjs",
   "scripts/smoke-test.mjs",
   "src/app.js",
+  "src/account-deletion.js",
   "src/config.js",
   "src/crypto.js",
   "src/native-file-export.js",
@@ -335,6 +337,27 @@ await check("public legal pages exist for OAuth production readiness", async () 
   ["Google Drive", "服務條款"].forEach((text) => {
     if (!terms.includes(text)) throw new Error(`terms.html must mention ${text}.`);
   });
+});
+
+await check("account deletion is available in-app and on a public self-service page", async () => {
+  const [appSource, deletionPage, deletionSource, workerSource, storeSource] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("data-deletion.html", "utf8"),
+    readFile("src/account-deletion.js", "utf8"),
+    readFile("workers/oauth/src/index.js", "utf8"),
+    readFile("workers/oauth/src/oauth-store.js", "utf8")
+  ]);
+  ["刪除雲端帳號與資料", "deleteDriveData", "deleteLocalData", "data-deletion.html"].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing account deletion support: ${text}`);
+  });
+  ["Cloudflare D1", "Google Drive appDataFolder", "data-delete-submit"].forEach((text) => {
+    if (!deletionPage.includes(text)) throw new Error(`data-deletion.html is missing ${text}`);
+  });
+  if (!deletionSource.includes("deleteGoogleCloudAccount")) throw new Error("public deletion page must execute self-service account deletion");
+  ["/v1/account/delete", "ACCOUNT_DELETION_REAUTH_MS", "revokeGoogleToken", "deleteAccountData"].forEach((text) => {
+    if (!workerSource.includes(text)) throw new Error(`Worker is missing account deletion support: ${text}`);
+  });
+  if (!storeSource.includes("database.batch(statements)")) throw new Error("D1 account deletion must use an atomic batch");
 });
 
 await check("GitHub Pages workflow builds deployable dist", () => {

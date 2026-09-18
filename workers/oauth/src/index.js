@@ -1,8 +1,8 @@
-import { authorizationUrl, exchangeCode, exchangeServerAuthCode, googleProfile, refreshAccessToken } from "./google-oauth.js";
+import { authorizationUrl, exchangeCode, exchangeServerAuthCode, googleProfile, refreshAccessToken, revokeGoogleToken } from "./google-oauth.js";
 import { createOAuthState } from "./oauth-state.js";
 import { verifyOAuthState } from "./oauth-state.js";
 import { decryptTokenEnvelope, encryptTokenEnvelope } from "./token-envelope.js";
-import { accountBySubject, consumeHandoff, createHandoff, createSession, revokeSession, saveAccount, sessionAccount } from "./oauth-store.js";
+import { accountBySubject, consumeHandoff, createHandoff, createSession, deleteAccountData, revokeSession, saveAccount, sessionAccount } from "./oauth-store.js";
 import { executeDriveOperation } from "./drive-proxy.js";
 import { approveRecoveryRequest, completeRecoveryRequest, createRecoveryRequest, listRecoveryRequests, recordFailedVerification, recoveryRequest, recoveryVerificationRecord } from "./recovery-store.js";
 
@@ -10,6 +10,7 @@ const SERVICE_NAME = "forget-me-not-oauth";
 const WORKER_SESSION_COOKIE = "forget_me_not_worker_session";
 const REQUIRED_SECRETS = ["GOOGLE_WEB_CLIENT_SECRET", "OAUTH_STATE_SIGNING_KEY", "TOKEN_ENCRYPTION_KEY"];
 const REQUIRED_PUBLIC_VALUES = ["APP_ORIGINS", "GOOGLE_WEB_CLIENT_ID", "GOOGLE_OAUTH_REDIRECT_URI"];
+const ACCOUNT_DELETION_REAUTH_MS = 5 * 60 * 1000;
 
 export default {
   async fetch(request, env) {
@@ -27,7 +28,8 @@ export default {
       const nonce = crypto.randomUUID();
       const popup = url.searchParams.get("popup") === "1";
       const state = await createOAuthState({ returnTo, nonce, popup, secret: env.OAUTH_STATE_SIGNING_KEY });
-      return redirect(authorizationUrl({ clientId: env.GOOGLE_WEB_CLIENT_ID, redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI, state }), 302, `forget_me_not_oauth_nonce=${nonce}; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=600`);
+      const prompt = url.searchParams.get("reauth") === "account-deletion" ? "select_account" : "";
+      return redirect(authorizationUrl({ clientId: env.GOOGLE_WEB_CLIENT_ID, redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI, state, prompt }), 302, `forget_me_not_oauth_nonce=${nonce}; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=600`);
     }
 
     if (request.method === "POST" && url.pathname === "/v1/oauth/google/native/exchange") {
@@ -136,6 +138,41 @@ export default {
         return json({ revoked: true }, 200, { ...corsHeaders(origin), "set-cookie": clearWorkerSessionCookie() });
       } catch {
         return json({ error: "session-revoke-failed" }, 500, corsHeaders(origin));
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/account/delete") {
+      const origin = request.headers.get("Origin");
+      if (!isAllowedOrigin(origin, env.APP_ORIGINS)) return json({ error: "origin-not-allowed" }, 403);
+      if (!hasRequiredConfiguration(env)) return json({ error: "oauth-not-configured" }, 503, corsHeaders(origin));
+      if (!(await recoveryDatabaseStatus(env.OAUTH_DB)).ready) return json({ error: "account-deletion-storage-not-ready" }, 503, corsHeaders(origin));
+      const token = requestSessionToken(request);
+      if (!token) return sessionError("session-required", origin);
+      const now = new Date().toISOString();
+      try {
+        const account = await sessionAccount(env.OAUTH_DB, { token, now });
+        if (!account) return sessionError("session-expired", origin);
+        const sessionCreatedAt = Date.parse(account.session_created_at ?? "");
+        if (!Number.isFinite(sessionCreatedAt) || Date.now() - sessionCreatedAt > ACCOUNT_DELETION_REAUTH_MS) {
+          return json({ error: "account-deletion-reauth-required" }, 401, corsHeaders(origin));
+        }
+        const body = await request.json();
+        if (body?.confirmation !== "DELETE") return json({ error: "account-deletion-confirmation-invalid" }, 400, corsHeaders(origin));
+        const deleteDriveData = body?.deleteDriveData === true;
+        const accessToken = await currentAccessToken(env, account, now);
+        if (deleteDriveData) {
+          await executeDriveOperation({ operation: "delete", name: "vault.enc", accessToken });
+          await executeDriveOperation({ operation: "delete", name: "key-package.enc", accessToken });
+        }
+        const storedTokens = await decryptTokenEnvelope({ ciphertext: account.token_ciphertext, iv: account.token_iv }, env.TOKEN_ENCRYPTION_KEY);
+        await revokeGoogleToken({ token: storedTokens.refresh_token || accessToken });
+        await deleteAccountData(env.OAUTH_DB, { subject: account.google_subject });
+        return json({ deleted: true, driveDataDeleted: deleteDriveData, googleAuthorizationRevoked: true }, 200, { ...corsHeaders(origin), "set-cookie": clearWorkerSessionCookie() });
+      } catch (error) {
+        const message = String(error?.message ?? "");
+        if (message.startsWith("google-drive-request-failed")) return json({ error: message }, 502, corsHeaders(origin));
+        if (message.includes("google-token")) return json({ error: message }, 502, corsHeaders(origin));
+        return json({ error: "account-deletion-failed" }, 500, corsHeaders(origin));
       }
     }
 

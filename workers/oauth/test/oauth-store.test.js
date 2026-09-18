@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { consumeHandoff, createSession, revokeSession, saveAccount } from "../src/oauth-store.js";
+import { consumeHandoff, createSession, deleteAccountData, revokeSession, saveAccount } from "../src/oauth-store.js";
 test("account storage binds encrypted fields instead of token plaintext", async () => {
   let values; const db = { prepare: () => ({ bind: (...args) => (values = args, { run: async () => {} }) }) };
   await saveAccount(db, { subject: "sub", envelope: { ciphertext: "cipher", iv: "iv" }, scopes: "scope", expiresAt: "2030", refreshTokenPresent: true, now: "2026" });
@@ -43,4 +43,25 @@ test("session revocation stores only a token hash", async () => {
   assert.equal(await revokeSession(database, { token: "session-token", now: "2026-09-05T00:00:00.000Z" }), true);
   assert.match(captured.query, /UPDATE oauth_sessions SET revoked_at/);
   assert(!captured.values.includes("session-token"));
+});
+
+test("account deletion removes every subject-owned table in one D1 batch", async () => {
+  const statements = [];
+  const database = {
+    prepare(query) {
+      return { bind: (...values) => ({ query, values }) };
+    },
+    async batch(batchStatements) {
+      statements.push(...batchStatements);
+      return batchStatements.map(() => ({ success: true }));
+    }
+  };
+  assert.deepEqual(await deleteAccountData(database, { subject: "subject-1" }), { deleted: true });
+  assert.deepEqual(statements.map((item) => item.query), [
+    "DELETE FROM recovery_requests WHERE google_subject = ?",
+    "DELETE FROM oauth_handoffs WHERE google_subject = ?",
+    "DELETE FROM oauth_sessions WHERE google_subject = ?",
+    "DELETE FROM oauth_accounts WHERE google_subject = ?"
+  ]);
+  assert(statements.every((item) => item.values[0] === "subject-1"));
 });

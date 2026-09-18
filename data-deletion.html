@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#24443D" />
+    <meta name="description" content="莫忘 Google 雲端帳號與資料刪除說明及自助刪除入口。" />
+    <title>莫忘 帳號與資料刪除</title>
+    <link rel="canonical" href="https://wuwangwo.shawnghong.com/data-deletion.html" />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="app legal-page">
+      <header class="topbar topbar-centered">
+        <a class="button-link secondary" href="./">返回莫忘</a>
+        <h1 class="section-title">帳號與資料刪除</h1>
+        <span></span>
+      </header>
+      <section class="panel stack">
+        <p>此頁不需先登入即可閱讀。即使已移除莫忘 App，仍可在這裡重新驗證 Google 帳號並永久刪除莫忘的雲端帳號資料。</p>
+        <h2 class="section-title">一定會刪除的資料</h2>
+        <ul class="guide-list">
+          <li>Cloudflare D1 中的 Google OAuth 帳號與加密權杖。</li>
+          <li>所有 Worker sessions、OAuth handoff 與帳號關聯的救援請求。</li>
+          <li>Google 帳號對莫忘的 OAuth 授權。</li>
+        </ul>
+        <h2 class="section-title">由你選擇是否刪除</h2>
+        <label class="deletion-choice"><input type="checkbox" data-delete-drive /> 同時刪除 Google Drive appDataFolder 中的莫忘加密同步檔</label>
+        <p class="muted">若不勾選，Google Drive 中的加密檔會保留，但刪除後的 Worker 無法再代表你存取。此網頁不會清除任何裝置上的本機資料；可在 App 刪除流程中另行選擇，或使用裝置／瀏覽器的網站資料清除功能。</p>
+        <div class="field">
+          <label>輸入 DELETE 確認永久刪除</label>
+          <input data-delete-confirmation autocomplete="off" />
+        </div>
+        <button class="danger" type="button" data-delete-submit>選擇 Google 帳號並永久刪除</button>
+        <p class="status-message" data-delete-status aria-live="polite">尚未提出刪除要求。</p>
+        <p class="muted">只有完成 Google 重新驗證後才會執行。若驗證取消或流程失敗，請視為資料尚未刪除並重新操作。</p>
+      </section>
+    </main>
+    <script src="./src/runtime-config.js"></script>
+    <script type="module" src="./src/account-deletion.js"></script>
+  </body>
+</html>

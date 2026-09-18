@@ -1,0 +1,198 @@
+# Google Play 上架準備
+
+最後更新：2026-09-18
+執行基準：Android v170／Git `e13638d`／套件名稱 `io.github.hgs3767994.wuwangwo`
+
+## 文件用途
+
+本文件是「莫忘」Android App 上架 Google Play 的工程主線。後續應依下列順序執行、驗證並更新勾選狀態；除非發現政策、資安或產品需求衝突，不任意跳過必要階段。
+
+每一階段只有在程式修改、測試、必要部署與文件更新都完成後，才可標記完成。需要開發者本人處理的身分驗證、付款、政策聲明或 Play Console 決策，應停下來提供明確操作步驟。
+
+## 已完成基線
+
+- [x] Android application ID 固定為 `io.github.hgs3767994.wuwangwo`。
+- [x] `minSdk 24`、`compileSdk 36`、`targetSdk 36`。
+- [x] 正式 release keystore 已由開發者自行保管。
+- [x] 本機 release SHA-1／SHA-256 已取得並登錄於目前 Android OAuth client。
+- [x] 正式 PWA：`https://wuwangwo.shawnghong.com`。
+- [x] 正式 Worker：`https://wuwangwo-api.shawnghong.com`。
+- [x] Google OAuth callback、原生 Google OAuth、Worker session 與靜默同步已可運作。
+- [x] Android Keystore、生物辨識、兩分鐘前景／背景鎖定、離線資料操作已實作。
+- [x] Android Auto Backup 已關閉。
+- [x] v170 已完成 Android 實機功能測試，使用者回報功能正常。
+- [x] 隱私權政策與服務條款已有初版公開頁面。
+
+## 第一階段：帳號與資料刪除
+
+目標：滿足 Google Play 帳號刪除與使用者資料政策，讓 Google 帳號連結所建立的 Worker 後端記錄可由使用者真正刪除。
+
+- [x] 定義刪除範圍與確認畫面：
+  - 刪除 Cloudflare D1 的 OAuth account。
+  - 撤銷及刪除所有 Worker sessions。
+  - 刪除 handoff、recovery request 等帳號關聯資料。
+  - 撤銷 Google OAuth token。
+  - 讓使用者明確選擇是否一併刪除 Google Drive `appDataFolder` 內的莫忘加密檔案。
+  - 本機資料是否保留或刪除必須清楚分流，不可由模糊文字隱含決定。
+- [x] Worker 新增重新驗證後才能執行的帳號／資料刪除 API。
+- [ ] D1 刪除流程具備交易或可驗證的一致性，並避免殘留有效 session。
+- [ ] App 設定頁加入清楚且不易誤觸的「刪除雲端帳號與資料」入口。
+- [ ] 建立公開、無須登入即可閱讀的資料刪除說明／申請頁面。
+- [ ] 補齊 Worker 單元測試、PWA 測試及 Android 實機測試。
+
+驗收條件：刪除後舊 Worker session 無法使用、D1 無帳號關聯資料、Google 授權已撤銷；使用者選擇刪除 Drive 資料時，加密同步檔亦不存在。
+
+### 第一階段執行紀錄（2026-09-18）
+
+本次開發候選快取版本：`forget-me-not-v171`。v170 原始基線與使用者提供的 APK、`assets/icon.svg` 及其他素材均保留。
+
+- [x] 刪除契約已落實為四個彼此清楚的範圍：Worker 帳號關聯資料與 Google OAuth 授權一定刪除；Drive 加密同步檔與本機資料各自獨立選擇，預設均保留。
+- [x] App 內要求輸入 `DELETE`、再次顯示完整範圍，並重新選擇 Google 帳號；若所選帳號與目前同步 Email 不同則中止。
+- [x] Worker 原始碼已加入 `POST /v1/account/delete`，只接受五分鐘內由 Google OAuth 新建立的 session。
+- [x] D1 原始碼使用單一 `database.batch()` 依序刪除 `recovery_requests`、`oauth_handoffs`、`oauth_sessions`、`oauth_accounts`；批次失敗不回報完成。
+- [x] 可選刪除 Google Drive `vault.enc`、`key-package.enc`，之後撤銷 Google refresh token／access token，再清除 D1 帳號資料。
+- [x] App 設定頁已加入「刪除雲端帳號與資料」，保留本機資料時轉成本機模式；選擇刪除本機資料時清除 IndexedDB 與原生 trusted session。
+- [x] 已建立公開自助頁 `data-deletion.html`，無須登入即可閱讀，並可由網頁直接重新驗證後提出刪除，不要求重新安裝 App。
+- [x] `npm run check`、`npm test`、`npm run check:worker`、`npm run test:worker`（33 項）均通過。
+- [x] `npm run build:pages` 與使用正式 Worker／OAuth 設定的 `npm run build:web` 均通過；兩個輸出均包含公開刪除頁。
+- [x] 已由新產生的 `www` 執行 Capacitor Android sync，並完成 `assembleDebug --offline`（`BUILD SUCCESSFUL`）。
+- [x] 最新 debug APK：`android/app/build/outputs/apk/debug/app-debug.apk`；SHA-256 `0EFEF1CE3C050E414DB9FECE1F2CA19137E0A562AC636C4D8FA20F5323DB8D52`。
+- [x] `assets/icon.svg` 工作樹 Git blob 與 `HEAD` 均為 `33a666d3ab71bc67608e339790eeaf85146edba6`，確認未被覆寫。
+- [x] 正式 Worker 已部署，版本 ID `68c5d212-c619-415e-a46f-c2c9ad921ea6`；`/health` 回報 OAuth、D1 schema 與 recovery storage 均 ready，未帶 session 的刪除請求回覆 `401`。
+- [ ] 正式網站尚待 GitHub Pages 發布完成，因此 App 入口與公開網頁主項目暫不勾選完成。
+- [ ] 目前 `adb devices -l` 無連線裝置；Android 實機刪除流程與刪除後遠端查核仍待執行。
+- [ ] 部署後須以測試 Google 帳號完成兩輪端到端驗收：保留 Drive／本機資料一次，以及刪除 Drive／本機資料一次；逐項查核舊 session、D1、Google 授權與 Drive 檔案。
+
+## 第二階段：正式隱私政策與服務條款
+
+- [ ] 更新 `privacy.html`：
+  - 同時適用 PWA 與 Android App。
+  - 明列開發者名稱及可直接聯絡的隱私信箱。
+  - 完整描述 Google 帳號識別碼、Email、加密 refresh token、Worker session 與加密同步檔的處理方式。
+  - 說明 Google Drive、Cloudflare Worker／D1 的角色。
+  - 加入資料保留期限與永久刪除政策。
+  - 加入 App 內及網頁版帳號／資料刪除方式。
+  - 內容必須與 Play Console Data safety 回答完全一致。
+- [ ] 更新 `terms.html`：
+  - 移除「個人開發中的 PWA」等不適用正式上架的文字。
+  - 同時涵蓋 PWA 與 Android App。
+  - 說明同步、加密、備份、救援碼、服務中斷與使用者責任。
+- [ ] 確認 App 內可直接開啟隱私政策、服務條款及資料刪除頁。
+- [ ] 部署至正式網域並驗證公開 URL、HTTPS、手機版面與無登入可存取性。
+
+## 第三階段：正式版本與 AAB
+
+- [ ] 決定首版公開 `versionName`，建議 `1.0.0`。
+- [ ] 首次上架使用 `versionCode 1`；建立後續每次發行必須遞增的規則。
+- [ ] 從最新原始碼與最新 `www` 重新建置，不沿用舊 APK 或舊 bundle。
+- [ ] 確認原生 bundle 使用正式 `GOOGLE_OAUTH_API_URL=https://wuwangwo-api.shawnghong.com`，且不含 mock Drive 設定。
+- [ ] 執行完整程式檢查、PWA 測試、Worker 測試、Web build 與 Capacitor sync。
+- [ ] 使用正式 upload keystore 產生簽章 `app-release.aab`。
+- [ ] 驗證 AAB 簽章、套件名稱、版本、正式網址與包內資源。
+- [ ] 保留對應版本的建置紀錄與 SHA-256 檔案雜湊。
+
+## 第四階段：Play Console 帳戶與 App 建立
+
+此階段含需開發者本人完成的動作。
+
+- [ ] 建立或確認 Google Play Console 開發者帳戶。
+- [ ] 選擇正確帳戶類型：個人或組織。
+- [ ] 完成法律姓名、地址、聯絡 Email、電話、付款資料與身分驗證。
+- [ ] 若為組織帳戶，準備並驗證 D-U-N-S 資料。
+- [ ] 啟用兩步驟驗證。
+- [ ] 在 Play Console 建立「莫忘」App。
+- [ ] 確認永久套件名稱為 `io.github.hgs3767994.wuwangwo`。
+- [ ] 決定免費／付費、發行國家與地區、預設語言及公開開發者名稱。
+
+## 第五階段：Play App Signing 與 Google OAuth
+
+- [ ] 上傳簽章 AAB 至 Internal testing，啟用 Play App Signing。
+- [ ] 保存 Play Console 提供的 App signing certificates。
+- [ ] 複製 Play App Signing 的 SHA-1／SHA-256；若 Console 提供多組傳統／混合簽章憑證，全部依官方要求登錄。
+- [ ] 在 Google Cloud 為 `io.github.hgs3767994.wuwangwo` 登錄 Play 簽章 SHA。
+- [ ] 保留現有本機 release／upload SHA，確保側載測試版仍可使用 OAuth。
+- [ ] 由 Google Play 測試軌安裝 App，驗證 Google 帳號連結、Drive 同步與靜默 session。
+- [ ] 確認 Google OAuth Audience 為 External、Publishing status 為 In production。
+- [ ] 確認正式 Branding 已發布，首頁、隱私政策、服務條款及授權網域皆使用已驗證的 `shawnghong.com`。
+- [ ] 確認只要求必要 scope；`drive.appdata` 維持非敏感最小權限。
+
+驗收條件：由 Play 商店安裝的版本可正常完成原生 Google OAuth 與同步，不只側載 APK 正常。
+
+## 第六階段：Google Play 商店資料與政策表格
+
+### 商店資訊與素材
+
+- [ ] App 名稱（最多 30 字元）。
+- [ ] 短描述（最多 80 字元）。
+- [ ] 完整描述（最多 4,000 字元）。
+- [ ] 分類與標籤；初步方向為「生產力工具」。
+- [ ] 必填支援 Email、網站及必要聯絡資訊。
+- [ ] 512 × 512 PNG 商店圖示。
+- [ ] 1024 × 500 JPG 或無透明背景 PNG feature graphic。
+- [ ] 最新版本手機截圖。
+- [ ] 建議提供 7 吋／10 吋平板截圖及相應大螢幕品質驗證。
+- [ ] 所有文案與圖片均不得誤導、宣稱未驗證功能或洩露真實人物資料。
+
+### App content 與政策聲明
+
+- [ ] Privacy policy URL。
+- [ ] Data deletion URL。
+- [ ] Data safety：如實申報 Google 帳號識別資訊、Email、加密 token、加密同步資料、資料用途、是否必要、是否分享及是否可刪除。
+- [ ] Ads：若正式版本仍無廣告及廣告 SDK，申報「不含廣告」。
+- [ ] App access：提供審查人員完整操作說明；說明可自行建立本機密碼，Google Drive 為選用同步功能。
+- [ ] Target audience：依真實產品定位選擇；若不以兒童為目標，不選兒童年齡層。
+- [ ] 完成 Content rating 問卷。
+- [ ] 完成 News、Government、Health、Financial、權限及其他 Console 顯示的適用聲明。
+- [ ] 確認政策回答、App 行為、商店文案與隱私政策互相一致。
+
+## 第七階段：Google Play 測試
+
+- [ ] Internal testing：由 Play 安裝而非只側載 APK。
+- [ ] 執行並檢查 Pre-launch report。
+- [ ] 修正 crash、ANR、無障礙、相容性、安全性與版面問題。
+- [ ] 驗證乾淨安裝與首次設定。
+- [ ] 驗證舊版本升級後資料、Keystore trusted session 與設定保留。
+- [ ] 驗證 Google OAuth、首次同步、靜默同步、登出及重新連結。
+- [ ] 驗證前景／背景兩分鐘鎖定、關閉重開、生物辨識。
+- [ ] 驗證離線啟動、新增、編輯、刪除、匯入與匯出。
+- [ ] 驗證更改密碼、救援碼、舊裝置核准、登出所有裝置及 session epoch 失效。
+- [ ] 驗證 Worker session 過期、撤銷、網路中斷與 Google Drive 錯誤處理。
+- [ ] 至少涵蓋多個 Android 版本、手機尺寸及平板尺寸。
+- [ ] 建立可重複執行的正式上架驗收紀錄。
+
+若開發者帳戶是 2023-11-13 後建立的個人帳戶：
+
+- [ ] 建立 Closed testing 測試名單。
+- [ ] 至少 12 名測試者連續加入測試 14 天。
+- [ ] 收集並記錄測試回饋與實際修正。
+- [ ] 完成 Production access 申請問卷。
+
+## 第八階段：正式發布
+
+- [ ] 所有 Play Console dashboard 必要項目均顯示完成。
+- [ ] 建立 Production release 與清楚的 release notes。
+- [ ] 使用 Managed publishing 或確認審查通過後發布時機。
+- [ ] 建議先以 staged rollout 小比例發布。
+- [ ] 監控 Android vitals、Crash、ANR、OAuth／Worker Logs 與使用者回報。
+- [ ] 無重大問題後逐步擴大至 100%。
+- [ ] 保存正式 AAB、版本資訊、Git commit、建置雜湊與 Play release 記錄。
+
+## 每次發行的固定規則
+
+1. 先確認工作區中的使用者檔案與未提交變更，不覆蓋 `assets/icon.svg` 或其他使用者素材。
+2. 更新版本號及快取版本。
+3. 執行 PWA、Worker、Android 自動檢查。
+4. 從最新正式設定重新產生 Web bundle、Capacitor 專案與 AAB。
+5. 先進測試軌，再進 Production；不以未經 Play 簽章驗證的側載 APK 取代 Play 測試。
+6. 任何資料處理變更都同步檢查隱私政策、Data safety 與帳號刪除流程。
+
+## 官方參考資料
+
+- Target API：https://support.google.com/googleplay/android-developer/answer/11926878
+- Android App Bundle：https://support.google.com/googleplay/android-developer/answer/9844679
+- Play App Signing：https://support.google.com/googleplay/android-developer/answer/9842756
+- 帳號刪除：https://support.google.com/googleplay/android-developer/answer/13327111
+- User data：https://support.google.com/googleplay/android-developer/answer/10144311
+- 新個人帳戶測試要求：https://support.google.com/googleplay/android-developer/answer/14151465
+- 商店素材：https://support.google.com/googleplay/android-developer/answer/9866151
+- Google Drive scopes：https://developers.google.com/workspace/drive/api/guides/api-specific-auth

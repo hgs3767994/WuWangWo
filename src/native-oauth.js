@@ -22,9 +22,9 @@ export function nativeOAuthReadiness() {
   return { ready: true, serverClientId };
 }
 
-export async function connectNativeGoogleDrive({ interactive = true } = {}) {
+export async function connectNativeGoogleDrive({ interactive = true, forceReauthorization = false } = {}) {
   const existing = readSession() ?? await restoreNativeGoogleOAuthSession();
-  if (existing && Date.parse(existing.expiresAt) > Date.now() + 30_000) {
+  if (!forceReauthorization && existing && Date.parse(existing.expiresAt) > Date.now() + 30_000) {
     return { connected: true, accountEmail: existing.accountEmail ?? "" };
   }
   if (!interactive) throw new Error("google-drive-auth-required");

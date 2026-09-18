@@ -42,3 +42,13 @@ export async function removeItem(key) {
     tx.onerror = () => reject(tx.error);
   });
 }
+
+export async function clearAllItems() {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("state", "readwrite");
+    tx.objectStore("state").clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}

@@ -1,5 +1,5 @@
-import { getItem, removeItem, setItem } from "./db.js";
-import { approveDriveRecoveryRequest, completeDriveRecoveryRequest, connectDrive, createDriveRecoveryRequest, disconnectDrive, driveAuthStatus, driveReadiness, getDriveRecoveryRequest, listDriveFileRevisions, listDriveFiles, listDriveRecoveryRequests, readDriveFile, readDriveFileRevision, restoreDriveSession, verifyDriveRecoveryRequest, writeDriveFile } from "./drive.js";
+import { clearAllItems, getItem, removeItem, setItem } from "./db.js";
+import { approveDriveRecoveryRequest, completeDriveRecoveryRequest, connectDrive, createDriveRecoveryRequest, deleteCloudAccount, disconnectDrive, driveAuthStatus, driveReadiness, getDriveRecoveryRequest, listDriveFileRevisions, listDriveFiles, listDriveRecoveryRequests, readDriveFile, readDriveFileRevision, restoreDriveSession, verifyDriveRecoveryRequest, writeDriveFile } from "./drive.js";
 import { completeGoogleOAuthHandoff } from "./drive-google.js";
 import { APP_CONFIG, driveFileName, driveProviderLabel } from "./config.js";
 import { nativeFileExportAvailable, saveNativeExport } from "./native-file-export.js";
@@ -101,7 +101,8 @@ const NO_SLIDE_ROUTE_NAMES = new Set([
   "recoveryComplete",
   "recoveryRequests",
   "recoveryApprovalWaiting",
-  "logoutAllDevices"
+  "logoutAllDevices",
+  "deleteCloudAccount"
 ]);
 const THEME_OPTIONS = [
   { id: "comfortable-green", name: "舒適綠", colors: ["#24443D", "#5B9EA6", "#F4F6F5"] },
@@ -1927,6 +1928,68 @@ async function logoutGoogleDrive() {
   render();
 }
 
+async function deleteCloudAccountAndData() {
+  const draft = state.route.accountDeletionDraft ?? {};
+  if (String(draft.confirmation ?? "").trim() !== "DELETE") {
+    alert("請輸入 DELETE 才能繼續刪除。");
+    return;
+  }
+  if (!state.appState?.googleDrive?.connected) {
+    alert("這台裝置目前沒有連結可刪除的 Google 雲端帳號。");
+    return;
+  }
+  const popupWindow = openGoogleOAuthPopup();
+  const deleteDriveData = draft.deleteDriveData === true;
+  const deleteLocalData = draft.deleteLocalData === true;
+  const scope = [
+    "Cloudflare D1 中的 Google OAuth 帳號、所有 Worker sessions、handoff 與救援請求",
+    "Google 對莫忘的 OAuth 授權",
+    deleteDriveData ? "Google Drive appDataFolder 中的莫忘加密同步檔" : "保留 Google Drive appDataFolder 中的莫忘加密同步檔",
+    deleteLocalData ? "這台裝置上的莫忘本機資料" : "保留這台裝置上的莫忘本機資料"
+  ].join("\n• ");
+  if (!(await confirmDialog(`刪除範圍如下：\n• ${scope}\n\n雲端帳號刪除後無法復原。確定繼續嗎？`, { confirmLabel: "重新驗證並刪除", danger: true }))) {
+    try { popupWindow?.close(); } catch {}
+    return;
+  }
+  try {
+    await deleteCloudAccount({ deleteDriveData, popupWindow, expectedAccountEmail: currentDriveAccountEmail() });
+    await removeItem("pendingRecoveryRequest");
+    if (deleteLocalData) {
+      await clearTrustedSession();
+      await clearAllItems();
+      try {
+        sessionStorage.clear();
+        localStorage.removeItem(PWA_BACKGROUND_AT_KEY);
+        localStorage.removeItem("forget-me-not-install-dismissed");
+      } catch {}
+      await showMessageDialog("雲端帳號與選取的資料已永久刪除。這台裝置的本機資料也已清除。");
+      window.location.reload();
+      return;
+    }
+    state.appState = {
+      ...state.appState,
+      mode: "localOnly",
+      googleDrive: { connected: false, syncStatus: "disabled", accountEmail: "" }
+    };
+    await save();
+    alert("雲端帳號已永久刪除；這台裝置的本機資料已依你的選擇保留，之後可在設定中重新連結雲端。");
+    await navigate({ name: "settings" }, { replace: true, force: true });
+  } catch (error) {
+    try { popupWindow?.close(); } catch {}
+    alert(accountDeletionErrorMessage(error));
+  }
+}
+
+function accountDeletionErrorMessage(error) {
+  const message = String(error?.message ?? "");
+  if (message.includes("authorization-cancelled")) return "已取消 Google 重新驗證，沒有刪除任何資料。";
+  if (message.includes("reauth-required")) return "重新驗證已逾時，請再次操作。";
+  if (message.includes("account-mismatch")) return "你選擇的 Google 帳號與目前同步帳號不同，因此沒有刪除任何雲端資料。請重新操作並選擇畫面所列的同步帳號。";
+  if (message.includes("google-drive-request-failed")) return "無法刪除 Google Drive 同步檔，雲端帳號尚未刪除。請確認網路後再試。";
+  if (message.includes("account-deletion-storage-not-ready")) return "雲端刪除服務尚未完成資料庫設定，沒有刪除任何資料。";
+  return "刪除雲端帳號失敗，沒有確認完成前請視為資料仍然保留，並稍後再試。";
+}
+
 async function resumeDriveSyncInBackground({ allowOutsideHome = false } = {}) {
   if (!state.appState?.googleDrive?.connected || (!allowOutsideHome && state.route.name !== "home")) return;
   if (!driveAuthStatus().hasAccessToken) return;
@@ -3224,6 +3287,7 @@ function view() {
   if (state.route.name === "importantNotes") return importantNotesView(getPerson(state.route.id));
   if (state.route.name === "selectFamilyMember") return selectFamilyMemberView();
   if (state.route.name === "settings") return settingsView();
+  if (state.route.name === "deleteCloudAccount") return deleteCloudAccountView();
   if (state.route.name === "syncConflicts") return syncConflictsView();
   if (state.route.name === "dataHealth") return dataHealthView();
   if (state.route.name === "localSnapshots") return localSnapshotsView();
@@ -3543,6 +3607,7 @@ function settingsView() {
       <button class="action-quiet" data-action="export-excel">匯出 Excel（XLSX）</button>
       <button class="action-quiet" data-action="choose-import-file">匯入資料</button>
       <button class="action-quiet" data-nav="dataHealth">資料完整性檢查</button>
+      <button class="danger" data-nav="deleteCloudAccount">刪除雲端帳號與資料</button>
       <input type="file" accept="application/json,.json" data-import-file hidden />
       <div class="settings-meta-list">
         ${dataManagement.lastJsonExportAt ? `<p class="muted">最近 JSON 備份：${formatDateTime(dataManagement.lastJsonExportAt)}</p>` : ""}
@@ -3560,9 +3625,36 @@ function settingsView() {
       <div class="legal-links">
         <a href="./privacy.html">隱私權政策</a>
         <a href="./terms.html">服務條款</a>
+        <a href="./data-deletion.html">資料刪除說明</a>
       </div>
     </section>
     ${bottomNav("settings")}
+  `;
+}
+
+function deleteCloudAccountView() {
+  const connected = state.appState?.googleDrive?.connected === true;
+  const draft = state.route.accountDeletionDraft ??= { deleteDriveData: false, deleteLocalData: false, confirmation: "" };
+  return `
+    <header class="topbar topbar-centered">
+      <button class="secondary" data-nav="settings" data-back="true">返回</button>
+      <h1 class="section-title">刪除雲端帳號與資料</h1>
+      <span></span>
+    </header>
+    <section class="panel stack danger-zone">
+      <p>這會永久刪除 Cloudflare D1 中的 Google OAuth 帳號、所有 Worker sessions、handoff、救援請求，並撤銷 Google OAuth 授權。</p>
+      <p class="danger-text"><strong>此操作無法復原。</strong>你必須重新選擇 Google 帳號完成驗證，避免誤刪其他帳號。</p>
+      ${connected ? `<p>目前同步帳號：<strong>${escapeHtml(driveAccountLabel(state.appState.googleDrive))}</strong></p>` : `<p class="status-message warning-message">這台裝置目前沒有連結 Google 雲端帳號。若已移除 App，可使用下方公開網頁完成刪除。</p>`}
+      <label class="deletion-choice"><input type="checkbox" data-route-checkbox="deleteDriveData" ${draft.deleteDriveData ? "checked" : ""} /> 同時刪除 Google Drive appDataFolder 中的莫忘加密同步檔</label>
+      <label class="deletion-choice"><input type="checkbox" data-route-checkbox="deleteLocalData" ${draft.deleteLocalData ? "checked" : ""} /> 同時清除這台裝置上的莫忘本機資料、密碼包與本機快照</label>
+      <p class="muted">未勾選的 Drive 同步檔與本機資料會保留。保留的 Drive 加密檔不再由 Worker 存取；日後重新連結同一 Google 帳號時仍可能再次使用。</p>
+      <div class="field">
+        <label>輸入 DELETE 確認永久刪除</label>
+        <input data-route-field="accountDeletionConfirmation" autocomplete="off" value="${escapeAttr(draft.confirmation)}" />
+      </div>
+      <button class="danger" data-action="delete-cloud-account" data-pending-label="重新驗證中…" ${connected ? "" : "disabled"}>重新驗證並永久刪除</button>
+      <a href="./data-deletion.html">開啟公開資料刪除頁</a>
+    </section>
   `;
 }
 
@@ -5080,7 +5172,18 @@ function bind() {
   });
   app.querySelectorAll("[data-route-field]").forEach((el) => {
     el.addEventListener("input", () => {
+      if (el.dataset.routeField === "accountDeletionConfirmation") {
+        state.route.accountDeletionDraft ??= {};
+        state.route.accountDeletionDraft.confirmation = el.value;
+        return;
+      }
       state.route[el.dataset.routeField] = el.value;
+    });
+  });
+  app.querySelectorAll("[data-route-checkbox]").forEach((el) => {
+    el.addEventListener("change", () => {
+      state.route.accountDeletionDraft ??= {};
+      state.route.accountDeletionDraft[el.dataset.routeCheckbox] = el.checked;
     });
   });
   app.querySelectorAll("[data-tag-rename]").forEach((el) => {
@@ -5319,6 +5422,7 @@ async function handleAction(event, el) {
   if (action === "sync-now") return syncNowWithOAuthPopup();
   if (action === "resolve-sync-conflict") return resolveSyncConflict(Number(el.dataset.index), el.dataset.source);
   if (action === "drive-logout") return logoutGoogleDrive();
+  if (action === "delete-cloud-account") return deleteCloudAccountAndData();
   if (action === "refresh-recovery-requests") return refreshRecoveryRequests();
   if (action === "check-recovery-request") return checkRecoveryRequest();
   if (action === "approve-recovery-request") return approveRecoveryRequest(el.dataset.requestId, el.dataset.pairingCode);

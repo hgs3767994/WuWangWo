@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import worker from "../src/index.js";
+import { encryptTokenEnvelope } from "../src/token-envelope.js";
 
 test("health endpoint is available without OAuth configuration", async () => {
   const response = await worker.fetch(new Request("https://example.test/health"), {});
@@ -244,3 +245,92 @@ test("session revoke accepts the HttpOnly PWA session cookie", async () => {
   assert.deepEqual(await response.json(), { revoked: true });
   assert.match(response.headers.get("set-cookie"), /Max-Age=0$/);
 });
+
+test("account deletion requires a fresh session, deletes selected Drive files, revokes Google, and atomically clears D1", async () => {
+  const encryptionKey = "account-deletion-test-key";
+  const envelope = await encryptTokenEnvelope({ access_token: "access-token", refresh_token: "refresh-token" }, encryptionKey);
+  const batchedQueries = [];
+  const now = new Date();
+  const database = {
+    prepare(query) {
+      if (query.includes("sqlite_master") && query.includes("recovery_requests")) return { all: async () => ({ results: [{ name: "recovery_requests" }] }) };
+      if (query.startsWith("PRAGMA table_info")) return { all: async () => ({ results: ["requester_public_key", "base_session_epoch", "verification_code_hash", "transfer_envelope", "completed_at"].map((name) => ({ name })) }) };
+      if (query.startsWith("SELECT a.google_subject")) return { bind: () => ({ first: async () => ({
+        google_subject: "subject-1",
+        token_ciphertext: envelope.ciphertext,
+        token_iv: envelope.iv,
+        scopes: "drive.appdata openid email",
+        token_expires_at: new Date(now.getTime() + 30 * 60 * 1000).toISOString(),
+        session_created_at: new Date(now.getTime() - 60 * 1000).toISOString()
+      }) }) };
+      if (query.startsWith("DELETE FROM")) return { bind: (...values) => ({ query, values }) };
+      throw new Error(`unexpected query: ${query}`);
+    },
+    async batch(statements) {
+      batchedQueries.push(...statements.map((item) => item.query));
+      return statements.map(() => ({ success: true }));
+    }
+  };
+  const googleRequests = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    googleRequests.push({ url: String(url), options });
+    if (String(url).startsWith("https://www.googleapis.com/drive/v3/files?")) {
+      const name = decodeURIComponent(String(url)).includes("vault.enc") ? "vault" : "key-package";
+      return Response.json({ files: [{ id: `${name}-file` }] });
+    }
+    if (options.method === "DELETE") return new Response(null, { status: 204 });
+    if (String(url) === "https://oauth2.googleapis.com/revoke") return new Response(null, { status: 200 });
+    return new Response(null, { status: 404 });
+  };
+  try {
+    const response = await worker.fetch(new Request("https://example.test/v1/account/delete", {
+      method: "POST",
+      headers: { Origin: "https://example.test", Authorization: "Bearer fresh-session", "content-type": "application/json" },
+      body: JSON.stringify({ confirmation: "DELETE", deleteDriveData: true })
+    }), configuredEnv(database, encryptionKey));
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { deleted: true, driveDataDeleted: true, googleAuthorizationRevoked: true });
+    assert.equal(googleRequests.filter((item) => item.options.method === "DELETE").length, 2);
+    assert(googleRequests.some((item) => item.url === "https://oauth2.googleapis.com/revoke"));
+    assert.deepEqual(batchedQueries, [
+      "DELETE FROM recovery_requests WHERE google_subject = ?",
+      "DELETE FROM oauth_handoffs WHERE google_subject = ?",
+      "DELETE FROM oauth_sessions WHERE google_subject = ?",
+      "DELETE FROM oauth_accounts WHERE google_subject = ?"
+    ]);
+    assert.match(response.headers.get("set-cookie"), /Max-Age=0$/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("account deletion rejects an hour-old Worker session before any external deletion", async () => {
+  const database = {
+    prepare(query) {
+      if (query.includes("sqlite_master") && query.includes("recovery_requests")) return { all: async () => ({ results: [{ name: "recovery_requests" }] }) };
+      if (query.startsWith("PRAGMA table_info")) return { all: async () => ({ results: ["requester_public_key", "base_session_epoch", "verification_code_hash", "transfer_envelope", "completed_at"].map((name) => ({ name })) }) };
+      if (query.startsWith("SELECT a.google_subject")) return { bind: () => ({ first: async () => ({ google_subject: "subject-1", session_created_at: "2026-01-01T00:00:00.000Z" }) }) };
+      throw new Error(`unexpected query: ${query}`);
+    }
+  };
+  const response = await worker.fetch(new Request("https://example.test/v1/account/delete", {
+    method: "POST",
+    headers: { Origin: "https://example.test", Authorization: "Bearer stale-session", "content-type": "application/json" },
+    body: JSON.stringify({ confirmation: "DELETE" })
+  }), configuredEnv(database, "key"));
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "account-deletion-reauth-required" });
+});
+
+function configuredEnv(database, encryptionKey) {
+  return {
+    APP_ORIGINS: "https://example.test",
+    GOOGLE_WEB_CLIENT_ID: "public-client-id",
+    GOOGLE_OAUTH_REDIRECT_URI: "https://example.test/callback",
+    GOOGLE_WEB_CLIENT_SECRET: "secret",
+    OAUTH_STATE_SIGNING_KEY: "state-key",
+    TOKEN_ENCRYPTION_KEY: encryptionKey,
+    OAUTH_DB: database
+  };
+}
