@@ -69,6 +69,7 @@ await check("required files exist and are readable", () => Promise.all(requiredF
 
 const manifest = await check("manifest JSON is valid", async () => JSON.parse(await readFile("manifest.webmanifest", "utf8")));
 const capacitorConfig = await check("Capacitor config JSON is valid", async () => JSON.parse(await readFile("capacitor.config.json", "utf8")));
+const packageConfig = await check("package JSON is valid", async () => JSON.parse(await readFile("package.json", "utf8")));
 
 const configSource = await readFile("src/config.js", "utf8");
 const serviceWorkerSource = await readFile("service-worker.js", "utf8");
@@ -76,8 +77,12 @@ const indexSource = await readFile("index.html", "utf8");
 const workflowSource = await readFile(".github/workflows/deploy-pages.yml", "utf8");
 const buildPagesSource = await readFile("scripts/build-pages.mjs", "utf8");
 const androidManifestSource = await readFile("android/app/src/main/AndroidManifest.xml", "utf8");
+const androidBuildSource = await readFile("android/app/build.gradle", "utf8");
 const configCacheName = configSource.match(/cacheName:\s*"([^"]+)"/)?.[1];
 const serviceWorkerCacheName = serviceWorkerSource.match(/CACHE_NAME\s*=\s*"([^"]+)"/)?.[1];
+const appVersion = configSource.match(/appVersion:\s*"([^"]+)"/)?.[1];
+const androidVersionName = androidBuildSource.match(/versionName\s+"([^"]+)"/)?.[1];
+const androidVersionCode = Number(androidBuildSource.match(/versionCode\s+(\d+)/)?.[1]);
 
 await check("config cacheName matches service worker CACHE_NAME", () => {
   if (!configCacheName || !serviceWorkerCacheName || configCacheName !== serviceWorkerCacheName) {
@@ -353,6 +358,15 @@ await check("public legal pages exist for OAuth production readiness", async () 
   });
   if (!privacy.includes('./data-deletion.html') || !terms.includes('./data-deletion.html')) {
     throw new Error("public policies must link to the account and data deletion page.");
+  }
+});
+
+await check("public and Android release versions match", () => {
+  if (!appVersion || packageConfig.version !== appVersion || androidVersionName !== appVersion) {
+    throw new Error("package version, APP_CONFIG.appVersion, and Android versionName must match.");
+  }
+  if (!Number.isSafeInteger(androidVersionCode) || androidVersionCode < 1) {
+    throw new Error("Android versionCode must be a positive integer.");
   }
 });
 

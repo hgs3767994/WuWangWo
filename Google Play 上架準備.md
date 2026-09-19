@@ -1,7 +1,7 @@
 # Google Play 上架準備
 
 最後更新：2026-09-19
-執行基準：Android v175／套件名稱 `io.github.hgs3767994.wuwangwo`
+執行基準：Android `1.0.0`／PWA cache v176／套件名稱 `io.github.hgs3767994.wuwangwo`
 
 ## 文件用途
 
@@ -148,14 +148,23 @@
 
 ## 第三階段：正式版本與 AAB
 
-- [ ] 決定首版公開 `versionName`，建議 `1.0.0`。
-- [ ] 首次上架使用 `versionCode 1`；建立後續每次發行必須遞增的規則。
-- [ ] 從最新原始碼與最新 `www` 重新建置，不沿用舊 APK 或舊 bundle。
-- [ ] 確認原生 bundle 使用正式 `GOOGLE_OAUTH_API_URL=https://wuwangwo-api.shawnghong.com`，且不含 mock Drive 設定。
-- [ ] 執行完整程式檢查、PWA 測試、Worker 測試、Web build 與 Capacitor sync。
-- [ ] 使用正式 upload keystore 產生簽章 `app-release.aab`。
-- [ ] 驗證 AAB 簽章、套件名稱、版本、正式網址與包內資源。
-- [ ] 保留對應版本的建置紀錄與 SHA-256 檔案雜湊。
+- [x] 決定首版公開 `versionName` 為 `1.0.0`。
+- [x] 首次上架使用 `versionCode 1`；後續每次上傳 Google Play 的新版本，必須先將 `versionCode` 遞增且不得重複使用。
+- [x] 從最新原始碼與最新 `www` 重新建置，不沿用舊 APK 或舊 bundle。
+- [x] 確認原生 bundle 使用正式 `GOOGLE_OAUTH_API_URL=https://wuwangwo-api.shawnghong.com`，啟動 runtime 為 Google Drive 而非 mock Drive。
+- [x] 執行完整程式檢查、PWA 測試、Worker 測試、Web build 與 Capacitor sync。
+- [x] 使用正式 upload keystore 產生簽章 `app-release.aab`。
+- [x] 驗證 AAB 簽章、套件名稱、版本、正式網址與包內資源。
+- [x] 保留對應版本的建置紀錄與 SHA-256 檔案雜湊。
+
+### 第三階段 1.0.0 AAB 建置紀錄（2026-09-19）
+
+- [x] `package.json`、App 顯示版本與 Android `versionName` 統一為 `1.0.0`；Android `versionCode` 為 `1`，PWA cache 升至 v176。
+- [x] `npm run check`、8 項 PWA smoke tests、36 項 Worker tests、正式設定 Web build、Android Capacitor sync 與 `bundleRelease` 全部通過。
+- [x] AAB 合併後 manifest：套件 `io.github.hgs3767994.wuwangwo`、`versionName 1.0.0`、`versionCode 1`。
+- [x] AAB 包內確認 `appVersion 1.0.0`、cache v176、正式 Worker `https://wuwangwo-api.shawnghong.com` 與正式 OAuth Web client。
+- [x] AAB 已由正式 upload certificate 簽署；certificate SHA-256 `6D4D32DBC1491F0DE8F41569A92A9B6EE1B3CF680635AD8CBC875A6903F2596E`。
+- [x] 正式 AAB：`莫忘-v1.0.0-release.aab`；SHA-256 `5769CF445F48290DB475BEB4B9EBB26C8BD0B3B834D469D76B0883D12F60BFA1`。
 
 ## 第四階段：Play Console 帳戶與 App 建立
 
