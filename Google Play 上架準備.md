@@ -1,7 +1,7 @@
 # Google Play 上架準備
 
 最後更新：2026-09-19
-執行基準：Android v174／套件名稱 `io.github.hgs3767994.wuwangwo`
+執行基準：Android v175／套件名稱 `io.github.hgs3767994.wuwangwo`
 
 ## 文件用途
 
@@ -131,7 +131,16 @@
   - 同時涵蓋 PWA 與 Android App。
   - 說明同步、加密、備份、救援碼、服務中斷與使用者責任。
 - [x] 確認 App 內可直接開啟隱私政策、服務條款及資料刪除頁。
-- [ ] 部署至正式網域並驗證公開 URL、HTTPS、手機版面與無登入可存取性。
+- [x] 部署至正式網域並驗證公開 URL、HTTPS、手機版面與無登入可存取性。
+
+### 第二階段部署與 v175 建置紀錄（2026-09-19）
+
+- [x] 帳號永久刪除改為一律刪除 Google Drive appDataFolder 中的 `vault.enc` 與 `key-package.enc`；舊版若要求保留 Drive，Worker 會拒絕且不刪除任何資料。
+- [x] 正式 Worker 已部署版本 `a6e05899-af56-4724-b8f3-edac0a53ba7e`，health 回報 OAuth、D1 schema 與 recovery storage 均 ready。
+- [x] GitHub 提交 `467b4dc` 已推送至 `main`；Pages workflow run `35443120133` 成功完成。
+- [x] 正式 `privacy.html`、`terms.html`、`data-deletion.html` 與 `service-worker.js` 均以 HTTPS 回覆 HTTP 200；政策頁含手機 viewport，Service Worker 為 v175。
+- [x] 從正式設定重新產生原生 `www`、執行 Android Capacitor sync 並成功建置 v175 release APK；包內確認使用 `https://wuwangwo-api.shawnghong.com`、正式 OAuth Web client 且不含 mock Drive runtime 設定。
+- [x] v175 release APK：`莫忘-v175-native-release.apk`；SHA-256 `3B6B056E6785B8F7BB5A7AC5C8AC6CC4AF1ADBE44BB6F082411F693F77F3F8C6`；正式 release certificate SHA-256 `6D4D32DBC1491F0DE8F41569A92A9B6EE1B3CF680635AD8CBC875A6903F2596E`。
 
 ## 第三階段：正式版本與 AAB
 
