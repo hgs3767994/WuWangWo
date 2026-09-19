@@ -141,6 +141,10 @@
 - [x] 正式 `privacy.html`、`terms.html`、`data-deletion.html` 與 `service-worker.js` 均以 HTTPS 回覆 HTTP 200；政策頁含手機 viewport，Service Worker 為 v175。
 - [x] 從正式設定重新產生原生 `www`、執行 Android Capacitor sync 並成功建置 v175 release APK；包內確認使用 `https://wuwangwo-api.shawnghong.com`、正式 OAuth Web client 且不含 mock Drive runtime 設定。
 - [x] v175 release APK：`莫忘-v175-native-release.apk`；SHA-256 `3B6B056E6785B8F7BB5A7AC5C8AC6CC4AF1ADBE44BB6F082411F693F77F3F8C6`；正式 release certificate SHA-256 `6D4D32DBC1491F0DE8F41569A92A9B6EE1B3CF680635AD8CBC875A6903F2596E`。
+- [x] Android 實機確認版本 `0.1.0`、快取版本 `forget-me-not-v175`，隱私政策與服務條款可開啟並顯示正式開發者名稱及聯絡信箱；返回 App 後依安全設計重新解鎖。
+- [x] 以單一測試人物連結 Google Drive，帳號選擇器正常、未偵測到既有雲端資料且同步成功；取消刪除重新驗證後沒有刪除資料，再次同步正常。
+- [x] 未勾選清除本機資料時，刪除流程永久刪除雲端帳號與 Drive 加密同步檔並保留本機測試人物；重新連結同一帳號時未偵測到舊雲端資料，確認舊同步檔已刪除。
+- [x] 勾選清除本機資料後再次完成永久刪除，App 顯示雲端帳號與選取資料已刪除、本機資料已清除，並正確返回首次設定狀態。
 
 ## 第三階段：正式版本與 AAB
 
