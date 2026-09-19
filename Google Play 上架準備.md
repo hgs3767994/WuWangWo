@@ -1,7 +1,7 @@
 # Google Play 上架準備
 
 最後更新：2026-09-19
-執行基準：Android v172／套件名稱 `io.github.hgs3767994.wuwangwo`
+執行基準：Android v174／套件名稱 `io.github.hgs3767994.wuwangwo`
 
 ## 文件用途
 
@@ -33,7 +33,7 @@
 - [x] 產生 Google Play 專用 512 × 512、32-bit RGBA PNG。
 - [x] 從正式 Worker 設定重新產生 Web bundle、執行 Capacitor sync 並成功建置 release APK。
 - [x] 驗證 release APK 簽章仍為正式 release certificate，並從 APK 反向取出 launcher icon 核對內容。
-- [ ] 在 Android 實機確認桌面、圓形遮罩、最近使用程式及系統 App 資訊頁的圖示顯示。
+- [x] 在 Android 實機確認桌面、圓形遮罩、最近使用程式及系統 App 資訊頁的圖示顯示。
 
 產出：
 
@@ -118,7 +118,7 @@
 
 ## 第二階段：正式隱私政策與服務條款
 
-- [ ] 更新 `privacy.html`：
+- [x] 更新 `privacy.html`：
   - 同時適用 PWA 與 Android App。
   - 明列開發者名稱及可直接聯絡的隱私信箱。
   - 完整描述 Google 帳號識別碼、Email、加密 refresh token、Worker session 與加密同步檔的處理方式。
@@ -126,11 +126,11 @@
   - 加入資料保留期限與永久刪除政策。
   - 加入 App 內及網頁版帳號／資料刪除方式。
   - 內容必須與 Play Console Data safety 回答完全一致。
-- [ ] 更新 `terms.html`：
+- [x] 更新 `terms.html`：
   - 移除「個人開發中的 PWA」等不適用正式上架的文字。
   - 同時涵蓋 PWA 與 Android App。
   - 說明同步、加密、備份、救援碼、服務中斷與使用者責任。
-- [ ] 確認 App 內可直接開啟隱私政策、服務條款及資料刪除頁。
+- [x] 確認 App 內可直接開啟隱私政策、服務條款及資料刪除頁。
 - [ ] 部署至正式網域並驗證公開 URL、HTTPS、手機版面與無登入可存取性。
 
 ## 第三階段：正式版本與 AAB

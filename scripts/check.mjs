@@ -345,12 +345,15 @@ await check("native Android exports use the public Downloads folder", async () =
 await check("public legal pages exist for OAuth production readiness", async () => {
   const privacy = await readFile("privacy.html", "utf8");
   const terms = await readFile("terms.html", "utf8");
-  ["Google Drive", "appDataFolder", "Email", "隱私權政策"].forEach((text) => {
+  ["PWA", "Android App", "Google Drive", "appDataFolder", "Cloudflare D1", "Email", "資料保留期限", "永久刪除", "Shawn G. Hong", "mailto:hgs3767994@gmail.com", "隱私權政策"].forEach((text) => {
     if (!privacy.includes(text)) throw new Error(`privacy.html must mention ${text}.`);
   });
-  ["Google Drive", "服務條款"].forEach((text) => {
+  ["PWA", "Android App", "Google Drive", "加密", "救援碼", "資料備份", "服務變更或中止", "Shawn G. Hong", "mailto:hgs3767994@gmail.com", "服務條款"].forEach((text) => {
     if (!terms.includes(text)) throw new Error(`terms.html must mention ${text}.`);
   });
+  if (!privacy.includes('./data-deletion.html') || !terms.includes('./data-deletion.html')) {
+    throw new Error("public policies must link to the account and data deletion page.");
+  }
 });
 
 await check("approved Android and Google Play launcher icons are intact", async () => {
@@ -394,15 +397,21 @@ await check("account deletion is available in-app and on a public self-service p
     readFile("workers/oauth/src/index.js", "utf8"),
     readFile("workers/oauth/src/oauth-store.js", "utf8")
   ]);
-  ["刪除雲端帳號與資料", "deleteDriveData", "deleteLocalData", "data-deletion.html"].forEach((text) => {
+  ["刪除雲端帳號與資料", "Google Drive appDataFolder 中的莫忘加密同步檔", "deleteLocalData", "data-deletion.html"].forEach((text) => {
     if (!appSource.includes(text)) throw new Error(`src/app.js is missing account deletion support: ${text}`);
   });
   ["Cloudflare D1", "Google Drive appDataFolder", "data-delete-submit"].forEach((text) => {
     if (!deletionPage.includes(text)) throw new Error(`data-deletion.html is missing ${text}`);
   });
   if (!deletionSource.includes("deleteGoogleCloudAccount")) throw new Error("public deletion page must execute self-service account deletion");
+  if (deletionPage.includes("data-delete-drive") || deletionSource.includes("data-delete-drive")) {
+    throw new Error("public account deletion must not allow Google Drive data retention");
+  }
   ["/v1/account/delete", "ACCOUNT_DELETION_REAUTH_MS", "revokeGoogleToken", "deleteAccountData"].forEach((text) => {
     if (!workerSource.includes(text)) throw new Error(`Worker is missing account deletion support: ${text}`);
+  });
+  ["name: \"vault.enc\"", "name: \"key-package.enc\"", "driveDataDeleted: true"].forEach((text) => {
+    if (!workerSource.includes(text)) throw new Error(`Worker must always delete account-owned Drive data: ${text}`);
   });
   ["/v1/oauth/session/status", 'reauthorization === "account-selection"'].forEach((text) => {
     if (!workerSource.includes(text)) throw new Error(`Worker is missing cross-client session invalidation support: ${text}`);

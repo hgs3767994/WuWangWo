@@ -56,13 +56,13 @@ export async function connectGoogleDrive({ interactive = true, popupWindow = nul
   return new Promise(() => {});
 }
 
-export async function deleteGoogleCloudAccount({ deleteDriveData, popupWindow = null, expectedAccountEmail = "" } = {}) {
+export async function deleteGoogleCloudAccount({ popupWindow = null, expectedAccountEmail = "" } = {}) {
   const connection = await connectGoogleDrive({ interactive: true, popupWindow, requirePopup: !isNativeOAuthRuntime(), forceReauthorization: true });
   if (expectedAccountEmail && connection.accountEmail && connection.accountEmail.toLowerCase() !== expectedAccountEmail.toLowerCase()) {
     await clearClientSession();
     throw new Error("account-deletion-account-mismatch");
   }
-  const result = await workerApiFetch("/v1/account/delete", { confirmation: "DELETE", deleteDriveData: deleteDriveData === true });
+  const result = await workerApiFetch("/v1/account/delete", { confirmation: "DELETE", deleteDriveData: true });
   await clearClientSession();
   return result;
 }

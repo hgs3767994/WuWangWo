@@ -1947,12 +1947,11 @@ async function deleteCloudAccountAndData() {
     return;
   }
   const popupWindow = openGoogleOAuthPopup();
-  const deleteDriveData = draft.deleteDriveData === true;
   const deleteLocalData = draft.deleteLocalData === true;
   const scope = [
     "Cloudflare D1 中的 Google OAuth 帳號、所有 Worker sessions、handoff 與救援請求",
     "Google 對莫忘的 OAuth 授權",
-    deleteDriveData ? "Google Drive appDataFolder 中的莫忘加密同步檔" : "保留 Google Drive appDataFolder 中的莫忘加密同步檔",
+    "Google Drive appDataFolder 中的莫忘加密同步檔",
     deleteLocalData ? "這台裝置上的莫忘本機資料" : "保留這台裝置上的莫忘本機資料"
   ].join("\n• ");
   if (!(await confirmDialog(`刪除範圍如下：\n• ${scope}\n\n雲端帳號刪除後無法復原。確定繼續嗎？`, { confirmLabel: "重新驗證並刪除", danger: true }))) {
@@ -1960,7 +1959,7 @@ async function deleteCloudAccountAndData() {
     return;
   }
   try {
-    await deleteCloudAccount({ deleteDriveData, popupWindow, expectedAccountEmail: currentDriveAccountEmail() });
+    await deleteCloudAccount({ popupWindow, expectedAccountEmail: currentDriveAccountEmail() });
     await removeItem("pendingRecoveryRequest");
     if (deleteLocalData) {
       await clearTrustedSession();
@@ -1980,7 +1979,7 @@ async function deleteCloudAccountAndData() {
       googleDrive: { connected: false, syncStatus: "disabled", accountEmail: "" }
     };
     await save();
-    alert("雲端帳號已永久刪除；這台裝置的本機資料已依你的選擇保留，之後可在設定中重新連結雲端。");
+    alert("雲端帳號與 Google Drive 加密同步檔已永久刪除；這台裝置的本機資料已依你的選擇保留，之後可在設定中重新連結並建立新的雲端資料。");
     await navigate({ name: "settings" }, { replace: true, force: true });
   } catch (error) {
     try { popupWindow?.close(); } catch {}
@@ -1992,6 +1991,7 @@ function accountDeletionErrorMessage(error) {
   const message = String(error?.message ?? "");
   if (message.includes("authorization-cancelled")) return "已取消 Google 重新驗證，沒有刪除任何資料。";
   if (message.includes("reauth-required")) return "重新驗證已逾時，請再次操作。";
+  if (message.includes("drive-deletion-required")) return "目前版本無法完成符合政策的刪除流程，請更新莫忘後再試。沒有刪除任何資料。";
   if (message.includes("account-mismatch")) return "你選擇的 Google 帳號與目前同步帳號不同，因此沒有刪除任何雲端資料。請重新操作並選擇畫面所列的同步帳號。";
   if (message.includes("google-drive-request-failed")) return "無法刪除 Google Drive 同步檔，雲端帳號尚未刪除。請確認網路後再試。";
   if (message.includes("account-deletion-storage-not-ready")) return "雲端刪除服務尚未完成資料庫設定，沒有刪除任何資料。";
@@ -3642,7 +3642,7 @@ function settingsView() {
 
 function deleteCloudAccountView() {
   const connected = state.appState?.googleDrive?.connected === true;
-  const draft = state.route.accountDeletionDraft ??= { deleteDriveData: false, deleteLocalData: false, confirmation: "" };
+  const draft = state.route.accountDeletionDraft ??= { deleteLocalData: false, confirmation: "" };
   return `
     <header class="topbar topbar-centered">
       <button class="secondary" data-nav="settings" data-back="true">返回</button>
@@ -3650,12 +3650,11 @@ function deleteCloudAccountView() {
       <span></span>
     </header>
     <section class="panel stack danger-zone">
-      <p>這會永久刪除 Cloudflare D1 中的 Google OAuth 帳號、所有 Worker sessions、handoff、救援請求，並撤銷 Google OAuth 授權。</p>
+      <p>這會永久刪除 Cloudflare D1 中的 Google OAuth 帳號、所有 Worker sessions、handoff、救援請求、Google Drive appDataFolder 中的莫忘加密同步檔，並撤銷 Google OAuth 授權。</p>
       <p class="danger-text"><strong>此操作無法復原。</strong>你必須重新選擇 Google 帳號完成驗證，避免誤刪其他帳號。</p>
       ${connected ? `<p>目前同步帳號：<strong>${escapeHtml(driveAccountLabel(state.appState.googleDrive))}</strong></p>` : `<p class="status-message warning-message">這台裝置目前沒有連結 Google 雲端帳號。若已移除 App，可使用下方公開網頁完成刪除。</p>`}
-      <label class="deletion-choice"><input type="checkbox" data-route-checkbox="deleteDriveData" ${draft.deleteDriveData ? "checked" : ""} /> 同時刪除 Google Drive appDataFolder 中的莫忘加密同步檔</label>
       <label class="deletion-choice"><input type="checkbox" data-route-checkbox="deleteLocalData" ${draft.deleteLocalData ? "checked" : ""} /> 同時清除這台裝置上的莫忘本機資料、密碼包與本機快照</label>
-      <p class="muted">未勾選的 Drive 同步檔與本機資料會保留。保留的 Drive 加密檔不再由 Worker 存取；日後重新連結同一 Google 帳號時仍可能再次使用。</p>
+      <p class="muted">雲端帳號及其 Google Drive 加密同步檔一定會刪除。若未勾選，本機資料會保留並切換為僅限本機模式；日後重新連結 Google Drive 時會建立新的雲端資料。</p>
       <div class="field">
         <label>輸入 DELETE 確認永久刪除</label>
         <input data-route-field="accountDeletionConfirmation" autocomplete="off" value="${escapeAttr(draft.confirmation)}" />

@@ -172,16 +172,14 @@ export default {
         }
         const body = await request.json();
         if (body?.confirmation !== "DELETE") return json({ error: "account-deletion-confirmation-invalid" }, 400, corsHeaders(origin));
-        const deleteDriveData = body?.deleteDriveData === true;
+        if (body?.deleteDriveData !== true) return json({ error: "account-deletion-drive-deletion-required" }, 400, corsHeaders(origin));
         const accessToken = await currentAccessToken(env, account, now);
-        if (deleteDriveData) {
-          await executeDriveOperation({ operation: "delete", name: "vault.enc", accessToken });
-          await executeDriveOperation({ operation: "delete", name: "key-package.enc", accessToken });
-        }
+        await executeDriveOperation({ operation: "delete", name: "vault.enc", accessToken });
+        await executeDriveOperation({ operation: "delete", name: "key-package.enc", accessToken });
         const storedTokens = await decryptTokenEnvelope({ ciphertext: account.token_ciphertext, iv: account.token_iv }, env.TOKEN_ENCRYPTION_KEY);
         await revokeGoogleToken({ token: storedTokens.refresh_token || accessToken });
         await deleteAccountData(env.OAUTH_DB, { subject: account.google_subject });
-        return json({ deleted: true, driveDataDeleted: deleteDriveData, googleAuthorizationRevoked: true }, 200, { ...corsHeaders(origin), "set-cookie": clearWorkerSessionCookie() });
+        return json({ deleted: true, driveDataDeleted: true, googleAuthorizationRevoked: true }, 200, { ...corsHeaders(origin), "set-cookie": clearWorkerSessionCookie() });
       } catch (error) {
         const message = String(error?.message ?? "");
         if (message.startsWith("google-drive-request-failed")) return json({ error: message }, 502, corsHeaders(origin));

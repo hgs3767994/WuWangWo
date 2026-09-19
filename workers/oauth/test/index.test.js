@@ -292,7 +292,7 @@ test("session status rejects a session removed by account deletion", async () =>
   assert.match(response.headers.get("set-cookie"), /Max-Age=0$/);
 });
 
-test("account deletion requires a fresh session, deletes selected Drive files, revokes Google, and atomically clears D1", async () => {
+test("account deletion requires a fresh session, always deletes Drive files, revokes Google, and atomically clears D1", async () => {
   const encryptionKey = "account-deletion-test-key";
   const envelope = await encryptTokenEnvelope({ access_token: "access-token", refresh_token: "refresh-token" }, encryptionKey);
   const batchedQueries = [];
@@ -330,6 +330,16 @@ test("account deletion requires a fresh session, deletes selected Drive files, r
     return new Response(null, { status: 404 });
   };
   try {
+    const rejectedResponse = await worker.fetch(new Request("https://example.test/v1/account/delete", {
+      method: "POST",
+      headers: { Origin: "https://example.test", Authorization: "Bearer fresh-session", "content-type": "application/json" },
+      body: JSON.stringify({ confirmation: "DELETE", deleteDriveData: false })
+    }), configuredEnv(database, encryptionKey));
+    assert.equal(rejectedResponse.status, 400);
+    assert.deepEqual(await rejectedResponse.json(), { error: "account-deletion-drive-deletion-required" });
+    assert.equal(googleRequests.length, 0);
+    assert.deepEqual(batchedQueries, []);
+
     const response = await worker.fetch(new Request("https://example.test/v1/account/delete", {
       method: "POST",
       headers: { Origin: "https://example.test", Authorization: "Bearer fresh-session", "content-type": "application/json" },

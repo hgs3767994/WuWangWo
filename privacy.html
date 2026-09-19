@@ -16,21 +16,51 @@
         <span></span>
       </header>
       <section class="panel stack">
-        <p>最後更新：2026-09-16</p>
-        <p>莫忘是一個用來記錄人物資料、興趣喜好、自訂欄位與備註的 PWA。資料會優先保存在使用者自己的裝置中；若使用者啟用 Google Drive 同步，資料會在本機加密後儲存在使用者自己的 Google Drive appDataFolder。</p>
-        <h2 class="section-title">我們存取的 Google 資料</h2>
-        <p>莫忘要求 Google Drive appDataFolder 權限，用於建立、讀取、更新與刪除莫忘自己的同步檔案。App 也會要求 Google 帳號 Email 權限，用於在設定頁顯示目前連結的 Google 帳號。App 不會要求讀取使用者一般 Google Drive 檔案的權限。</p>
-        <h2 class="section-title">資料如何使用</h2>
-        <p>Google Drive 權限只用於提供跨裝置同步、資料備份、資料還原與同步診斷。Google 帳號 Email 只用於在 App 內顯示目前同步帳號。同步資料會先在使用者裝置上加密，才透過莫忘的 Cloudflare Worker 寫入 Google Drive。</p>
-        <h2 class="section-title">資料儲存與分享</h2>
-        <p>人物資料保存在裝置本機 IndexedDB，以及使用者自行授權的 Google Drive appDataFolder。傳送至 Cloudflare Worker 的人物同步檔在使用者裝置上即已加密；Worker 只代理讀寫加密檔案，沒有解密人物資料所需的密碼或資料金鑰。</p>
-        <p>為完成 Google OAuth 與同步，Worker 會處理 Google 帳號識別碼、短效存取權杖與更新權杖。更新權杖經加密後儲存在 Cloudflare D1；莫忘的短效登入 session 只以雜湊形式保存。這些資料只用於使用者要求的同步，不會出售、出租、用於廣告或提供給廣告平台。</p>
-        <h2 class="section-title">使用者控制</h2>
-        <p>使用者可在 App 中匯出 JSON 或 Excel、匯入備份、登出 Google Drive、刪除人物資料，或到 Google 帳戶安全性設定中移除莫忘的 Google Drive 存取權。移除授權後，App 將無法再同步 Google Drive。</p>
-        <h2 class="section-title">安全性</h2>
-        <p>莫忘使用加密資料金鑰保護人物資料。使用者密碼不會被保存；密碼只用來解開資料金鑰。請妥善保管密碼、救援碼與匯出的備份檔。</p>
-        <h2 class="section-title">聯絡方式</h2>
-        <p>若對此隱私權政策或資料使用有疑問，請透過 GitHub repository 的 Issues 或專案頁面提供的聯絡方式聯繫開發者。</p>
+        <p>最後更新：2026-09-19</p>
+        <p>本隱私權政策適用於「莫忘」漸進式網頁應用程式（PWA）與 Android App。莫忘用來記錄人物資料、興趣喜好、自訂欄位與備註；資料會優先保存在使用者自己的裝置中。只有在使用者主動啟用 Google Drive 同步後，加密同步檔才會儲存在使用者自己的 Google Drive appDataFolder。</p>
+
+        <h2 class="section-title">處理的資料與用途</h2>
+        <ul class="guide-list">
+          <li><strong>使用者輸入的內容：</strong>人物資料、興趣喜好、自訂欄位、備註及相關設定，用於提供整理、搜尋、備份、還原與同步功能。</li>
+          <li><strong>Google 帳號資料：</strong>Google 帳號識別碼用於辨識 Worker 端的同步帳號；Email 僅用於在 App 內顯示目前連結的帳號，方便使用者確認。</li>
+          <li><strong>Google OAuth 資料：</strong>短效存取權杖與更新權杖用於使用者授權的 Google Drive 操作。更新權杖會先加密再儲存於 Cloudflare D1。</li>
+          <li><strong>Worker session：</strong>短效、隨機的 session 憑證用於驗證同步請求；D1 僅保存其雜湊值。OAuth handoff 同樣只保存雜湊值。</li>
+          <li><strong>救援流程資料：</strong>啟用跨裝置救援時，Worker 會暫時處理請求識別碼、裝置識別碼、保管庫識別碼、公開金鑰及加密傳輸封套；Worker 不會取得主密碼、救援碼或可直接解密人物資料的資料金鑰。</li>
+        </ul>
+
+        <h2 class="section-title">Google Drive 權限</h2>
+        <p>莫忘只要求 Google Drive appDataFolder 權限，用於建立、讀取、更新及依使用者要求刪除莫忘自己的加密同步檔。此權限無法讓莫忘讀取使用者一般 Google Drive 空間中的其他檔案。Google Drive 權限只用於跨裝置同步、備份、還原及同步診斷。</p>
+
+        <h2 class="section-title">資料儲存位置與服務提供者</h2>
+        <p>本機資料儲存在 PWA 的瀏覽器儲存空間或 Android App 的應用程式儲存空間。啟用同步後，人物同步檔與金鑰包會先在裝置上加密，再透過 Cloudflare Worker 寫入使用者的 Google Drive appDataFolder。</p>
+        <p><strong>Google Drive</strong>負責保存使用者授權寫入的加密同步檔；<strong>Cloudflare Worker 與 D1</strong>負責 Google OAuth、短效 session、受限的 Drive 代理操作及跨裝置救援協調。Worker 不持有解密人物內容所需的主密碼或明文資料金鑰。</p>
+
+        <h2 class="section-title">資料分享</h2>
+        <p>莫忘不出售、出租或將個人資料用於廣告，也不提供給廣告平台。為提供使用者主動啟用的同步功能，必要資料會由 Google 與 Cloudflare 依其服務角色處理；除法律要求或維護服務安全所必要的情況外，不會另行揭露。</p>
+
+        <h2 class="section-title">資料保留期限</h2>
+        <ul class="guide-list">
+          <li>本機資料會保留到使用者在 App 中清除、清除瀏覽器／App 資料或解除安裝 App；解除安裝 PWA 或 Android App 是否同時清除資料，依裝置與瀏覽器行為而定。</li>
+          <li>Google Drive 加密同步檔會保留到使用者自行刪除，或執行雲端帳號永久刪除；永久刪除雲端帳號時會一併刪除相關加密同步檔。</li>
+          <li>Cloudflare D1 中的 OAuth 帳號與加密權杖會保留到使用者永久刪除雲端帳號。單純登出只會撤銷當次 Worker session，不等同刪除雲端帳號。</li>
+          <li>Worker session 的有效期為一小時，OAuth handoff 的有效期為兩分鐘，救援請求的有效期為五分鐘；到期後即不可再用。相關到期記錄可能保留至帳號永久刪除或系統維護清理。</li>
+        </ul>
+
+        <h2 class="section-title">使用者控制與永久刪除</h2>
+        <p>使用者可匯出 JSON 備份或 Excel、匯入備份、刪除人物資料、登出 Google Drive，或到 Google 帳戶安全性設定移除莫忘的存取權。移除 Google 授權後，莫忘將無法再同步，但不一定會自動刪除本機資料、Drive 加密檔或 Worker 帳號記錄。</p>
+        <p>若要永久刪除雲端帳號，請在 App「設定」中選擇「刪除雲端帳號與資料」，或使用<a href="./data-deletion.html">公開帳號與資料刪除頁</a>重新驗證 Google 帳號。永久刪除會移除 D1 中的 OAuth 帳號、加密權杖、所有 Worker sessions、OAuth handoff、救援請求及 Google Drive 中的莫忘加密同步檔，並撤銷 Google OAuth 授權。App 內流程可另外選擇是否清除該裝置的本機資料；公開網頁無法遠端清除裝置資料。</p>
+
+        <h2 class="section-title">安全性與使用者責任</h2>
+        <p>莫忘使用加密資料金鑰保護人物資料；主密碼不會被保存，只用於在裝置上解開資料金鑰。任何系統都無法保證絕對安全，請妥善保管主密碼、救援碼、裝置及匯出的備份檔。</p>
+
+        <h2 class="section-title">兒童隱私</h2>
+        <p>莫忘不是專為兒童設計的服務，也不會刻意向兒童蒐集個人資料。若監護人認為兒童透過本服務提供了資料，請透過下方聯絡方式提出處理要求。</p>
+
+        <h2 class="section-title">政策變更</h2>
+        <p>若功能、服務提供者或資料處理方式有重大改變，本頁會更新內容及最後更新日期。</p>
+
+        <h2 class="section-title">開發者與聯絡方式</h2>
+        <p data-policy-contact>開發者：Shawn G. Hong<br />隱私相關問題、資料權利或刪除要求，請寄至：<a href="mailto:hgs3767994@gmail.com">hgs3767994@gmail.com</a></p>
       </section>
     </main>
   </body>
