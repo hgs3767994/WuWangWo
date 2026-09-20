@@ -1,4 +1,4 @@
-const CACHE_NAME = "forget-me-not-v180";
+const CACHE_NAME = "forget-me-not-v181";
 const NETWORK_FIRST = new Set(["./src/runtime-config.js"]);
 const APP_SHELL = [
   "./",
@@ -31,8 +31,29 @@ const APP_SHELL = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
+  event.waitUntil(precacheVersionedAppShell());
 });
+
+async function precacheVersionedAppShell() {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    await Promise.all(APP_SHELL.map(async (path) => {
+      const canonicalUrl = new URL(path, self.location.href);
+      const fetchUrl = new URL(canonicalUrl);
+      fetchUrl.searchParams.set("sw-version", CACHE_NAME);
+      const response = await fetch(fetchUrl, { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) throw new Error(`app-shell-fetch-failed:${path}:${response.status}`);
+      if (path === "./src/config.js") {
+        const source = await response.clone().text();
+        if (!source.includes(`cacheName: "${CACHE_NAME}"`)) throw new Error("app-shell-version-mismatch");
+      }
+      await cache.put(new Request(canonicalUrl, { credentials: "same-origin" }), response);
+    }));
+  } catch (error) {
+    await caches.delete(CACHE_NAME);
+    throw error;
+  }
+}
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(

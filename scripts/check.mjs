@@ -473,6 +473,21 @@ await check("service worker app shell files exist", async () => {
   await Promise.all(appShell.filter((file) => file !== "./").map((file) => access(stripRelativePrefix(file))));
 });
 
+await check("service worker rejects mixed-version Pages deployments", async () => {
+  const serviceWorkerSource = await readFile("service-worker.js", "utf8");
+  [
+    "precacheVersionedAppShell",
+    'fetchUrl.searchParams.set("sw-version", CACHE_NAME)',
+    'cache: "no-store"',
+    'path === "./src/config.js"',
+    "app-shell-version-mismatch",
+    "await caches.delete(CACHE_NAME)"
+  ].forEach((text) => {
+    if (!serviceWorkerSource.includes(text)) throw new Error(`service worker is missing mixed-version deployment protection: ${text}`);
+  });
+  if (serviceWorkerSource.includes("cache.addAll(APP_SHELL)")) throw new Error("service worker must not precache unversioned app-shell responses.");
+});
+
 await check("required files are included in service worker app shell", () => {
   const appShellSet = new Set(appShell.map(stripRelativePrefix));
   appShellRequiredFiles.forEach((file) => {
