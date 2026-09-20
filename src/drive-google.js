@@ -3,6 +3,8 @@ import { clearNativeGoogleOAuthSession, completeNativeGoogleOAuthLaunch, connect
 
 const SESSION_STORAGE_KEY = "forget-me-not-oauth-session";
 const PERSISTENT_SESSION_MARKER_KEY = "forget-me-not-oauth-session-marker-v1";
+const OAUTH_RESUME_PARAM = "oauth_resume";
+const OAUTH_ERROR_PARAM = "oauth_error";
 
 export async function writeGoogleDriveFile(name, content) { await execute("write", { name, content }); }
 export async function readGoogleDriveFile(name) { return execute("read", { name }); }
@@ -50,9 +52,11 @@ export async function connectGoogleDrive({ interactive = true, popupWindow = nul
   const startUrl = `${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ ...startParameters, popup: "1" })}`;
   if (popupWindow && !popupWindow.closed) return connectGoogleDriveInPopup(popupWindow, startUrl);
   if (requirePopup) throw new Error("google-drive-popup-blocked");
-  // Fallback for browsers that refuse a user-initiated popup.  The normal app
-  // path supplies a popup, so this is only retained for compatibility.
-  location.replace(`${apiUrl()}/v1/oauth/google/start?${new URLSearchParams(startParameters)}`);
+  // Installed and mobile PWAs can discard the opener while Google renders its
+  // account chooser. Use a signed full-page return marker so authorization can
+  // survive a document restart without bypassing the App unlock screen.
+  returnTo.searchParams.set(OAUTH_RESUME_PARAM, "drive-connect");
+  location.replace(`${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ ...startParameters, return_to: returnTo.toString() })}`);
   return new Promise(() => {});
 }
 
@@ -108,14 +112,26 @@ export async function completeGoogleOAuthHandoff() {
   if (nativeSession) return nativeSession;
   const url = new URL(location.href);
   const handoff = url.searchParams.get("oauth_handoff");
-  if (!handoff) return null;
+  const oauthResume = url.searchParams.get(OAUTH_RESUME_PARAM) ?? "";
+  const oauthError = url.searchParams.get(OAUTH_ERROR_PARAM) ?? "";
+  if (!handoff) {
+    if (!oauthError) return null;
+    url.searchParams.delete(OAUTH_RESUME_PARAM);
+    url.searchParams.delete(OAUTH_ERROR_PARAM);
+    history.replaceState(history.state, "", url);
+    throw new Error(`google-drive-handoff-failed:${oauthError}`);
+  }
   try {
     const session = await exchangeOAuthHandoff(handoff);
     url.searchParams.delete("oauth_handoff");
+    url.searchParams.delete(OAUTH_RESUME_PARAM);
+    url.searchParams.delete(OAUTH_ERROR_PARAM);
     history.replaceState(history.state, "", url);
-    return session;
+    return { ...session, oauthResume };
   } catch (error) {
     url.searchParams.delete("oauth_handoff");
+    url.searchParams.delete(OAUTH_RESUME_PARAM);
+    url.searchParams.delete(OAUTH_ERROR_PARAM);
     history.replaceState(history.state, "", url);
     throw new Error(`google-drive-handoff-failed:${error?.message ?? "unknown"}`);
   }

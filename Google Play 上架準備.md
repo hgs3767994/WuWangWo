@@ -133,6 +133,14 @@
 - [x] 8 項核心 smoke tests 與 40 項 Worker tests 全部通過；正式 Worker 已部署版本 `ff2b20fa-7717-4198-b0d4-6d580f95ddb9`，health 回報 D1 schema ready。
 - [x] v178 release APK SHA-256：`2CAB20EAB738C1DA24528DB97CC5268751F234B1274692108DB556E3F27E6464`；v178 release AAB SHA-256：`784839FD8606D561EF455A3C1474C7B79F8FA549ACEA7FDCD32C0162B3118E1B`；release certificate SHA-256 維持 `6D4D32DBC1491F0DE8F41569A92A9B6EE1B3CF680635AD8CBC875A6903F2596E`。
 
+### v179 手機 PWA OAuth 回跳修正（2026-09-20）
+
+- [x] 重現已安裝的手機 PWA 在 Google 帳號選擇期間被系統重新載入，造成 popup opener 消失、一次性 handoff 無法交回原頁面的問題。
+- [x] 已安裝或行動裝置 PWA 改採簽章保護的同頁 OAuth 回跳；成功交換 handoff 後才標記 Drive 已連結，且仍保留 PWA 冷啟動主密碼驗證。
+- [x] OAuth 返回設定頁的目的地只在本機保存 10 分鐘；PWA 文件被系統回收時仍可在解鎖後回到設定頁並開始同步。
+- [x] Google 授權取消時會安全返回 App 並顯示錯誤，不再停留於 Worker；桌面瀏覽器 popup 與原生 Android AuthorizationClient 流程維持不變。
+- [x] 8 項核心 smoke tests、41 項 Worker tests、Worker 語法檢查與部署檢查全部通過；正式 Worker 已部署版本 `b240c89e-36da-418e-9981-aaa44fc35fa2`，PWA cache 更新為 v179。
+
 ## 第二階段：正式隱私政策與服務條款
 
 - [x] 更新 `privacy.html`：

@@ -284,7 +284,7 @@ await check("native Android OAuth uses Google AuthorizationClient and a one-time
   if (!appSource.includes("isNativeOAuthRuntime() || isSimulatedDrive() || sessionReusable")) {
     throw new Error("native OAuth must bypass the web popup reservation.");
   }
-  if (!appSource.includes("beginDriveSetup({ ...openGoogleOAuthPopup(), selectAccount: true })")) {
+  if (!appSource.includes("beginDriveSetup({ ...oauthOptions, selectAccount: true })")) {
     throw new Error("a user-initiated Google Drive connection must show the native account selector.");
   }
   ["connectDrive({ interactive: false })", "disconnectedDriveState(previousGoogleDrive)", "重新連結 Google Drive"].forEach((text) => {
@@ -359,6 +359,24 @@ await check("public legal pages exist for OAuth production readiness", async () 
   if (!privacy.includes('./data-deletion.html') || !terms.includes('./data-deletion.html')) {
     throw new Error("public policies must link to the account and data deletion page.");
   }
+});
+
+await check("installed and mobile PWAs resume Google OAuth across a document restart", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  const driveSource = await readFile("src/drive-google.js", "utf8");
+  [
+    "shouldUseFullPageOAuthRedirect",
+    "fullPageOAuth",
+    'oauthHandoffSession?.oauthResume === "drive-connect"',
+    "state.suspendedRouteAfterIdleLock = oauthReturnRoute",
+    "OAUTH_RETURN_ROUTE_PERSISTENT_KEY",
+    "OAUTH_RETURN_ROUTE_LIFETIME_MS"
+  ].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing restart-safe PWA OAuth support: ${text}`);
+  });
+  ["oauth_resume", "drive-connect", "oauth_error"].forEach((text) => {
+    if (!driveSource.includes(text)) throw new Error(`src/drive-google.js is missing restart-safe PWA OAuth support: ${text}`);
+  });
 });
 
 await check("public and Android release versions match", () => {

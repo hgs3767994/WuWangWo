@@ -75,6 +75,11 @@ export default {
         return redirect(destination.toString(), 303, "forget_me_not_oauth_nonce=; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=0");
       } catch {
         if (payload?.popup) return popupFailure(payload.returnTo);
+        if (payload?.returnTo && allowedReturnTo(payload.returnTo, env.APP_ORIGINS)) {
+          const destination = new URL(payload.returnTo);
+          destination.searchParams.set("oauth_error", "oauth-authorization-failed");
+          return redirect(destination.toString(), 303, "forget_me_not_oauth_nonce=; HttpOnly; Secure; SameSite=Lax; Path=/v1/oauth/google; Max-Age=0");
+        }
         return json({ error: "oauth-authorization-failed" }, 400);
       }
     }

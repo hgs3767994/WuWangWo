@@ -80,6 +80,8 @@ const REMOTE_SECURITY_CHECK_INTERVAL_MS = 30 * 1000;
 const GOOGLE_REAUTHORIZATION_NOTICE = "Google Drive 連線已失效；本機資料仍安全保留。請到設定頁明確點擊【重新連結 Google Drive】並選擇帳號。";
 const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
 const OAUTH_RETURN_ROUTE_STORAGE_KEY = "forget-me-not-oauth-return-route";
+const OAUTH_RETURN_ROUTE_PERSISTENT_KEY = "forget-me-not-oauth-return-route-persistent";
+const OAUTH_RETURN_ROUTE_LIFETIME_MS = 10 * 60 * 1000;
 const PWA_RUNTIME_SESSION_KEY = "forget-me-not-pwa-runtime-session";
 const PWA_BACKGROUND_AT_KEY = "forget-me-not-pwa-background-at";
 const NO_SLIDE_ROUTE_NAMES = new Set([
@@ -234,14 +236,30 @@ async function boot() {
     if (isDriveAuthRequiredError(error)) driveSessionAvailable = false;
     console.warn("無法還原 Google Drive 短效連線", error);
   }
-  let oauthHandoffCompleted = false;
+  let oauthHandoffSession = null;
   let oauthHandoffError = null;
   bootStage = { code: "BOOT-OAUTH-HANDOFF", label: "處理 Google Drive 授權回跳" };
-  try { oauthHandoffCompleted = Boolean(await completeGoogleOAuthHandoff()); } catch (error) { oauthHandoffError = error; }
+  try { oauthHandoffSession = await completeGoogleOAuthHandoff(); } catch (error) { oauthHandoffError = error; }
+  const oauthHandoffCompleted = Boolean(oauthHandoffSession);
   const oauthReturnRoute = oauthHandoffCompleted ? consumeOAuthReturnRoute() : null;
+  if (oauthHandoffError) clearOAuthReturnRoute();
   bootStage = { code: "BOOT-APP-STATE", label: "讀取本機設定" };
   const storedAppState = await getItem("appState");
   let appState = normalizeLoadedAppState(storedAppState);
+  if (oauthHandoffSession?.oauthResume === "drive-connect" && appState) {
+    appState = {
+      ...appState,
+      googleDrive: {
+        ...appState.googleDrive,
+        connected: true,
+        syncStatus: "needsSync",
+        syncStartedAt: "",
+        lastSyncError: "",
+        accountEmail: oauthHandoffSession.accountEmail ?? appState.googleDrive?.accountEmail ?? "",
+        simulated: false
+      }
+    };
+  }
   if (!oauthHandoffCompleted && driveSessionAvailable === false && appState?.googleDrive?.connected) {
     appState = {
       ...appState,
@@ -311,6 +329,7 @@ async function boot() {
             allowBiometric: !passwordOnlyUnlockRequired(appState) && (sessionCheck.valid || Boolean(sessionCheck.keepTrustedSession))
           }
         };
+        state.suspendedRouteAfterIdleLock = oauthReturnRoute;
         render();
         registerHistoryNavigation();
         registerServiceWorker();
@@ -420,16 +439,28 @@ function showBootFailure(stage, error) {
   }
 }
 
-function rememberOAuthReturnRoute(route) {
-  try { sessionStorage.setItem(OAUTH_RETURN_ROUTE_STORAGE_KEY, JSON.stringify(historyRouteSnapshot(route))); } catch {}
+function rememberOAuthReturnRoute(route, options = {}) {
+  const snapshot = historyRouteSnapshot(route);
+  try { sessionStorage.setItem(OAUTH_RETURN_ROUTE_STORAGE_KEY, JSON.stringify(snapshot)); } catch {}
+  if (!options.persistent) return;
+  try {
+    localStorage.setItem(OAUTH_RETURN_ROUTE_PERSISTENT_KEY, JSON.stringify({ route: snapshot, expiresAt: Date.now() + OAUTH_RETURN_ROUTE_LIFETIME_MS }));
+  } catch {}
 }
 
 function consumeOAuthReturnRoute() {
   try {
-    const route = JSON.parse(sessionStorage.getItem(OAUTH_RETURN_ROUTE_STORAGE_KEY) ?? "null");
-    sessionStorage.removeItem(OAUTH_RETURN_ROUTE_STORAGE_KEY);
+    const sessionRoute = JSON.parse(sessionStorage.getItem(OAUTH_RETURN_ROUTE_STORAGE_KEY) ?? "null");
+    const persistent = JSON.parse(localStorage.getItem(OAUTH_RETURN_ROUTE_PERSISTENT_KEY) ?? "null");
+    clearOAuthReturnRoute();
+    const route = sessionRoute?.name ? sessionRoute : (Number(persistent?.expiresAt ?? 0) > Date.now() ? persistent?.route : null);
     return route?.name ? restoreHistoryRoute(route) : null;
   } catch { return null; }
+}
+
+function clearOAuthReturnRoute() {
+  try { sessionStorage.removeItem(OAUTH_RETURN_ROUTE_STORAGE_KEY); } catch {}
+  try { localStorage.removeItem(OAUTH_RETURN_ROUTE_PERSISTENT_KEY); } catch {}
 }
 
 function installOAuthSettingsBackBarrier() {
@@ -1841,10 +1872,17 @@ function openGoogleOAuthPopup() {
   // Android uses Google AuthorizationClient inside the app. Reserving a web
   // popup here would send the user to an orphaned about:blank browser tab.
   if (isNativeOAuthRuntime() || isSimulatedDrive() || sessionReusable) {
-    return { oauthPopup: null, requireOAuthPopup: false };
+    return { oauthPopup: null, requireOAuthPopup: false, fullPageOAuth: false };
+  }
+  if (shouldUseFullPageOAuthRedirect()) {
+    return { oauthPopup: null, requireOAuthPopup: false, fullPageOAuth: true };
   }
   const oauthPopup = window.open("about:blank", "forget-me-not-google-oauth", "popup=yes,width=520,height=720");
-  return { oauthPopup, requireOAuthPopup: true };
+  return { oauthPopup, requireOAuthPopup: true, fullPageOAuth: false };
+}
+
+function shouldUseFullPageOAuthRedirect() {
+  return isPwaInstalled() || /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 }
 
 function closeOAuthPopup(oauthPopup) {
@@ -1912,7 +1950,9 @@ function syncNowWithOAuthPopup() {
 function beginDriveSetupWithOAuthPopup() {
   // Initial Drive setup performs IndexedDB reads before it starts OAuth, so it
   // needs the same user-gesture popup reservation as manual sync.
-  return beginDriveSetup({ ...openGoogleOAuthPopup(), selectAccount: true });
+  const oauthOptions = openGoogleOAuthPopup();
+  if (oauthOptions.fullPageOAuth) rememberOAuthReturnRoute(state.route, { persistent: true });
+  return beginDriveSetup({ ...oauthOptions, selectAccount: true });
 }
 
 async function logoutGoogleDrive() {

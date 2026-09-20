@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import worker from "../src/index.js";
+import { createOAuthState } from "../src/oauth-state.js";
 import { encryptTokenEnvelope } from "../src/token-envelope.js";
 
 const schemaRows = () => ["oauth_accounts", "oauth_handoffs", "oauth_sessions", "oauth_session_renewals"].map((name) => ({ name }));
@@ -109,6 +110,31 @@ test("explicit PWA relinking forces Google account selection", async () => {
   const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/start?return_to=https://example.test/app&reauth=account-selection"), configuredEnv(database, "encryption-key"));
   assert.equal(response.status, 302);
   assert.equal(new URL(response.headers.get("location")).searchParams.get("prompt"), "select_account");
+});
+
+test("full-page PWA OAuth denial returns to the App instead of stranding on the Worker", async () => {
+  const state = await createOAuthState({
+    returnTo: "https://example.test/app?oauth_resume=drive-connect",
+    nonce: "oauth-nonce",
+    popup: false,
+    secret: "state-key"
+  });
+  const response = await worker.fetch(new Request(`https://example.test/v1/oauth/google/callback?state=${encodeURIComponent(state)}&error=access_denied`, {
+    headers: { Cookie: "forget_me_not_oauth_nonce=oauth-nonce" }
+  }), {
+    APP_ORIGINS: "https://example.test",
+    GOOGLE_WEB_CLIENT_ID: "public-client-id",
+    GOOGLE_OAUTH_REDIRECT_URI: "https://example.test/callback",
+    GOOGLE_WEB_CLIENT_SECRET: "secret",
+    OAUTH_STATE_SIGNING_KEY: "state-key",
+    TOKEN_ENCRYPTION_KEY: "encryption-key"
+  });
+  assert.equal(response.status, 303);
+  const destination = new URL(response.headers.get("location"));
+  assert.equal(destination.origin, "https://example.test");
+  assert.equal(destination.pathname, "/app");
+  assert.equal(destination.searchParams.get("oauth_resume"), "drive-connect");
+  assert.equal(destination.searchParams.get("oauth_error"), "oauth-authorization-failed");
 });
 
 test("web OAuth handoff creates a renewable HttpOnly Worker session cookie", async () => {
