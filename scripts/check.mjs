@@ -274,7 +274,7 @@ await check("native Android OAuth uses Google AuthorizationClient and a one-time
   ["EXTRA_PENDING_INTENT", "PendingIntent", "getAuthorizationResultFromIntent"].forEach((text) => {
     if (!activitySource.includes(text)) throw new Error(`native OAuth Android activity is missing ${text}.`);
   });
-  ["AndroidKeyStore", "AES/GCM/NoPadding", "OAuthSession"].forEach((text) => {
+  ["AndroidKeyStore", "AES/GCM/NoPadding", "OAuthSession", "renewalToken", "renewalExpiresAt"].forEach((text) => {
     if (!oauthSessionPluginSource.includes(text)) throw new Error(`native OAuth session storage is missing ${text}.`);
   });
   if (!nativeOAuthSource.includes("restoreNativeGoogleOAuthSession")) throw new Error("native OAuth adapter must restore the renewable Worker device session from Android Keystore.");
@@ -404,12 +404,13 @@ await check("approved Android and Google Play launcher icons are intact", async 
 });
 
 await check("account deletion is available in-app and on a public self-service page", async () => {
-  const [appSource, deletionPage, deletionSource, workerSource, storeSource] = await Promise.all([
+  const [appSource, deletionPage, deletionSource, workerSource, storeSource, renewalMigrationSource] = await Promise.all([
     readFile("src/app.js", "utf8"),
     readFile("data-deletion.html", "utf8"),
     readFile("src/account-deletion.js", "utf8"),
     readFile("workers/oauth/src/index.js", "utf8"),
-    readFile("workers/oauth/src/oauth-store.js", "utf8")
+    readFile("workers/oauth/src/oauth-store.js", "utf8"),
+    readFile("workers/oauth/migrations/0005-session-renewals.sql", "utf8")
   ]);
   ["刪除雲端帳號與資料", "Google Drive appDataFolder 中的莫忘加密同步檔", "deleteLocalData", "data-deletion.html"].forEach((text) => {
     if (!appSource.includes(text)) throw new Error(`src/app.js is missing account deletion support: ${text}`);
@@ -427,8 +428,14 @@ await check("account deletion is available in-app and on a public self-service p
   ["name: \"vault.enc\"", "name: \"key-package.enc\"", "driveDataDeleted: true"].forEach((text) => {
     if (!workerSource.includes(text)) throw new Error(`Worker must always delete account-owned Drive data: ${text}`);
   });
-  ["/v1/oauth/session/status", "/v1/oauth/session/refresh", "rotateSession", 'reauthorization === "account-selection"'].forEach((text) => {
+  ["/v1/oauth/session/status", "/v1/oauth/session/refresh", "rotateRenewalAndCreateSession", "WORKER_RENEWAL_COOKIE", 'reauthorization === "account-selection"'].forEach((text) => {
     if (!workerSource.includes(text)) throw new Error(`Worker is missing cross-client session invalidation support: ${text}`);
+  });
+  ["ACCESS_SESSION_LIFETIME_MS = 60 * 60 * 1000", "DEVICE_RENEWAL_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000", "oauth_session_renewals"].forEach((text) => {
+    if (!storeSource.includes(text)) throw new Error(`Worker session separation is missing ${text}`);
+  });
+  ["CREATE TABLE IF NOT EXISTS oauth_session_renewals", "UPDATE oauth_sessions", "+1 hour"].forEach((text) => {
+    if (!renewalMigrationSource.includes(text)) throw new Error(`session-renewal migration is missing ${text}`);
   });
   if (!storeSource.includes("database.batch(statements)")) throw new Error("D1 account deletion must use an atomic batch");
 });

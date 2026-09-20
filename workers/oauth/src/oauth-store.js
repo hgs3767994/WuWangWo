@@ -1,4 +1,5 @@
-const DEVICE_SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
+const ACCESS_SESSION_LIFETIME_MS = 60 * 60 * 1000;
+const DEVICE_RENEWAL_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
 export async function saveAccount(database, { subject, envelope, scopes, expiresAt, refreshTokenPresent, now }) {
   await database.prepare(`INSERT INTO oauth_accounts (google_subject, token_ciphertext, token_iv, scopes, token_expires_at, refresh_token_present, created_at, updated_at, revoked_at)
@@ -30,32 +31,53 @@ export async function consumeHandoff(database, { code, now }) {
   return row?.google_subject ?? null;
 }
 
-export async function createSession(database, { token, subject, now }) {
+export async function createSession(database, { token, subject, now, authorizedAt = now }) {
   const hash = await sha256(token);
-  const expiresAt = new Date(new Date(now).getTime() + DEVICE_SESSION_LIFETIME_MS).toISOString();
+  const expiresAt = new Date(new Date(now).getTime() + ACCESS_SESSION_LIFETIME_MS).toISOString();
   await database
     .prepare("INSERT INTO oauth_sessions (session_hash, google_subject, expires_at, revoked_at, created_at) VALUES (?, ?, ?, NULL, ?)")
-    .bind(hash, subject, expiresAt, now)
+    .bind(hash, subject, expiresAt, authorizedAt)
     .run();
   return { expiresAt };
 }
 
-export async function rotateSession(database, { token, nextToken, now }) {
+export async function createRenewal(database, { token, subject, now, authorizedAt = now }) {
   const hash = await sha256(token);
-  const nextHash = await sha256(nextToken);
-  const expiresAt = new Date(new Date(now).getTime() + DEVICE_SESSION_LIFETIME_MS).toISOString();
+  const expiresAt = new Date(new Date(now).getTime() + DEVICE_RENEWAL_LIFETIME_MS).toISOString();
+  await database
+    .prepare("INSERT INTO oauth_session_renewals (renewal_hash, google_subject, expires_at, revoked_at, created_at) VALUES (?, ?, ?, NULL, ?)")
+    .bind(hash, subject, expiresAt, authorizedAt)
+    .run();
+  return { expiresAt };
+}
+
+export async function rotateRenewalAndCreateSession(database, { renewalToken, nextRenewalToken, sessionToken, now }) {
+  const renewalHash = await sha256(renewalToken);
+  const nextRenewalHash = await sha256(nextRenewalToken);
+  const sessionHash = await sha256(sessionToken);
+  const expiresAt = new Date(new Date(now).getTime() + ACCESS_SESSION_LIFETIME_MS).toISOString();
+  const renewalExpiresAt = new Date(new Date(now).getTime() + DEVICE_RENEWAL_LIFETIME_MS).toISOString();
   const statements = [
+    database.prepare(`INSERT INTO oauth_session_renewals (renewal_hash, google_subject, expires_at, revoked_at, created_at)
+      SELECT ?, r.google_subject, ?, NULL, r.created_at
+      FROM oauth_session_renewals r JOIN oauth_accounts a ON a.google_subject = r.google_subject
+      WHERE r.renewal_hash = ? AND r.expires_at > ? AND r.revoked_at IS NULL AND a.revoked_at IS NULL`)
+      .bind(nextRenewalHash, renewalExpiresAt, renewalHash, now),
     database.prepare(`INSERT INTO oauth_sessions (session_hash, google_subject, expires_at, revoked_at, created_at)
-      SELECT ?, google_subject, ?, NULL, created_at FROM oauth_sessions
-      WHERE session_hash = ? AND expires_at > ? AND revoked_at IS NULL`).bind(nextHash, expiresAt, hash, now),
-    database.prepare("UPDATE oauth_sessions SET revoked_at = ? WHERE session_hash = ? AND revoked_at IS NULL").bind(now, hash)
+      SELECT ?, r.google_subject, ?, NULL, r.created_at
+      FROM oauth_session_renewals r JOIN oauth_accounts a ON a.google_subject = r.google_subject
+      WHERE r.renewal_hash = ? AND r.expires_at > ? AND r.revoked_at IS NULL AND a.revoked_at IS NULL`)
+      .bind(sessionHash, expiresAt, renewalHash, now),
+    database.prepare("UPDATE oauth_session_renewals SET revoked_at = ? WHERE renewal_hash = ? AND revoked_at IS NULL")
+      .bind(now, renewalHash)
   ];
   const results = await database.batch(statements);
   if (!Array.isArray(results) || results.length !== statements.length || results.some((result) => result?.success === false)) {
-    throw new Error("session-rotation-failed");
+    throw new Error("session-renewal-failed");
   }
   if (results[0]?.meta?.changes === 0) return null;
-  return { expiresAt };
+  if (results[1]?.meta?.changes === 0) throw new Error("session-renewal-incomplete");
+  return { expiresAt, renewalExpiresAt };
 }
 
 export async function sessionAccount(database, { token, now }) {
@@ -73,6 +95,7 @@ export async function deleteAccountData(database, { subject }) {
     database.prepare("DELETE FROM recovery_requests WHERE google_subject = ?").bind(subject),
     database.prepare("DELETE FROM oauth_handoffs WHERE google_subject = ?").bind(subject),
     database.prepare("DELETE FROM oauth_sessions WHERE google_subject = ?").bind(subject),
+    database.prepare("DELETE FROM oauth_session_renewals WHERE google_subject = ?").bind(subject),
     database.prepare("DELETE FROM oauth_accounts WHERE google_subject = ?").bind(subject)
   ];
   const results = await database.batch(statements);
@@ -86,6 +109,15 @@ export async function revokeSession(database, { token, now }) {
   const hash = await sha256(token);
   const row = await database
     .prepare("UPDATE oauth_sessions SET revoked_at = ? WHERE session_hash = ? AND revoked_at IS NULL RETURNING google_subject")
+    .bind(now, hash)
+    .first();
+  return Boolean(row?.google_subject);
+}
+
+export async function revokeRenewal(database, { token, now }) {
+  const hash = await sha256(token);
+  const row = await database
+    .prepare("UPDATE oauth_session_renewals SET revoked_at = ? WHERE renewal_hash = ? AND revoked_at IS NULL RETURNING google_subject")
     .bind(now, hash)
     .first();
   return Boolean(row?.google_subject);

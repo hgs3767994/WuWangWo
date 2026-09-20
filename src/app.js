@@ -6810,7 +6810,7 @@ function driveErrorMessage(error, fallback) {
   if (message.includes("google-drive-auth-required") || message.includes("interaction_required") || message.includes("login_required") || message.includes("consent_required")) {
     return GOOGLE_REAUTHORIZATION_NOTICE;
   }
-  if (message.includes("session-required") || message.includes("session-expired") || message.includes("google-refresh-token-missing") || message.includes("google-token-refresh-failed")) return GOOGLE_REAUTHORIZATION_NOTICE;
+  if (message.includes("session-required") || message.includes("session-expired") || message.includes("session-renewal-required") || message.includes("session-renewal-expired") || message.includes("google-refresh-token-missing") || message.includes("google-token-refresh-failed")) return GOOGLE_REAUTHORIZATION_NOTICE;
   if (message.includes("google-drive-request-failed:401")) return GOOGLE_REAUTHORIZATION_NOTICE;
   if (message.includes("google-drive-request-failed:403")) return "Google Drive 權限不足，請確認授權範圍後再試。";
   if (message.includes("google-drive-request-failed")) return "Google Drive 連線失敗，請稍後再試。";
@@ -6823,6 +6823,8 @@ function isDriveAuthRequiredError(error) {
     message.includes("google-drive-auth-required") ||
     message.includes("session-required") ||
     message.includes("session-expired") ||
+    message.includes("session-renewal-required") ||
+    message.includes("session-renewal-expired") ||
     message.includes("google-refresh-token-missing") ||
     message.includes("google-token-refresh-failed") ||
     message.includes("interaction_required") ||

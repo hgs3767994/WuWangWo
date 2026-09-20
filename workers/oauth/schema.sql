@@ -32,6 +32,17 @@ CREATE TABLE IF NOT EXISTS oauth_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_oauth_sessions_expiry ON oauth_sessions(expires_at);
 
+CREATE TABLE IF NOT EXISTS oauth_session_renewals (
+  renewal_hash TEXT PRIMARY KEY,
+  google_subject TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (google_subject) REFERENCES oauth_accounts(google_subject)
+);
+
+CREATE INDEX IF NOT EXISTS idx_oauth_session_renewals_expiry ON oauth_session_renewals(expires_at);
+
 CREATE TABLE IF NOT EXISTS recovery_requests (
   request_id TEXT PRIMARY KEY,
   google_subject TEXT NOT NULL,

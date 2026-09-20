@@ -35,10 +35,14 @@ public class OAuthSessionPlugin extends Plugin {
         try {
             String sessionToken = required(call, "sessionToken");
             String expiresAt = required(call, "expiresAt");
+            String renewalToken = required(call, "renewalToken");
+            String renewalExpiresAt = required(call, "renewalExpiresAt");
             String accountEmail = call.getString("accountEmail", "");
             JSONObject payload = new JSONObject();
             payload.put("sessionToken", sessionToken);
             payload.put("expiresAt", expiresAt);
+            payload.put("renewalToken", renewalToken);
+            payload.put("renewalExpiresAt", renewalExpiresAt);
             payload.put("accountEmail", accountEmail == null ? "" : accountEmail);
 
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
@@ -73,6 +77,8 @@ public class OAuthSessionPlugin extends Plugin {
                 JSObject response = new JSObject();
                 response.put("sessionToken", payload.optString("sessionToken", ""));
                 response.put("expiresAt", payload.optString("expiresAt", ""));
+                response.put("renewalToken", payload.optString("renewalToken", ""));
+                response.put("renewalExpiresAt", payload.optString("renewalExpiresAt", ""));
                 response.put("accountEmail", payload.optString("accountEmail", ""));
                 call.resolve(response);
             } finally {

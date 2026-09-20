@@ -52,12 +52,14 @@ export async function connectNativeGoogleDrive({ interactive = true, forceReauth
     body: JSON.stringify({ server_auth_code: serverAuthCode })
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload?.sessionToken) {
+  if (!response.ok || !payload?.sessionToken || !payload?.renewalToken) {
     throw new Error(`native-oauth-exchange-failed:${payload?.error ?? "unknown"}`);
   }
   const session = {
     sessionToken: payload.sessionToken,
     expiresAt: payload.expiresAt,
+    renewalToken: payload.renewalToken,
+    renewalExpiresAt: payload.renewalExpiresAt,
     accountEmail: payload.accountEmail ?? ""
   };
   sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
@@ -70,13 +72,15 @@ export async function restoreNativeGoogleOAuthSession() {
   if (!bridge?.load) return null;
   try {
     const session = await bridge.load();
-    if (!session?.sessionToken || Date.parse(session.expiresAt ?? "") <= Date.now() + 30_000) {
+    if (!session?.renewalToken || Date.parse(session.renewalExpiresAt ?? "") <= Date.now() + 30_000) {
       await clearNativeGoogleOAuthSession();
       return null;
     }
     const restored = {
-      sessionToken: String(session.sessionToken),
-      expiresAt: String(session.expiresAt),
+      sessionToken: String(session.sessionToken ?? ""),
+      expiresAt: String(session.expiresAt ?? ""),
+      renewalToken: String(session.renewalToken),
+      renewalExpiresAt: String(session.renewalExpiresAt),
       accountEmail: String(session.accountEmail ?? "")
     };
     sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(restored));

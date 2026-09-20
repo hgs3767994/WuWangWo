@@ -70,7 +70,7 @@ export async function deleteGoogleCloudAccount({ popupWindow = null, expectedAcc
 export async function disconnectGoogleDrive() {
   const session = readSession();
   try {
-    if (session) await apiFetch("/v1/oauth/session/revoke", {}, session.sessionToken ?? "");
+    if (session) await apiFetch("/v1/oauth/session/revoke", {}, session);
   } finally {
     await clearClientSession();
   }
@@ -84,12 +84,14 @@ export function googleDriveAuthStatus() {
 export async function restoreGoogleDriveSession() {
   let existing = readSession();
   if (!existing && isNativeOAuthRuntime()) existing = await restoreNativeGoogleOAuthSession();
-  if (!existing || Date.parse(existing.expiresAt) <= Date.now() + 30_000) return null;
-  const refreshed = await apiFetch("/v1/oauth/session/refresh", {}, existing.sessionToken ?? "");
-  if (!refreshed?.expiresAt || (!refreshed.sessionToken && !existing.cookieSession)) throw new Error("session-refresh-failed");
+  if (!existing || !hasFreshRenewal(existing)) return null;
+  const refreshed = await apiFetch("/v1/oauth/session/refresh", {}, existing);
+  if (!refreshed?.expiresAt || !refreshed?.renewalExpiresAt || (!refreshed.sessionToken && !existing.cookieSession)) throw new Error("session-refresh-failed");
   const nextSession = {
     ...(refreshed.sessionToken ? { sessionToken: refreshed.sessionToken } : { cookieSession: true }),
     expiresAt: refreshed.expiresAt,
+    ...(refreshed.renewalToken ? { renewalToken: refreshed.renewalToken } : {}),
+    renewalExpiresAt: refreshed.renewalExpiresAt,
     accountEmail: existing.accountEmail ?? ""
   };
   await storeClientSession(nextSession);
@@ -164,26 +166,35 @@ function connectGoogleDriveInPopup(popupWindow, startUrl) {
 }
 
 async function exchangeOAuthHandoff(handoff) {
-  const response = await apiFetch("/v1/oauth/google/handoff/exchange", { handoff }, false);
+  const response = await apiFetch("/v1/oauth/google/handoff/exchange", { handoff });
   const profile = await execute("profile", {}, response.sessionToken);
-  const session = { sessionToken: response.sessionToken, expiresAt: response.expiresAt, accountEmail: profile?.email ?? "" };
+  const session = {
+    sessionToken: response.sessionToken,
+    cookieSession: true,
+    expiresAt: response.expiresAt,
+    renewalExpiresAt: response.renewalExpiresAt,
+    accountEmail: profile?.email ?? ""
+  };
   await storeClientSession(session);
   return session;
 }
 
 async function execute(operation, values = {}, overrideToken = "") {
-  const session = overrideToken ? { sessionToken: overrideToken } : readSession();
-  if (!session?.sessionToken && !session?.cookieSession) throw new Error("google-drive-auth-required");
-  const response = await apiFetch("/v1/drive/execute", { operation, ...values }, session.sessionToken ?? "");
+  const session = overrideToken ? { sessionToken: overrideToken, expiresAt: new Date(Date.now() + 60_000).toISOString() } : await ensureAccessSession();
+  const response = await apiFetch("/v1/drive/execute", { operation, ...values }, session);
   return response.result;
 }
 
-async function apiFetch(path, body, sessionToken) {
+async function apiFetch(path, body, session = {}) {
   if (!isGoogleDriveConfigured()) throw new Error(googleDriveReadiness().message);
   const response = await fetch(`${apiUrl()}${path}`, {
     method: "POST",
     credentials: "include",
-    headers: { "content-type": "application/json", ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}) },
+    headers: {
+      "content-type": "application/json",
+      ...(session.sessionToken ? { Authorization: `Bearer ${session.sessionToken}` } : {}),
+      ...(session.renewalToken ? { "X-Device-Renewal": session.renewalToken } : {})
+    },
     body: JSON.stringify(body)
   });
   const payload = await response.json().catch(() => ({}));
@@ -195,8 +206,7 @@ async function apiFetch(path, body, sessionToken) {
 }
 
 async function workerApiFetch(path, body, method = "POST") {
-  const session = readSession();
-  if (!session?.sessionToken && !session?.cookieSession) throw new Error("google-drive-auth-required");
+  const session = await ensureAccessSession();
   if (!isGoogleDriveConfigured()) throw new Error(googleDriveReadiness().message);
   const response = await fetch(`${apiUrl()}${path}`, {
     method,
@@ -215,11 +225,11 @@ async function workerApiFetch(path, body, method = "POST") {
 function apiUrl() { return String(APP_CONFIG.googleDrive.oauthApiUrl).replace(/\/$/, ""); }
 function readSession() {
   const active = parseStoredSession(sessionStorage, SESSION_STORAGE_KEY);
-  if (active && Date.parse(active.expiresAt ?? "") > Date.now()) return active;
+  if (active && (hasFreshAccess(active) || hasFreshRenewal(active))) return active;
   if (active) sessionStorage.removeItem(SESSION_STORAGE_KEY);
   if (isNativeOAuthRuntime()) return null;
   const marker = parseStoredSession(localStorage, PERSISTENT_SESSION_MARKER_KEY);
-  if (marker?.cookieSession && Date.parse(marker.expiresAt ?? "") > Date.now()) return marker;
+  if (marker?.cookieSession && hasFreshRenewal(marker)) return marker;
   if (marker) localStorage.removeItem(PERSISTENT_SESSION_MARKER_KEY);
   return null;
 }
@@ -233,8 +243,28 @@ async function storeClientSession(session) {
   localStorage.setItem(PERSISTENT_SESSION_MARKER_KEY, JSON.stringify({
     cookieSession: true,
     expiresAt: session.expiresAt,
+    renewalExpiresAt: session.renewalExpiresAt,
     accountEmail: session.accountEmail ?? ""
   }));
+}
+
+async function ensureAccessSession() {
+  let session = readSession();
+  if (!session && isNativeOAuthRuntime()) session = await restoreNativeGoogleOAuthSession();
+  if (session && hasFreshAccess(session) && (session.sessionToken || session.cookieSession)) return session;
+  if (session && hasFreshRenewal(session)) {
+    const refreshed = await restoreGoogleDriveSession();
+    if (refreshed && hasFreshAccess(refreshed)) return refreshed;
+  }
+  throw new Error("google-drive-auth-required");
+}
+
+function hasFreshAccess(session) {
+  return Date.parse(session?.expiresAt ?? "") > Date.now() + 30_000;
+}
+
+function hasFreshRenewal(session) {
+  return Date.parse(session?.renewalExpiresAt ?? "") > Date.now() + 30_000;
 }
 
 async function clearClientSession() {

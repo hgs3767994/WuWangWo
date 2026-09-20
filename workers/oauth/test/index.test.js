@@ -3,6 +3,8 @@ import test from "node:test";
 import worker from "../src/index.js";
 import { encryptTokenEnvelope } from "../src/token-envelope.js";
 
+const schemaRows = () => ["oauth_accounts", "oauth_handoffs", "oauth_sessions", "oauth_session_renewals"].map((name) => ({ name }));
+
 test("health endpoint is available without OAuth configuration", async () => {
   const response = await worker.fetch(new Request("https://example.test/health"), {});
   assert.equal(response.status, 200);
@@ -23,14 +25,14 @@ test("health endpoint verifies an attached D1 database without writing data", as
       queries.push(query);
       return query === "SELECT 1 AS ready"
         ? { first: async () => ({ ready: 1 }) }
-        : { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+        : { all: async () => ({ results: schemaRows() }) };
     }
   };
   const response = await worker.fetch(new Request("https://example.test/health"), { OAUTH_DB: database });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).storageReady, true);
   assert.equal((await worker.fetch(new Request("https://example.test/health"), { OAUTH_DB: database })).status, 200);
-  assert.deepEqual(queries, ["SELECT 1 AS ready", "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('oauth_accounts', 'oauth_handoffs', 'oauth_sessions')", "SELECT 1 AS ready", "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('oauth_accounts', 'oauth_handoffs', 'oauth_sessions')"]);
+  assert.deepEqual(queries, ["SELECT 1 AS ready", "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('oauth_accounts', 'oauth_handoffs', 'oauth_sessions', 'oauth_session_renewals')", "SELECT 1 AS ready", "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('oauth_accounts', 'oauth_handoffs', 'oauth_sessions', 'oauth_session_renewals')"]);
 });
 
 test("configuration endpoint names missing values without exposing any secret", async () => {
@@ -82,7 +84,7 @@ test("OAuth start redirects with a nonce cookie instead of throwing", async () =
   const database = {
     prepare: (query) => query === "SELECT 1 AS ready"
       ? { first: async () => ({ ready: 1 }) }
-      : { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) }
+      : { all: async () => ({ results: schemaRows() }) }
   };
   const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/start?return_to=https://example.test/app"), {
     APP_ORIGINS: "https://example.test",
@@ -102,7 +104,7 @@ test("explicit PWA relinking forces Google account selection", async () => {
   const database = {
     prepare: (query) => query === "SELECT 1 AS ready"
       ? { first: async () => ({ ready: 1 }) }
-      : { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) }
+      : { all: async () => ({ results: schemaRows() }) }
   };
   const response = await worker.fetch(new Request("https://example.test/v1/oauth/google/start?return_to=https://example.test/app&reauth=account-selection"), configuredEnv(database, "encryption-key"));
   assert.equal(response.status, 302);
@@ -113,9 +115,10 @@ test("web OAuth handoff creates a renewable HttpOnly Worker session cookie", asy
   const database = {
     prepare(query) {
       if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
-      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: schemaRows() }) };
       if (query.startsWith("UPDATE oauth_handoffs")) return { bind: () => ({ first: async () => ({ google_subject: "subject-1" }) }) };
       if (query.startsWith("INSERT INTO oauth_sessions")) return { bind: () => ({ run: async () => ({ success: true }) }) };
+      if (query.startsWith("INSERT INTO oauth_session_renewals")) return { bind: () => ({ run: async () => ({ success: true }) }) };
       throw new Error(`unexpected query: ${query}`);
     }
   };
@@ -135,7 +138,10 @@ test("web OAuth handoff creates a renewable HttpOnly Worker session cookie", asy
   const payload = await response.json();
   assert.equal(response.status, 200);
   assert.equal(typeof payload.sessionToken, "string");
-  assert.match(response.headers.get("set-cookie"), /^forget_me_not_worker_session=.*HttpOnly; Secure; SameSite=None; Path=\/v1; Max-Age=/);
+  assert.equal(typeof payload.renewalExpiresAt, "string");
+  const cookies = response.headers.getSetCookie();
+  assert(cookies.some((value) => /^forget_me_not_worker_session=.*HttpOnly; Secure; SameSite=None; Path=\/v1; Max-Age=/.test(value)));
+  assert(cookies.some((value) => /^forget_me_not_worker_renewal=.*HttpOnly; Secure; SameSite=None; Path=\/v1\/oauth\/session; Max-Age=/.test(value)));
   assert.equal(response.headers.get("access-control-allow-credentials"), "true");
 });
 
@@ -145,7 +151,7 @@ test("native OAuth exchanges a one-time server auth code without exposing Google
     prepare(query) {
       if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
       if (query.includes("sqlite_master")) {
-        return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+        return { all: async () => ({ results: schemaRows() }) };
       }
       if (query.startsWith("SELECT google_subject")) {
         return { bind: () => ({ first: async () => null }) };
@@ -189,13 +195,14 @@ test("native OAuth exchanges a one-time server auth code without exposing Google
     assert.equal(response.status, 200);
     assert.equal(payload.accountEmail, "person@example.test");
     assert.equal(typeof payload.sessionToken, "string");
+    assert.equal(typeof payload.renewalToken, "string");
     assert.equal(requests.length, 2);
     const tokenBody = new URLSearchParams(requests[0].options.body);
     assert.equal(tokenBody.get("code"), "single-use-code");
     assert.equal(tokenBody.get("client_secret"), "worker-only-secret");
     assert.equal(tokenBody.get("redirect_uri"), "");
     assert.equal(requests[1].options.headers.Authorization, "Bearer google-access-token");
-    assert.equal(writes.length, 2);
+    assert.equal(writes.length, 3);
     assert(!JSON.stringify(writes).includes("google-refresh-token"));
     assert(!JSON.stringify(writes).includes("google-access-token"));
     assert(!JSON.stringify(payload).includes("google-refresh-token"));
@@ -211,7 +218,7 @@ test("session revoke accepts an opaque Bearer token and does not store its plain
     prepare(query) {
       calls.push(query);
       if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
-      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: schemaRows() }) };
       return { bind: (...values) => ({ first: async () => ({ google_subject: "subject-1" }), values }) };
     }
   };
@@ -236,13 +243,13 @@ test("session revoke accepts the HttpOnly PWA session cookie", async () => {
   const database = {
     prepare(query) {
       if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
-      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: schemaRows() }) };
       return { bind: () => ({ first: async () => ({ google_subject: "subject-1" }) }) };
     }
   };
   const response = await worker.fetch(new Request("https://example.test/v1/oauth/session/revoke", {
     method: "POST",
-    headers: { Origin: "https://example.test", Cookie: "forget_me_not_worker_session=opaque-cookie-session" }
+    headers: { Origin: "https://example.test", Cookie: "forget_me_not_worker_session=opaque-cookie-session; forget_me_not_worker_renewal=opaque-cookie-renewal" }
   }), {
     APP_ORIGINS: "https://example.test",
     GOOGLE_WEB_CLIENT_ID: "public-client-id",
@@ -254,14 +261,14 @@ test("session revoke accepts the HttpOnly PWA session cookie", async () => {
   });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { revoked: true });
-  assert.match(response.headers.get("set-cookie"), /Max-Age=0$/);
+  assert.equal(response.headers.getSetCookie().filter((value) => /Max-Age=0$/.test(value)).length, 2);
 });
 
 test("session status validates the server-side session without contacting Google", async () => {
   const database = {
     prepare(query) {
       if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
-      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: schemaRows() }) };
       if (query.startsWith("SELECT a.google_subject")) return { bind: () => ({ first: async () => ({ google_subject: "subject-1" }) }) };
       throw new Error(`unexpected query: ${query}`);
     }
@@ -278,7 +285,7 @@ test("session status rejects a session removed by account deletion", async () =>
   const database = {
     prepare(query) {
       if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
-      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: schemaRows() }) };
       if (query.startsWith("SELECT a.google_subject")) return { bind: () => ({ first: async () => null }) };
       throw new Error(`unexpected query: ${query}`);
     }
@@ -292,13 +299,12 @@ test("session status rejects a session removed by account deletion", async () =>
   assert.match(response.headers.get("set-cookie"), /Max-Age=0$/);
 });
 
-test("session refresh rotates a Bearer device session and returns the replacement only to its native client", async () => {
+test("session refresh rotates a native renewal credential and returns separate one-hour access credentials", async () => {
   const statements = [];
   const database = {
     prepare(query) {
       if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
-      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
-      if (query.startsWith("SELECT a.google_subject")) return { bind: () => ({ first: async () => ({ google_subject: "subject-1", session_created_at: "2026-09-01T00:00:00.000Z" }) }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: schemaRows() }) };
       return { bind: (...values) => ({ query, values }) };
     },
     async batch(batchStatements) {
@@ -308,22 +314,25 @@ test("session refresh rotates a Bearer device session and returns the replacemen
   };
   const response = await worker.fetch(new Request("https://example.test/v1/oauth/session/refresh", {
     method: "POST",
-    headers: { Origin: "https://example.test", Authorization: "Bearer current-device-session" }
+    headers: { Origin: "https://example.test", "X-Device-Renewal": "current-device-renewal" }
   }), configuredEnv(database, "encryption-key"));
   const payload = await response.json();
   assert.equal(response.status, 200);
   assert.equal(payload.active, true);
   assert.equal(typeof payload.sessionToken, "string");
-  assert.match(response.headers.get("set-cookie"), /^forget_me_not_worker_session=.*Max-Age=/);
-  assert.match(statements[0].query, /NULL, created_at FROM oauth_sessions/);
-  assert(!JSON.stringify(statements).includes("current-device-session"));
+  assert.equal(typeof payload.renewalToken, "string");
+  assert.equal(Date.parse(payload.expiresAt) - Date.now() <= 60 * 60 * 1000, true);
+  assert.match(statements[0].query, /INSERT INTO oauth_session_renewals/);
+  assert.match(statements[1].query, /INSERT INTO oauth_sessions/);
+  assert(statements.slice(0, 2).every((item) => item.query.includes("r.created_at")));
+  assert(!JSON.stringify(statements).includes("current-device-renewal"));
 });
 
 test("session refresh rotates a PWA cookie without exposing its replacement token to JavaScript", async () => {
   const database = {
     prepare(query) {
       if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
-      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: schemaRows() }) };
       if (query.startsWith("SELECT a.google_subject")) return { bind: () => ({ first: async () => ({ google_subject: "subject-1" }) }) };
       return { bind: (...values) => ({ query, values }) };
     },
@@ -333,14 +342,34 @@ test("session refresh rotates a PWA cookie without exposing its replacement toke
   };
   const response = await worker.fetch(new Request("https://example.test/v1/oauth/session/refresh", {
     method: "POST",
-    headers: { Origin: "https://example.test", Cookie: "forget_me_not_worker_session=current-cookie-session" }
+    headers: { Origin: "https://example.test", Cookie: "forget_me_not_worker_renewal=current-cookie-renewal" }
   }), configuredEnv(database, "encryption-key"));
   const payload = await response.json();
   assert.equal(response.status, 200);
   assert.equal(payload.active, true);
   assert.equal(typeof payload.expiresAt, "string");
   assert.equal(payload.sessionToken, undefined);
-  assert.match(response.headers.get("set-cookie"), /^forget_me_not_worker_session=.*HttpOnly/);
+  assert.equal(payload.renewalToken, undefined);
+  const cookies = response.headers.getSetCookie();
+  assert(cookies.some((value) => value.startsWith("forget_me_not_worker_session=")));
+  assert(cookies.some((value) => value.startsWith("forget_me_not_worker_renewal=")));
+});
+
+test("renewal credentials cannot call the Drive proxy directly", async () => {
+  const database = {
+    prepare(query) {
+      if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: schemaRows() }) };
+      throw new Error(`unexpected query: ${query}`);
+    }
+  };
+  const response = await worker.fetch(new Request("https://example.test/v1/drive/execute", {
+    method: "POST",
+    headers: { Origin: "https://example.test", "X-Device-Renewal": "renewal-only", "content-type": "application/json" },
+    body: JSON.stringify({ operation: "read", name: "vault.enc" })
+  }), configuredEnv(database, "encryption-key"));
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "session-required" });
 });
 
 test("account deletion requires a fresh session, always deletes Drive files, revokes Google, and atomically clears D1", async () => {
@@ -404,6 +433,7 @@ test("account deletion requires a fresh session, always deletes Drive files, rev
       "DELETE FROM recovery_requests WHERE google_subject = ?",
       "DELETE FROM oauth_handoffs WHERE google_subject = ?",
       "DELETE FROM oauth_sessions WHERE google_subject = ?",
+      "DELETE FROM oauth_session_renewals WHERE google_subject = ?",
       "DELETE FROM oauth_accounts WHERE google_subject = ?"
     ]);
     assert.match(response.headers.get("set-cookie"), /Max-Age=0$/);

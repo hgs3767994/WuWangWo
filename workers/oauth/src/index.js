@@ -2,12 +2,13 @@ import { authorizationUrl, exchangeCode, exchangeServerAuthCode, googleProfile, 
 import { createOAuthState } from "./oauth-state.js";
 import { verifyOAuthState } from "./oauth-state.js";
 import { decryptTokenEnvelope, encryptTokenEnvelope } from "./token-envelope.js";
-import { accountBySubject, consumeHandoff, createHandoff, createSession, deleteAccountData, revokeSession, rotateSession, saveAccount, sessionAccount } from "./oauth-store.js";
+import { accountBySubject, consumeHandoff, createHandoff, createRenewal, createSession, deleteAccountData, revokeRenewal, revokeSession, rotateRenewalAndCreateSession, saveAccount, sessionAccount } from "./oauth-store.js";
 import { executeDriveOperation } from "./drive-proxy.js";
 import { approveRecoveryRequest, completeRecoveryRequest, createRecoveryRequest, listRecoveryRequests, recordFailedVerification, recoveryRequest, recoveryVerificationRecord } from "./recovery-store.js";
 
 const SERVICE_NAME = "forget-me-not-oauth";
 const WORKER_SESSION_COOKIE = "forget_me_not_worker_session";
+const WORKER_RENEWAL_COOKIE = "forget_me_not_worker_renewal";
 const REQUIRED_SECRETS = ["GOOGLE_WEB_CLIENT_SECRET", "OAUTH_STATE_SIGNING_KEY", "TOKEN_ENCRYPTION_KEY"];
 const REQUIRED_PUBLIC_VALUES = ["APP_ORIGINS", "GOOGLE_WEB_CLIENT_ID", "GOOGLE_OAUTH_REDIRECT_URI"];
 const ACCOUNT_DELETION_REAUTH_MS = 5 * 60 * 1000;
@@ -46,9 +47,11 @@ export default {
         const profile = await googleProfile({ accessToken: tokens.access_token });
         const now = new Date().toISOString();
         await saveGoogleTokens(env, { profile, tokens, now });
-        const token = crypto.randomUUID();
-        const session = await createSession(env.OAUTH_DB, { token, subject: profile.sub, now });
-        return json({ sessionToken: token, expiresAt: session.expiresAt, accountEmail: profile.email ?? "" }, 200, corsHeaders(origin));
+        const sessionToken = crypto.randomUUID();
+        const renewalToken = crypto.randomUUID();
+        const session = await createSession(env.OAUTH_DB, { token: sessionToken, subject: profile.sub, now });
+        const renewal = await createRenewal(env.OAUTH_DB, { token: renewalToken, subject: profile.sub, now });
+        return json({ sessionToken, expiresAt: session.expiresAt, renewalToken, renewalExpiresAt: renewal.expiresAt, accountEmail: profile.email ?? "" }, 200, corsHeaders(origin));
       } catch {
         return json({ error: "native-oauth-exchange-failed" }, 502, corsHeaders(origin));
       }
@@ -89,12 +92,14 @@ export default {
         const now = new Date().toISOString();
         const subject = await consumeHandoff(env.OAUTH_DB, { code: handoff, now });
         if (!subject) return json({ error: "handoff-invalid-or-expired" }, 400, corsHeaders(origin));
-        const token = crypto.randomUUID();
-        const session = await createSession(env.OAUTH_DB, { token, subject, now });
+        const sessionToken = crypto.randomUUID();
+        const renewalToken = crypto.randomUUID();
+        const session = await createSession(env.OAUTH_DB, { token: sessionToken, subject, now });
+        const renewal = await createRenewal(env.OAUTH_DB, { token: renewalToken, subject, now });
         return json(
-          { sessionToken: token, expiresAt: session.expiresAt },
+          { sessionToken, expiresAt: session.expiresAt, renewalExpiresAt: renewal.expiresAt },
           200,
-          { ...corsHeaders(origin), "set-cookie": workerSessionCookie(token, session.expiresAt) }
+          deviceSessionHeaders(origin, { sessionToken, expiresAt: session.expiresAt, renewalToken, renewalExpiresAt: renewal.expiresAt })
         );
       } catch (error) {
         if (error?.message === "handoff-invalid") return json({ error: "handoff-invalid-or-expired" }, 400, corsHeaders(origin));
@@ -132,11 +137,14 @@ export default {
       const storage = await databaseStatus(env.OAUTH_DB);
       if (!storage.schemaReady) return json({ error: "storage-not-ready" }, 503, corsHeaders(origin));
       const token = requestSessionToken(request);
-      if (!token) return sessionError("session-required", origin);
+      const renewalToken = requestRenewalToken(request);
+      if (!token && !renewalToken) return sessionError("session-required", origin);
       try {
-        await revokeSession(env.OAUTH_DB, { token, now: new Date().toISOString() });
+        const now = new Date().toISOString();
+        if (token) await revokeSession(env.OAUTH_DB, { token, now });
+        if (renewalToken) await revokeRenewal(env.OAUTH_DB, { token: renewalToken, now });
         // Treat repeated logout as successful without revealing whether a token was valid.
-        return json({ revoked: true }, 200, { ...corsHeaders(origin), "set-cookie": clearWorkerSessionCookie() });
+        return json({ revoked: true }, 200, clearDeviceSessionHeaders(origin));
       } catch {
         return json({ error: "session-revoke-failed" }, 500, corsHeaders(origin));
       }
@@ -161,20 +169,24 @@ export default {
       if (!hasRequiredConfiguration(env)) return json({ error: "oauth-not-configured" }, 503, corsHeaders(origin));
       const storage = await databaseStatus(env.OAUTH_DB);
       if (!storage.schemaReady) return json({ error: "storage-not-ready" }, 503, corsHeaders(origin));
-      const token = requestSessionToken(request);
-      if (!token) return sessionError("session-required", origin);
+      const renewalToken = requestRenewalToken(request);
+      if (!renewalToken) return renewalError("session-renewal-required", origin);
       const now = new Date().toISOString();
-      const account = await sessionAccount(env.OAUTH_DB, { token, now });
-      if (!account) return sessionError("session-expired", origin);
       try {
-        const nextToken = crypto.randomUUID();
-        const session = await rotateSession(env.OAUTH_DB, { token, nextToken, now });
-        if (!session) return sessionError("session-expired", origin);
-        const usesBearer = Boolean(bearerToken(request.headers.get("Authorization")));
+        const sessionToken = crypto.randomUUID();
+        const nextRenewalToken = crypto.randomUUID();
+        const session = await rotateRenewalAndCreateSession(env.OAUTH_DB, { renewalToken, nextRenewalToken, sessionToken, now });
+        if (!session) return renewalError("session-renewal-expired", origin);
+        const usesNativeRenewal = Boolean(request.headers.get("X-Device-Renewal"));
         return json(
-          { active: true, expiresAt: session.expiresAt, ...(usesBearer ? { sessionToken: nextToken } : {}) },
+          {
+            active: true,
+            expiresAt: session.expiresAt,
+            renewalExpiresAt: session.renewalExpiresAt,
+            ...(usesNativeRenewal ? { sessionToken, renewalToken: nextRenewalToken } : {})
+          },
           200,
-          { ...corsHeaders(origin), "set-cookie": workerSessionCookie(nextToken, session.expiresAt) }
+          deviceSessionHeaders(origin, { sessionToken, expiresAt: session.expiresAt, renewalToken: nextRenewalToken, renewalExpiresAt: session.renewalExpiresAt })
         );
       } catch {
         return json({ error: "session-refresh-failed" }, 500, corsHeaders(origin));
@@ -205,7 +217,7 @@ export default {
         const storedTokens = await decryptTokenEnvelope({ ciphertext: account.token_ciphertext, iv: account.token_iv }, env.TOKEN_ENCRYPTION_KEY);
         await revokeGoogleToken({ token: storedTokens.refresh_token || accessToken });
         await deleteAccountData(env.OAUTH_DB, { subject: account.google_subject });
-        return json({ deleted: true, driveDataDeleted: true, googleAuthorizationRevoked: true }, 200, { ...corsHeaders(origin), "set-cookie": clearWorkerSessionCookie() });
+        return json({ deleted: true, driveDataDeleted: true, googleAuthorizationRevoked: true }, 200, clearDeviceSessionHeaders(origin));
       } catch (error) {
         const message = String(error?.message ?? "");
         if (message.startsWith("google-drive-request-failed")) return json({ error: message }, 502, corsHeaders(origin));
@@ -299,7 +311,7 @@ export default {
         oauthReady: hasRequiredConfiguration(env),
         missing: missingConfiguration(env),
         storageReady: storage.ready,
-        message: "OAuth、可撤銷裝置 session 與受限 Drive proxy 只會在 Google 設定、Worker secrets 與 D1 schema 都完整時啟用。"
+        message: "OAuth、一小時 access session、可輪替裝置續期憑證與受限 Drive proxy 只會在 Google 設定、Worker secrets 與 D1 schema 都完整時啟用。"
       });
     }
 
@@ -326,6 +338,7 @@ function cookie(header, name) {
 }
 function bearerToken(header) { const match = /^Bearer\s+(.+)$/i.exec(String(header ?? "")); return match?.[1] ?? ""; }
 function requestSessionToken(request) { return bearerToken(request.headers.get("Authorization")) || cookie(request.headers.get("Cookie"), WORKER_SESSION_COOKIE); }
+function requestRenewalToken(request) { return String(request.headers.get("X-Device-Renewal") ?? "").trim() || cookie(request.headers.get("Cookie"), WORKER_RENEWAL_COOKIE); }
 
 function missingConfiguration(env) {
   return [...REQUIRED_PUBLIC_VALUES, ...REQUIRED_SECRETS].filter((name) => !String(env?.[name] ?? "").trim());
@@ -347,10 +360,10 @@ async function databaseStatus(database) {
   try {
     await database.prepare("SELECT 1 AS ready").first();
     const tables = await database
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('oauth_accounts', 'oauth_handoffs', 'oauth_sessions')")
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('oauth_accounts', 'oauth_handoffs', 'oauth_sessions', 'oauth_session_renewals')")
       .all();
     const names = new Set((tables.results ?? []).map((row) => row.name));
-    return { ready: true, schemaReady: names.has("oauth_accounts") && names.has("oauth_handoffs") && names.has("oauth_sessions") };
+    return { ready: true, schemaReady: names.has("oauth_accounts") && names.has("oauth_handoffs") && names.has("oauth_sessions") && names.has("oauth_session_renewals") };
   } catch {
     return { ready: false, schemaReady: false };
   }
@@ -367,7 +380,7 @@ async function recoveryDatabaseStatus(database) {
   } catch { return { ready: false }; }
 }
 
-function corsHeaders(origin) { return { "access-control-allow-origin": origin, "access-control-allow-credentials": "true", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type, authorization", vary: "Origin" }; }
+function corsHeaders(origin) { return { "access-control-allow-origin": origin, "access-control-allow-credentials": "true", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type, authorization, x-device-renewal", vary: "Origin" }; }
 function bounded(value, maxLength) { const text = String(value ?? "").trim(); return text && text.length <= maxLength ? text : ""; }
 function redirect(location, status, setCookie) { return new Response(null, { status, headers: { location, "set-cookie": setCookie, "cache-control": "no-store" } }); }
 
@@ -376,12 +389,39 @@ function workerSessionCookie(token, expiresAt) {
   return `${WORKER_SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=None; Path=/v1; Max-Age=${maxAge}`;
 }
 
+function workerRenewalCookie(token, expiresAt) {
+  const maxAge = Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000));
+  return `${WORKER_RENEWAL_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=None; Path=/v1/oauth/session; Max-Age=${maxAge}`;
+}
+
 function clearWorkerSessionCookie() {
   return `${WORKER_SESSION_COOKIE}=; HttpOnly; Secure; SameSite=None; Path=/v1; Max-Age=0`;
 }
 
+function clearWorkerRenewalCookie() {
+  return `${WORKER_RENEWAL_COOKIE}=; HttpOnly; Secure; SameSite=None; Path=/v1/oauth/session; Max-Age=0`;
+}
+
+function deviceSessionHeaders(origin, { sessionToken, expiresAt, renewalToken, renewalExpiresAt }) {
+  const headers = new Headers(corsHeaders(origin));
+  headers.append("set-cookie", workerSessionCookie(sessionToken, expiresAt));
+  headers.append("set-cookie", workerRenewalCookie(renewalToken, renewalExpiresAt));
+  return headers;
+}
+
+function clearDeviceSessionHeaders(origin) {
+  const headers = new Headers(corsHeaders(origin));
+  headers.append("set-cookie", clearWorkerSessionCookie());
+  headers.append("set-cookie", clearWorkerRenewalCookie());
+  return headers;
+}
+
 function sessionError(error, origin) {
   return json({ error }, 401, { ...corsHeaders(origin), "set-cookie": clearWorkerSessionCookie() });
+}
+
+function renewalError(error, origin) {
+  return json({ error }, 401, clearDeviceSessionHeaders(origin));
 }
 
 function popupHandoff(destination, handoff) {
@@ -439,12 +479,11 @@ async function currentAccessToken(env, account, now) {
 }
 
 function json(payload, status = 200, extraHeaders = {}) {
+  const headers = extraHeaders instanceof Headers ? extraHeaders : new Headers(extraHeaders);
+  headers.set("content-type", "application/json; charset=UTF-8");
+  headers.set("cache-control", "no-store");
   return new Response(JSON.stringify(payload), {
     status,
-    headers: {
-      "content-type": "application/json; charset=UTF-8",
-      "cache-control": "no-store",
-      ...extraHeaders
-    }
+    headers
   });
 }

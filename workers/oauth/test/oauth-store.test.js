@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { consumeHandoff, createSession, deleteAccountData, revokeSession, rotateSession, saveAccount } from "../src/oauth-store.js";
+import { consumeHandoff, createSession, deleteAccountData, revokeSession, rotateRenewalAndCreateSession, saveAccount } from "../src/oauth-store.js";
 test("account storage binds encrypted fields instead of token plaintext", async () => {
   let values; const db = { prepare: () => ({ bind: (...args) => (values = args, { run: async () => {} }) }) };
   await saveAccount(db, { subject: "sub", envelope: { ciphertext: "cipher", iv: "iv" }, scopes: "scope", expiresAt: "2030", refreshTokenPresent: true, now: "2026" });
@@ -24,11 +24,11 @@ test("handoff consumption is single-use and sessions are stored hashed", async (
   };
   assert.equal(await consumeHandoff(database, { code: "handoff-code", now: "2026-09-04T00:00:00.000Z" }), "subject-1");
   const session = await createSession(database, { token: "session-token", subject: "subject-1", now: "2026-09-04T00:00:00.000Z" });
-  assert.equal(session.expiresAt, "2026-10-04T00:00:00.000Z");
+  assert.equal(session.expiresAt, "2026-09-04T01:00:00.000Z");
   assert(calls.some(({ query, values }) => query.includes("oauth_sessions") && !values.includes("session-token")));
 });
 
-test("session rotation extends the device session without resetting its original authorization time", async () => {
+test("renewal rotation mints a one-hour access session without resetting the original authorization time", async () => {
   const statements = [];
   const database = {
     prepare(query) {
@@ -39,15 +39,20 @@ test("session rotation extends the device session without resetting its original
       return batchStatements.map(() => ({ success: true, meta: { changes: 1 } }));
     }
   };
-  const session = await rotateSession(database, {
-    token: "old-session-token",
-    nextToken: "new-session-token",
+  const session = await rotateRenewalAndCreateSession(database, {
+    renewalToken: "old-renewal-token",
+    nextRenewalToken: "new-renewal-token",
+    sessionToken: "new-session-token",
     now: "2026-09-20T00:00:00.000Z"
   });
-  assert.equal(session.expiresAt, "2026-10-20T00:00:00.000Z");
-  assert.match(statements[0].query, /SELECT \?, google_subject, \?, NULL, created_at FROM oauth_sessions/);
-  assert.match(statements[1].query, /UPDATE oauth_sessions SET revoked_at/);
-  assert(!JSON.stringify(statements).includes("old-session-token"));
+  assert.equal(session.expiresAt, "2026-09-20T01:00:00.000Z");
+  assert.equal(session.renewalExpiresAt, "2026-10-20T00:00:00.000Z");
+  assert.match(statements[0].query, /INSERT INTO oauth_session_renewals/);
+  assert.match(statements[1].query, /INSERT INTO oauth_sessions/);
+  assert.match(statements[2].query, /UPDATE oauth_session_renewals SET revoked_at/);
+  assert(statements.slice(0, 2).every((item) => item.query.includes("r.created_at")));
+  assert(!JSON.stringify(statements).includes("old-renewal-token"));
+  assert(!JSON.stringify(statements).includes("new-renewal-token"));
   assert(!JSON.stringify(statements).includes("new-session-token"));
 });
 
@@ -84,6 +89,7 @@ test("account deletion removes every subject-owned table in one D1 batch", async
     "DELETE FROM recovery_requests WHERE google_subject = ?",
     "DELETE FROM oauth_handoffs WHERE google_subject = ?",
     "DELETE FROM oauth_sessions WHERE google_subject = ?",
+    "DELETE FROM oauth_session_renewals WHERE google_subject = ?",
     "DELETE FROM oauth_accounts WHERE google_subject = ?"
   ]);
   assert(statements.every((item) => item.values[0] === "subject-1"));

@@ -63,7 +63,7 @@ Recovery v2 的 key package 只有 `recoveryAuthorizationVerifier`，不能在�
 
 1. Web OAuth BFF：`/v1/oauth/google/start`、`/callback`、`/session`、`/logout`。
 2. 原生 OAuth：Android使用 Google Play services AuthorizationClient；iOS日後使用 Google Sign-In for iOS／AppAuth支援流程。兩者都不在 WebView載入 GIS popup。
-3. 共用同步 API：只接受與回傳已加密的 key package、vault 和 recovery request；裝置 API session 採最長 30 天、啟動時自動輪替且可立即撤銷的雜湊憑證。
+3. 共用同步 API：只接受與回傳已加密的 key package、vault 和 recovery request；這些 API 只接受一小時 access session。最長 30 天的裝置續期憑證採輪替雜湊，只能換發 access session，不能直接呼叫同步、救援或刪除 API。
 4. Token store：採 D1 schema 保存加密 token envelope、Google subject、scope、更新時間與撤銷狀態；不保存 DEK、主密碼、救援碼或 vault 明文。
 
 ## Capacitor 前置條件

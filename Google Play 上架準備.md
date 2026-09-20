@@ -124,6 +124,15 @@
 - [x] 靜態檢查、8 項核心 smoke tests與 39 項 Worker tests 全部通過；正式 Worker 已部署版本 `4d3a86c0-63ac-45c9-83af-dbb7d6b11667`。
 - [x] v177 release APK SHA-256：`3951807318086BF5569D00FC6B17FB1AB7913110234C09391AFFD767663D43C0`；v177 release AAB SHA-256：`2756727C977F13CDD215E18984ED3EA078316F1C78331BBD6D84BE6A2712B7C9`。
 
+### v178 短效存取與長效續期憑證分離（2026-09-20）
+
+- [x] 修正 v177 將可直接呼叫 Drive proxy 的 bearer session 延長至 30 天所造成的權限過大問題；直接存取憑證恢復為 1 小時。
+- [x] 新增最長 30 天、每次使用即輪替並撤銷舊值的續期憑證；續期憑證只能交換新的 1 小時存取憑證，不能直接同步、讀取救援資料或刪除帳號。
+- [x] PWA 的兩種憑證均使用 `HttpOnly` Cookie；原生 App 的憑證以 Android Keystore 加密保存，且只在 session refresh 請求傳送續期憑證。
+- [x] 遠端 D1 已建立 `oauth_session_renewals`，並將 v177 尚未撤銷的長效直接存取 session 截短為最多 1 小時；升級後既有 PWA 與原生 App 需各自明確重新連結一次。
+- [x] 8 項核心 smoke tests 與 40 項 Worker tests 全部通過；正式 Worker 已部署版本 `ff2b20fa-7717-4198-b0d4-6d580f95ddb9`，health 回報 D1 schema ready。
+- [x] v178 release APK SHA-256：`2CAB20EAB738C1DA24528DB97CC5268751F234B1274692108DB556E3F27E6464`；v178 release AAB SHA-256：`784839FD8606D561EF455A3C1474C7B79F8FA549ACEA7FDCD32C0162B3118E1B`；release certificate SHA-256 維持 `6D4D32DBC1491F0DE8F41569A92A9B6EE1B3CF680635AD8CBC875A6903F2596E`。
+
 ## 第二階段：正式隱私政策與服務條款
 
 - [x] 更新 `privacy.html`：
