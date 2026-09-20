@@ -363,6 +363,35 @@ await check("public legal pages exist for OAuth production readiness", async () 
   }
 });
 
+await check("Drive revision recovery preserves current credentials and is exposed directly in Settings", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  const settingsStart = appSource.indexOf("function settingsView()");
+  const settingsEnd = appSource.indexOf("function deleteCloudAccountView()", settingsStart);
+  const settingsSource = appSource.slice(settingsStart, settingsEnd);
+  const syncIndex = settingsSource.indexOf(">立即同步</button>");
+  const recoveryIndex = settingsSource.indexOf('data-nav="driveRevisionRecovery"');
+  const logoutIndex = settingsSource.indexOf(">登出 Google Drive</button>");
+  if (syncIndex < 0 || recoveryIndex < syncIndex || logoutIndex < recoveryIndex) {
+    throw new Error("Settings must show Drive revision recovery below immediate sync and before logout.");
+  }
+  if (appSource.includes("syncTroubleshooting")) throw new Error("The obsolete sync troubleshooting route must be removed.");
+  const recoveryViewStart = appSource.indexOf("function driveRevisionRecoveryView()");
+  const recoveryViewEnd = appSource.indexOf("function driveRevisionRecoveryReportView", recoveryViewStart);
+  const recoveryViewSource = appSource.slice(recoveryViewStart, recoveryViewEnd);
+  if (recoveryViewSource.includes('data-security-draft="newPassword"') || recoveryViewSource.includes('data-security-draft="confirmPassword"')) {
+    throw new Error("Drive revision recovery must not ask for a replacement password.");
+  }
+  [
+    "當雲端資料異常導致程式執行錯誤時",
+    "revisionRecoveryId",
+    "preservePermanentDeletions",
+    "目前密碼與救援碼均未變更",
+    'await readDriveFile(driveFileName("vault"))'
+  ].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing safe Drive revision recovery support: ${text}`);
+  });
+});
+
 await check("mobile PWA OAuth fallback completes outside the main history", async () => {
   const appSource = await readFile("src/app.js", "utf8");
   const driveSource = await readFile("src/drive-google.js", "utf8");

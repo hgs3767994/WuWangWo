@@ -54,6 +54,28 @@ function isTombstoned(tombstones, type, id) {
   return tombstones.some((item) => item.type === type && item.id === id);
 }
 
+export function preservePermanentDeletions(recoveredVault, currentVault) {
+  const tombstonesByTarget = new Map(
+    asArray(recoveredVault?.tombstones).map((item) => [`${item.type}:${item.id}`, item])
+  );
+  asArray(currentVault?.tombstones)
+    .filter((item) => item?.purgedAt)
+    .forEach((item) => tombstonesByTarget.set(`${item.type}:${item.id}`, item));
+  const tombstones = [...tombstonesByTarget.values()];
+  const permanentlyDeleted = new Set(
+    tombstones.filter((item) => item?.purgedAt).map((item) => `${item.type}:${item.id}`)
+  );
+  return {
+    ...recoveredVault,
+    people: asArray(recoveredVault?.people).filter((item) => !permanentlyDeleted.has(`person:${item.id}`)),
+    personGroupTags: asArray(recoveredVault?.personGroupTags).filter((item) => !permanentlyDeleted.has(`personGroupTag:${item.id}`)),
+    interestTags: asArray(recoveredVault?.interestTags).filter((item) => !permanentlyDeleted.has(`interestTag:${item.id}`)),
+    customFieldDefs: asArray(recoveredVault?.customFieldDefs).filter((item) => !permanentlyDeleted.has(`customField:${item.id}`)),
+    deletedItems: asArray(recoveredVault?.deletedItems).filter((item) => !permanentlyDeleted.has(`${item.type}:${item.id}`)),
+    tombstones
+  };
+}
+
 function mergeNamedTags(localItems = [], remoteItems = [], tombstones = [], tombstoneType = "") {
   const deletedIds = new Set(asArray(tombstones).filter((item) => item.type === tombstoneType).map((item) => item.id));
   const tagsById = byId(asArray(localItems).filter((item) => !deletedIds.has(item.id)));

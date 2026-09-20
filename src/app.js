@@ -5,7 +5,7 @@ import { APP_CONFIG, driveFileName, driveProviderLabel } from "./config.js";
 import { nativeFileExportAvailable, saveNativeExport } from "./native-file-export.js";
 import { isNativeOAuthRuntime } from "./native-oauth.js";
 import { clearNativeTrustedSession, isNativeTrustedSession, nativeTrustedSessionAuthenticationError, nativeTrustedSessionAvailable } from "./native-trusted-session.js";
-import { mergeVaults } from "./sync.js";
+import { mergeVaults, preservePermanentDeletions } from "./sync.js";
 import { buildVaultXlsx } from "./xlsx.js";
 import {
   createKeyPackage,
@@ -2779,7 +2779,6 @@ function recoveryPairingCode() { return crypto.randomUUID().replaceAll("-", "").
 async function scanDriveRevisionRecovery(event) {
   event.preventDefault();
   const draft = state.route.securityDraft ?? {};
-  if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
   const credentialType = draft.credentialType === "recoveryCode" ? "recoveryCode" : "password";
   const secret = credentialType === "recoveryCode" ? normalizeRecoveryCode(draft.secret ?? "") : (draft.secret ?? "");
   if (!secret) {
@@ -2823,9 +2822,7 @@ async function scanDriveRevisionRecovery(event) {
           const envelope = await vaultCandidate.read();
           const vault = normalizeVault(pruneDeleted(await decryptVaultEnvelope(envelope, dekBytes)));
           state.route.revisionRecoveryCandidate = {
-            keyPackage,
             vault,
-            dekBytes,
             keyRevision: revisionSummary(keyCandidate),
             vaultRevision: revisionSummary(vaultCandidate)
           };
@@ -2868,70 +2865,111 @@ async function scanDriveRevisionRecovery(event) {
 
 async function applyDriveRevisionRecovery() {
   const candidate = state.route.revisionRecoveryCandidate;
-  const draft = state.route.securityDraft ?? {};
   if (!candidate) {
     alert("尚未找到可用的歷史版本");
     return;
   }
-  if (!validateNewPassword(draft.newPassword, draft.confirmPassword)) return;
-  const connection = await reuseDriveAuthorizationOrNotify();
-  if (!connection) return;
-  rememberDriveAccount(connection);
+  if (!state.dekBytes) {
+    alert("目前裝置的資料金鑰尚未解鎖，請重新開啟 App 並輸入目前密碼後再試一次。");
+    return;
+  }
+  let currentKeyPackage;
+  try {
+    const prepared = await prepareSecurityWrite();
+    if (prepared.blocked) return;
+    currentKeyPackage = prepared.keyPackage;
+    if (!currentKeyPackage?.vaultId || !currentKeyPackage?.securityMeta) throw new Error("revision-recovery-current-key-missing");
+  } catch (error) {
+    alert(securityWriteFailureMessage(error, "必須先取得最新的 Google Drive 安全設定，才能重建雲端歷史資料。"));
+    return;
+  }
   const confirmed = await confirmDialog(
-    `確定要使用找到的歷史版本重建雲端同步資料嗎？\n\n金鑰檔：${candidate.keyRevision.label}\n資料檔：${candidate.vaultRevision.label}\n人物：${candidate.vault.people.length} 位\n\n此操作會覆蓋目前 Google Drive 中的莫忘同步資料，並產生新的密碼與救援碼。`,
+    `確定要使用找到的歷史版本重建雲端同步資料嗎？\n\n金鑰檔：${candidate.keyRevision.label}\n資料檔：${candidate.vaultRevision.label}\n人物：${candidate.vault.people.length} 位\n\n此操作會覆蓋目前 Google Drive 中的莫忘同步資料，但不會變更目前密碼或救援碼。為避免其他裝置把異常資料再次同步回來，其他裝置之後需用目前密碼重新登入。`,
     { confirmLabel: "重建", danger: true }
   );
   if (!confirmed) return;
-  const deviceId = state.appState?.deviceId ?? createDeviceId();
-  const updated = await buildReplacedMasterPasswordAndRecovery({
-    keyPackage: candidate.keyPackage,
-    dekBytes: candidate.dekBytes,
-    newPassword: draft.newPassword,
-    deviceId,
-    bumpSession: true
-  });
-  const syncedAt = new Date().toISOString();
-  state.dekBytes = candidate.dekBytes;
-  state.vault = normalizeVault(pruneDeleted(candidate.vault));
-  state.appState = {
-    ...(state.appState ?? {}),
-    schemaVersion: state.appState?.schemaVersion ?? 1,
-    mode: "driveSync",
-    deviceId,
-    currentVaultId: state.vault.vaultId,
-    ui: {
-      themeId: currentThemeId()
-    },
-    googleDrive: {
-      ...(state.appState?.googleDrive ?? {}),
-      connected: true,
-      syncStatus: "synced",
-      lastSyncAt: syncedAt,
-      lastLocalChangeAt: "",
-      lastSyncError: "",
-      accountEmail: currentDriveAccountEmail(),
-      lastSyncSummary: buildSyncSummary({ localBeforeSync: null, remoteVault: candidate.vault, mergedVault: state.vault, conflicts: [], syncedAt }),
-      pendingConflicts: [],
-      simulated: isSimulatedDrive()
+  try {
+    const deviceId = state.appState?.deviceId ?? createDeviceId();
+    const syncedAt = new Date().toISOString();
+    const revisionRecoveryId = crypto.randomUUID();
+    const currentVaultId = currentKeyPackage.vaultId;
+    const recoverySource = preservePermanentDeletions(candidate.vault, state.vault);
+    const recoveredVault = normalizeVault(pruneDeleted({
+      ...recoverySource,
+      vaultId: currentVaultId,
+      syncMeta: {
+        ...(candidate.vault.syncMeta ?? {}),
+        revision: Math.max(candidate.vault.syncMeta?.revision ?? 0, state.vault?.syncMeta?.revision ?? 0) + 1,
+        updatedAt: syncedAt,
+        updatedByDeviceId: deviceId,
+        revisionRecoveryId
+      }
+    }));
+    const updatedKeyPackage = {
+      ...currentKeyPackage,
+      securityMeta: {
+        ...currentKeyPackage.securityMeta,
+        sessionEpoch: (currentKeyPackage.securityMeta.sessionEpoch ?? 1) + 1,
+        globalLogoutAt: syncedAt,
+        globalLogoutId: revisionRecoveryId,
+        revisionRecoveryAt: syncedAt,
+        revisionRecoveryId,
+        updatedAt: syncedAt
+      }
+    };
+    try {
+      await createLocalSnapshot("雲端歷史版本救援前");
+    } catch (error) {
+      console.warn("建立救援前本機快照失敗", error);
     }
-  };
-  await setItem("keyPackage", updated.keyPackage);
-  await setItem(
-    "trustedSession",
-    await createTrustedSessionWithDek({
-      vaultId: updated.keyPackage.vaultId,
+    const recoveredEnvelope = await encryptVaultEnvelope(recoveredVault, state.dekBytes);
+    await writeDriveFile(driveFileName("keyPackage"), updatedKeyPackage);
+    const verifiedKeyPackage = await readDriveFile(driveFileName("keyPackage"));
+    if (verifiedKeyPackage?.securityMeta?.revisionRecoveryId !== revisionRecoveryId || verifiedKeyPackage?.securityMeta?.sessionEpoch !== updatedKeyPackage.securityMeta.sessionEpoch) {
+      throw new Error("revision-recovery-key-cloud-verification-failed");
+    }
+    await setItem("keyPackage", verifiedKeyPackage);
+    await setItem("trustedSession", await createTrustedSessionWithDek({
+      vaultId: currentVaultId,
       deviceId,
-      sessionEpoch: updated.keyPackage.securityMeta.sessionEpoch,
-      dekBytes: candidate.dekBytes
-    })
-  );
-  await save();
-  await uploadKeyPackageToDrive();
-  await uploadCurrentVaultToDrive();
-  showRecoveryCodeRoute(updated.recoveryCode, {
-    oldInvalid: true,
-    returnTo: { name: "home" }
-  });
+      sessionEpoch: verifiedKeyPackage.securityMeta.sessionEpoch,
+      dekBytes: state.dekBytes
+    }));
+    await writeDriveFile(driveFileName("vault"), recoveredEnvelope);
+    const verifiedEnvelope = await readDriveFile(driveFileName("vault"));
+    const verifiedVault = normalizeVault(pruneDeleted(await decryptVaultEnvelope(verifiedEnvelope, state.dekBytes)));
+    if (verifiedVault.vaultId !== currentVaultId || verifiedVault.syncMeta?.revisionRecoveryId !== revisionRecoveryId) {
+      throw new Error("revision-recovery-vault-cloud-verification-failed");
+    }
+    state.vault = verifiedVault;
+    state.appState = {
+      ...(state.appState ?? {}),
+      schemaVersion: state.appState?.schemaVersion ?? 1,
+      mode: "driveSync",
+      deviceId,
+      currentVaultId,
+      ui: { themeId: currentThemeId() },
+      security: { ...(state.appState?.security ?? {}), passwordRequiredEpoch: 0 },
+      googleDrive: {
+        ...(state.appState?.googleDrive ?? {}),
+        connected: true,
+        syncStatus: "synced",
+        lastSyncAt: syncedAt,
+        lastLocalChangeAt: "",
+        lastSyncError: "",
+        accountEmail: currentDriveAccountEmail(),
+        lastSyncSummary: buildSyncSummary({ localBeforeSync: null, remoteVault: candidate.vault, mergedVault: verifiedVault, conflicts: [], syncedAt }),
+        pendingConflicts: [],
+        simulated: isSimulatedDrive()
+      }
+    };
+    await save();
+    navigate({ name: "settings" }, { replace: true, force: true });
+    alert("雲端歷史版本救援完成。資料已使用目前金鑰重新加密；目前密碼與救援碼均未變更。其他裝置下次開啟時，需使用目前密碼重新登入。");
+  } catch (error) {
+    console.warn("雲端歷史版本重建失敗", error);
+    alert(driveErrorMessage(error, "雲端歷史版本重建失敗；目前密碼與救援碼沒有變更。請保留本機資料並稍後再試。"));
+  }
 }
 
 async function regenerateRecoveryCode(event) {
@@ -3383,7 +3421,6 @@ function view() {
   if (state.route.name === "dataHealth") return dataHealthView();
   if (state.route.name === "localSnapshots") return localSnapshotsView();
   if (state.route.name === "archived") return archivedPeopleView();
-  if (state.route.name === "syncTroubleshooting") return syncTroubleshootingView();
   if (state.route.name === "driveRevisionRecovery") return driveRevisionRecoveryView();
   if (state.route.name === "installGuide") return installGuideView();
   if (state.route.name === "deleted") return deletedView();
@@ -3677,8 +3714,7 @@ function settingsView() {
       ${gd.lastSyncError ? `<p class="danger-text">${escapeHtml(gd.lastSyncError)}</p>` : ""}
       ${syncSummaryView(gd.lastSyncSummary)}
       ${pendingConflicts.length ? `<button class="action-quiet" data-nav="syncConflicts">處理衝突資料</button>` : ""}
-      <button class="action-quiet" data-nav="syncTroubleshooting">同步疑難排解</button>
-      ${gd.connected ? `<button class="action-quiet" data-action="sync-now" ${isDriveSyncRecentlyStarted(gd) ? "disabled" : ""}>立即同步</button><button class="action-quiet" data-action="drive-logout">登出 Google Drive</button>` : `<button class="action-quiet" data-action="drive-placeholder">${state.appState.mode === "driveSync" ? "重新連結 Google Drive" : "連結 Google Drive"}</button>`}
+      ${gd.connected ? `<button class="action-quiet" data-action="sync-now" ${isDriveSyncRecentlyStarted(gd) ? "disabled" : ""}>立即同步</button><button class="action-quiet" data-nav="driveRevisionRecovery">雲端歷史版本救援</button><button class="action-quiet" data-action="drive-logout">登出 Google Drive</button>` : `<button class="action-quiet" data-action="drive-placeholder">${state.appState.mode === "driveSync" ? "重新連結 Google Drive" : "連結 Google Drive"}</button>`}
     </section>
     ${themeSettingsSection()}
     ${securitySettingsSection()}
@@ -3913,17 +3949,17 @@ function syncSummaryView(summary) {
 }
 
 function driveRevisionRecoveryView() {
-  const draft = state.route.securityDraft ?? { credentialType: "password", secret: "", newPassword: "", confirmPassword: "" };
+  const draft = state.route.securityDraft ?? { credentialType: "password", secret: "" };
   const report = state.route.revisionRecoveryReport;
   const candidate = state.route.revisionRecoveryCandidate;
   return `
     <header class="topbar topbar-centered">
-      <button class="secondary" data-nav="syncTroubleshooting">返回</button>
+      <button class="secondary" data-nav="settings">返回</button>
       <h1 class="section-title">雲端歷史版本救援</h1>
       <span></span>
     </header>
     <section class="panel stack">
-      <p>此工具會嘗試掃描 Google Drive 中莫忘同步檔的歷史版本，找出可用原密碼或救援碼解開的舊版資料。</p>
+      <p>當雲端資料異常導致程式執行錯誤時，此工具會嘗試掃描 Google Drive 中莫忘同步檔的歷史版本，找出可用原密碼或救援碼解開的舊版資料。</p>
       <p class="muted">Google Drive 可能未保留完整舊版，且部分舊版可能無法下載；此工具會盡力嘗試，但不能保證一定能救回。</p>
     </section>
     <form class="panel stack security-form" data-form="drive-revision-recovery">
@@ -3937,14 +3973,6 @@ function driveRevisionRecoveryView() {
       <div class="field security-field">
         <label>原密碼或救援碼</label>
         <input type="password" data-security-draft="secret" value="${escapeAttr(draft.secret ?? "")}" autocomplete="current-password" />
-      </div>
-      <div class="field security-field">
-        <label>新密碼</label>
-        <input type="password" data-security-draft="newPassword" value="${escapeAttr(draft.newPassword ?? "")}" autocomplete="new-password" />
-      </div>
-      <div class="field security-field">
-        <label>再次輸入新密碼</label>
-        <input type="password" data-security-draft="confirmPassword" value="${escapeAttr(draft.confirmPassword ?? "")}" autocomplete="new-password" />
       </div>
       <button type="submit">掃描歷史版本</button>
     </form>
@@ -3967,7 +3995,7 @@ function driveRevisionRecoveryReportView(report, candidate) {
       }
       ${
         candidate
-          ? `<button type="button" data-action="apply-drive-revision-recovery">使用找到的版本重建雲端資料</button>`
+          ? `<button type="button" data-action="apply-drive-revision-recovery" data-pending-label="重建中…">使用找到的版本重建雲端資料</button>`
           : ""
       }
       ${
@@ -4086,58 +4114,6 @@ function localSnapshotCard(snapshot) {
       </div>
     </div>
   `;
-}
-
-function syncTroubleshootingView() {
-  const gd = state.appState.googleDrive;
-  const authStatus = driveAuthStatus();
-  const issues = syncTroubleshootingItems(gd, authStatus);
-  return `
-    <header class="topbar topbar-centered">
-      <button class="secondary" data-nav="settings">返回</button>
-      <h1 class="section-title">同步疑難排解</h1>
-      <span></span>
-    </header>
-    <section class="panel stack">
-      <p>目前狀態：${syncStatusLabel(gd)}</p>
-      ${issues.map(troubleshootingItem).join("")}
-      <div class="actions">
-        <button type="button" class="action-quiet" data-nav="driveRevisionRecovery">雲端歷史版本救援</button>
-      </div>
-    </section>
-  `;
-}
-
-function troubleshootingItem(item) {
-  return `
-    <div class="inline-item troubleshoot-item ${item.level}">
-      <strong>${escapeHtml(item.title)}</strong>
-      <span class="muted">${escapeHtml(item.detail)}</span>
-    </div>
-  `;
-}
-
-function syncTroubleshootingItems(gd, authStatus) {
-  const items = [];
-  if (!gd.connected) {
-    items.push({ level: "warn", title: "尚未啟用 Google Drive 同步", detail: "可回到設定頁按「連結 Google Drive」啟用同步。" });
-  }
-  if (gd.connected && !authStatus.hasAccessToken) {
-    items.push({ level: "warn", title: "需要重新確認 Google 授權", detail: "這是正常情況；為避免打擾使用者，App 只會在你按「立即同步」時開啟 Google 授權。" });
-  }
-  if (gd.syncStatus === "needsSync") {
-    items.push({ level: "warn", title: "有本機變更尚未同步", detail: "資料已保存在本機；按「立即同步」後會與 Google Drive 合併並寫回雲端。" });
-  }
-  if (gd.syncStatus === "needsResolution") {
-    items.push({ level: "error", title: "有資料衝突需要處理", detail: "請回設定頁按「處理衝突資料」，逐筆選擇保留本機或雲端內容。" });
-  }
-  if (gd.lastSyncError) {
-    items.push({ level: "error", title: "最近同步失敗", detail: gd.lastSyncError });
-  }
-  if (!items.length) {
-    items.push({ level: "ok", title: "目前沒有明顯同步問題", detail: "若仍覺得資料不一致，可回到設定頁手動執行「立即同步」一次。" });
-  }
-  return items;
 }
 
 function dataHealthView() {
@@ -5426,6 +5402,7 @@ function bindSecurityForms() {
     "drive-merge-unlock": "同步中…",
     "drive-recovery-reset": "重設中…",
     "recovery-v3-complete": "重設中…",
+    "drive-revision-recovery": "掃描中…",
     "change-password": "更改中…",
     "forgot-password": "重設中…",
     "regenerate-recovery": "產生中…",

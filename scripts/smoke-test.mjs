@@ -1,5 +1,5 @@
 import { APP_CONFIG, driveFileName, driveProviderLabel, isGoogleDriveConfigured, isMockDrive } from "../src/config.js";
-import { mergeVaults } from "../src/sync.js";
+import { mergeVaults, preservePermanentDeletions } from "../src/sync.js";
 import { buildVaultXlsx } from "../src/xlsx.js";
 import { createKeyPackage, createLocalStorageKey, createRecoveryTransferKeyPair, createTrustedSessionWithDek, decryptDekFromRecoveryTransfer, decryptLocalEnvelope, encryptDekForRecoveryTransfer, encryptLocalEnvelope, restoreDekFromTrustedSession, unwrapDek, verifyRecoveryAuthorizationVerifier } from "../src/crypto.js";
 
@@ -8,6 +8,7 @@ const tests = [
   ["sync merge combines duplicate interest names and detects conflicts", testSyncMerge],
   ["sync merge supports legacy customValues object", testLegacyCustomValues],
   ["permanently deleted people cannot return through sync", testPermanentPersonDeletion],
+  ["historical recovery preserves permanent deletions", testHistoricalRecoveryPermanentDeletion],
   ["xlsx export produces an Excel workbook blob", testXlsxExport],
   ["local snapshot encryption supports large payloads", testLargeLocalSnapshotEnvelope],
   ["Recovery v3 code wrapper and sealed device transfer restore the same DEK", testRecoveryV3],
@@ -130,6 +131,29 @@ function testPermanentPersonDeletion() {
     assert(!merged.people.some((item) => item.id === deletedPerson.id), "purged person should not return from sync");
     assert(!merged.deletedItems.some((item) => item.id === deletedPerson.id), "purged recently-deleted item should not return from sync");
     assert(merged.tombstones.some((item) => item.id === deletedPerson.id && item.purgedAt), "permanent tombstone should survive sync");
+  });
+}
+
+function testHistoricalRecoveryPermanentDeletion() {
+  const permanentTombstones = [
+    { id: "person-purged", type: "person", purgedAt: "2026-09-02T00:00:00.000Z" },
+    { id: "field-purged", type: "customField", purgedAt: "2026-09-02T00:00:00.000Z" }
+  ];
+  const currentVault = vault({ tombstones: permanentTombstones, revision: 8 });
+  const historicalVault = vault({
+    people: [person({ id: "person-purged", name: "不應復活" }), person({ id: "person-kept", name: "應保留" })],
+    customFieldDefs: [{ id: "field-purged", name: "已永久刪除欄位", type: "text" }],
+    deletedItems: [{ id: "person-purged", type: "person", restoreUntil: "2099-01-01T00:00:00.000Z" }],
+    revision: 2
+  });
+
+  const recovered = preservePermanentDeletions(historicalVault, currentVault);
+  assert(!recovered.people.some((item) => item.id === "person-purged"), "historical recovery must not revive a purged person");
+  assert(recovered.people.some((item) => item.id === "person-kept"), "historical recovery should retain non-purged people");
+  assert(!recovered.customFieldDefs.some((item) => item.id === "field-purged"), "historical recovery must not revive a purged custom field");
+  assert(!recovered.deletedItems.some((item) => item.id === "person-purged"), "historical recovery must not revive a purged recently-deleted item");
+  permanentTombstones.forEach((tombstone) => {
+    assert(recovered.tombstones.some((item) => item.type === tombstone.type && item.id === tombstone.id && item.purgedAt), "permanent tombstone should survive historical recovery");
   });
 }
 

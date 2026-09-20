@@ -172,6 +172,15 @@
 - [x] 8 項核心 smoke tests、41 項 Worker tests、Worker 語法檢查、Pages 與 Capacitor web build 全部通過；正式 Worker 已部署版本 `a9c6506a-327d-4200-8691-8b4bc91c3715`。
 - [x] PWA cache 更新為 v183；原生 Android AuthorizationClient、短效 access session 與長效 renewal session 設計不變。
 
+### v184 雲端歷史版本救援整理（2026-09-21）
+
+- [x] 將「雲端歷史版本救援」移至設定頁 Google Drive 同步區塊的「立即同步」下方，移除不再提供獨立操作價值的「同步疑難排解」頁面。
+- [x] 救援頁補充適用情境，保留原密碼／救援碼作為歷史版本解密憑證，移除非必要的新密碼與再次輸入欄位。
+- [x] 救出的歷史資料改用目前資料金鑰重新加密，不變更目前密碼或救援碼；提高安全世代讓其他裝置以目前密碼重新登入，避免異常資料回灌。
+- [x] 救援前建立本機快照，雲端 key package 與 vault 寫入後均讀回驗證，並保留永久刪除 tombstone，避免歷史版本復活已永久刪除資料。
+- [x] 9 項核心 smoke tests、41 項 Worker tests、Worker 語法檢查、Pages 與 Capacitor web build 全部通過；PWA cache 更新為 v184。
+- [x] v184 release APK SHA-256：`4702F4B2854257A0DEF6DED6455FCA7BADE35A3D8FA81503D01F14100499A73A`；v184 release AAB SHA-256：`50052AE5203A35AAFCE4AE5894DF03902A791E949214CFB4F7F460C93C3AB49B`；release certificate SHA-256 維持 `6D4D32DBC1491F0DE8F41569A92A9B6EE1B3CF680635AD8CBC875A6903F2596E`。
+
 ## 第二階段：正式隱私政策與服務條款
 
 - [x] 更新 `privacy.html`：
