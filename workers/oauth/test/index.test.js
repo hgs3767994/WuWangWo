@@ -109,7 +109,7 @@ test("explicit PWA relinking forces Google account selection", async () => {
   assert.equal(new URL(response.headers.get("location")).searchParams.get("prompt"), "select_account");
 });
 
-test("web OAuth handoff creates a short-lived HttpOnly Worker session cookie", async () => {
+test("web OAuth handoff creates a renewable HttpOnly Worker session cookie", async () => {
   const database = {
     prepare(query) {
       if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
@@ -290,6 +290,57 @@ test("session status rejects a session removed by account deletion", async () =>
   assert.equal(response.status, 401);
   assert.deepEqual(await response.json(), { error: "session-expired" });
   assert.match(response.headers.get("set-cookie"), /Max-Age=0$/);
+});
+
+test("session refresh rotates a Bearer device session and returns the replacement only to its native client", async () => {
+  const statements = [];
+  const database = {
+    prepare(query) {
+      if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      if (query.startsWith("SELECT a.google_subject")) return { bind: () => ({ first: async () => ({ google_subject: "subject-1", session_created_at: "2026-09-01T00:00:00.000Z" }) }) };
+      return { bind: (...values) => ({ query, values }) };
+    },
+    async batch(batchStatements) {
+      statements.push(...batchStatements);
+      return batchStatements.map(() => ({ success: true, meta: { changes: 1 } }));
+    }
+  };
+  const response = await worker.fetch(new Request("https://example.test/v1/oauth/session/refresh", {
+    method: "POST",
+    headers: { Origin: "https://example.test", Authorization: "Bearer current-device-session" }
+  }), configuredEnv(database, "encryption-key"));
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.active, true);
+  assert.equal(typeof payload.sessionToken, "string");
+  assert.match(response.headers.get("set-cookie"), /^forget_me_not_worker_session=.*Max-Age=/);
+  assert.match(statements[0].query, /NULL, created_at FROM oauth_sessions/);
+  assert(!JSON.stringify(statements).includes("current-device-session"));
+});
+
+test("session refresh rotates a PWA cookie without exposing its replacement token to JavaScript", async () => {
+  const database = {
+    prepare(query) {
+      if (query === "SELECT 1 AS ready") return { first: async () => ({ ready: 1 }) };
+      if (query.includes("sqlite_master")) return { all: async () => ({ results: [{ name: "oauth_accounts" }, { name: "oauth_handoffs" }, { name: "oauth_sessions" }] }) };
+      if (query.startsWith("SELECT a.google_subject")) return { bind: () => ({ first: async () => ({ google_subject: "subject-1" }) }) };
+      return { bind: (...values) => ({ query, values }) };
+    },
+    async batch(batchStatements) {
+      return batchStatements.map(() => ({ success: true, meta: { changes: 1 } }));
+    }
+  };
+  const response = await worker.fetch(new Request("https://example.test/v1/oauth/session/refresh", {
+    method: "POST",
+    headers: { Origin: "https://example.test", Cookie: "forget_me_not_worker_session=current-cookie-session" }
+  }), configuredEnv(database, "encryption-key"));
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.active, true);
+  assert.equal(typeof payload.expiresAt, "string");
+  assert.equal(payload.sessionToken, undefined);
+  assert.match(response.headers.get("set-cookie"), /^forget_me_not_worker_session=.*HttpOnly/);
 });
 
 test("account deletion requires a fresh session, always deletes Drive files, revokes Google, and atomically clears D1", async () => {

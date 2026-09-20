@@ -2,7 +2,7 @@ import { authorizationUrl, exchangeCode, exchangeServerAuthCode, googleProfile, 
 import { createOAuthState } from "./oauth-state.js";
 import { verifyOAuthState } from "./oauth-state.js";
 import { decryptTokenEnvelope, encryptTokenEnvelope } from "./token-envelope.js";
-import { accountBySubject, consumeHandoff, createHandoff, createSession, deleteAccountData, revokeSession, saveAccount, sessionAccount } from "./oauth-store.js";
+import { accountBySubject, consumeHandoff, createHandoff, createSession, deleteAccountData, revokeSession, rotateSession, saveAccount, sessionAccount } from "./oauth-store.js";
 import { executeDriveOperation } from "./drive-proxy.js";
 import { approveRecoveryRequest, completeRecoveryRequest, createRecoveryRequest, listRecoveryRequests, recordFailedVerification, recoveryRequest, recoveryVerificationRecord } from "./recovery-store.js";
 
@@ -155,6 +155,32 @@ export default {
       return json({ active: true }, 200, corsHeaders(origin));
     }
 
+    if (request.method === "POST" && url.pathname === "/v1/oauth/session/refresh") {
+      const origin = request.headers.get("Origin");
+      if (!isAllowedOrigin(origin, env.APP_ORIGINS)) return json({ error: "origin-not-allowed" }, 403);
+      if (!hasRequiredConfiguration(env)) return json({ error: "oauth-not-configured" }, 503, corsHeaders(origin));
+      const storage = await databaseStatus(env.OAUTH_DB);
+      if (!storage.schemaReady) return json({ error: "storage-not-ready" }, 503, corsHeaders(origin));
+      const token = requestSessionToken(request);
+      if (!token) return sessionError("session-required", origin);
+      const now = new Date().toISOString();
+      const account = await sessionAccount(env.OAUTH_DB, { token, now });
+      if (!account) return sessionError("session-expired", origin);
+      try {
+        const nextToken = crypto.randomUUID();
+        const session = await rotateSession(env.OAUTH_DB, { token, nextToken, now });
+        if (!session) return sessionError("session-expired", origin);
+        const usesBearer = Boolean(bearerToken(request.headers.get("Authorization")));
+        return json(
+          { active: true, expiresAt: session.expiresAt, ...(usesBearer ? { sessionToken: nextToken } : {}) },
+          200,
+          { ...corsHeaders(origin), "set-cookie": workerSessionCookie(nextToken, session.expiresAt) }
+        );
+      } catch {
+        return json({ error: "session-refresh-failed" }, 500, corsHeaders(origin));
+      }
+    }
+
     if (request.method === "POST" && url.pathname === "/v1/account/delete") {
       const origin = request.headers.get("Origin");
       if (!isAllowedOrigin(origin, env.APP_ORIGINS)) return json({ error: "origin-not-allowed" }, 403);
@@ -273,7 +299,7 @@ export default {
         oauthReady: hasRequiredConfiguration(env),
         missing: missingConfiguration(env),
         storageReady: storage.ready,
-        message: "OAuth、短效 session 與受限 Drive proxy 只會在 Google 設定、Worker secrets 與 D1 schema 都完整時啟用。"
+        message: "OAuth、可撤銷裝置 session 與受限 Drive proxy 只會在 Google 設定、Worker secrets 與 D1 schema 都完整時啟用。"
       });
     }
 

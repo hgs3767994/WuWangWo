@@ -1,5 +1,5 @@
 import { APP_CONFIG, isGoogleDriveConfigured } from "./config.js";
-import { clearNativeGoogleOAuthSession, completeNativeGoogleOAuthLaunch, connectNativeGoogleDrive, isNativeOAuthRuntime, restoreNativeGoogleOAuthSession } from "./native-oauth.js";
+import { clearNativeGoogleOAuthSession, completeNativeGoogleOAuthLaunch, connectNativeGoogleDrive, isNativeOAuthRuntime, persistNativeGoogleOAuthSession, restoreNativeGoogleOAuthSession } from "./native-oauth.js";
 
 const SESSION_STORAGE_KEY = "forget-me-not-oauth-session";
 const PERSISTENT_SESSION_MARKER_KEY = "forget-me-not-oauth-session-marker-v1";
@@ -85,8 +85,15 @@ export async function restoreGoogleDriveSession() {
   let existing = readSession();
   if (!existing && isNativeOAuthRuntime()) existing = await restoreNativeGoogleOAuthSession();
   if (!existing || Date.parse(existing.expiresAt) <= Date.now() + 30_000) return null;
-  await apiFetch("/v1/oauth/session/status", {}, existing.sessionToken ?? "");
-  return existing;
+  const refreshed = await apiFetch("/v1/oauth/session/refresh", {}, existing.sessionToken ?? "");
+  if (!refreshed?.expiresAt || (!refreshed.sessionToken && !existing.cookieSession)) throw new Error("session-refresh-failed");
+  const nextSession = {
+    ...(refreshed.sessionToken ? { sessionToken: refreshed.sessionToken } : { cookieSession: true }),
+    expiresAt: refreshed.expiresAt,
+    accountEmail: existing.accountEmail ?? ""
+  };
+  await storeClientSession(nextSession);
+  return nextSession;
 }
 
 export function googleDriveReadiness() {
@@ -219,7 +226,10 @@ function readSession() {
 
 async function storeClientSession(session) {
   sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-  if (isNativeOAuthRuntime()) return;
+  if (isNativeOAuthRuntime()) {
+    await persistNativeGoogleOAuthSession(session);
+    return;
+  }
   localStorage.setItem(PERSISTENT_SESSION_MARKER_KEY, JSON.stringify({
     cookieSession: true,
     expiresAt: session.expiresAt,

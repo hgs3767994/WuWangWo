@@ -1,5 +1,5 @@
 -- Run once in Cloudflare D1 Console after the initial schema.sql import.
--- This migration introduces short-lived opaque sessions for the browser/native client.
+-- This migration introduces revocable opaque device sessions for browser/native clients.
 CREATE TABLE IF NOT EXISTS oauth_sessions (
   session_hash TEXT PRIMARY KEY,
   google_subject TEXT NOT NULL,

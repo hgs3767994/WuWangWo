@@ -277,7 +277,7 @@ await check("native Android OAuth uses Google AuthorizationClient and a one-time
   ["AndroidKeyStore", "AES/GCM/NoPadding", "OAuthSession"].forEach((text) => {
     if (!oauthSessionPluginSource.includes(text)) throw new Error(`native OAuth session storage is missing ${text}.`);
   });
-  if (!nativeOAuthSource.includes("restoreNativeGoogleOAuthSession")) throw new Error("native OAuth adapter must restore the short-lived Worker session from Android Keystore.");
+  if (!nativeOAuthSource.includes("restoreNativeGoogleOAuthSession")) throw new Error("native OAuth adapter must restore the renewable Worker device session from Android Keystore.");
   if (!driveGoogleSource.includes('credentials: "include"') || !driveGoogleSource.includes("PERSISTENT_SESSION_MARKER_KEY")) {
     throw new Error("PWA OAuth must reuse the HttpOnly Worker session without persisting its bearer token.");
   }
@@ -290,8 +290,8 @@ await check("native Android OAuth uses Google AuthorizationClient and a one-time
   ["connectDrive({ interactive: false })", "disconnectedDriveState(previousGoogleDrive)", "重新連結 Google Drive"].forEach((text) => {
     if (!appSource.includes(text)) throw new Error(`expired Drive sessions must require explicit relinking: ${text}`);
   });
-  ["/v1/oauth/session/status", 'reauth: reauthorization'].forEach((text) => {
-    if (!driveGoogleSource.includes(text)) throw new Error(`PWA OAuth session validation is missing ${text}.`);
+  ["/v1/oauth/session/refresh", "persistNativeGoogleOAuthSession", 'reauth: reauthorization'].forEach((text) => {
+    if (!driveGoogleSource.includes(text)) throw new Error(`renewable device-session support is missing ${text}.`);
   });
   if (!driveGoogleSource.includes("if (popupWindow && !popupWindow.closed) popupWindow.close()")) {
     throw new Error("native OAuth must close any stale reserved web popup.");
@@ -427,7 +427,7 @@ await check("account deletion is available in-app and on a public self-service p
   ["name: \"vault.enc\"", "name: \"key-package.enc\"", "driveDataDeleted: true"].forEach((text) => {
     if (!workerSource.includes(text)) throw new Error(`Worker must always delete account-owned Drive data: ${text}`);
   });
-  ["/v1/oauth/session/status", 'reauthorization === "account-selection"'].forEach((text) => {
+  ["/v1/oauth/session/status", "/v1/oauth/session/refresh", "rotateSession", 'reauthorization === "account-selection"'].forEach((text) => {
     if (!workerSource.includes(text)) throw new Error(`Worker is missing cross-client session invalidation support: ${text}`);
   });
   if (!storeSource.includes("database.batch(statements)")) throw new Error("D1 account deletion must use an atomic batch");

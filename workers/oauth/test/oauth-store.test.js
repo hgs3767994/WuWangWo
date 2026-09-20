@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { consumeHandoff, createSession, deleteAccountData, revokeSession, saveAccount } from "../src/oauth-store.js";
+import { consumeHandoff, createSession, deleteAccountData, revokeSession, rotateSession, saveAccount } from "../src/oauth-store.js";
 test("account storage binds encrypted fields instead of token plaintext", async () => {
   let values; const db = { prepare: () => ({ bind: (...args) => (values = args, { run: async () => {} }) }) };
   await saveAccount(db, { subject: "sub", envelope: { ciphertext: "cipher", iv: "iv" }, scopes: "scope", expiresAt: "2030", refreshTokenPresent: true, now: "2026" });
@@ -24,8 +24,31 @@ test("handoff consumption is single-use and sessions are stored hashed", async (
   };
   assert.equal(await consumeHandoff(database, { code: "handoff-code", now: "2026-09-04T00:00:00.000Z" }), "subject-1");
   const session = await createSession(database, { token: "session-token", subject: "subject-1", now: "2026-09-04T00:00:00.000Z" });
-  assert.equal(session.expiresAt, "2026-09-04T01:00:00.000Z");
+  assert.equal(session.expiresAt, "2026-10-04T00:00:00.000Z");
   assert(calls.some(({ query, values }) => query.includes("oauth_sessions") && !values.includes("session-token")));
+});
+
+test("session rotation extends the device session without resetting its original authorization time", async () => {
+  const statements = [];
+  const database = {
+    prepare(query) {
+      return { bind: (...values) => ({ query, values }) };
+    },
+    async batch(batchStatements) {
+      statements.push(...batchStatements);
+      return batchStatements.map(() => ({ success: true, meta: { changes: 1 } }));
+    }
+  };
+  const session = await rotateSession(database, {
+    token: "old-session-token",
+    nextToken: "new-session-token",
+    now: "2026-09-20T00:00:00.000Z"
+  });
+  assert.equal(session.expiresAt, "2026-10-20T00:00:00.000Z");
+  assert.match(statements[0].query, /SELECT \?, google_subject, \?, NULL, created_at FROM oauth_sessions/);
+  assert.match(statements[1].query, /UPDATE oauth_sessions SET revoked_at/);
+  assert(!JSON.stringify(statements).includes("old-session-token"));
+  assert(!JSON.stringify(statements).includes("new-session-token"));
 });
 
 test("session revocation stores only a token hash", async () => {

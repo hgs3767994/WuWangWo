@@ -1,3 +1,5 @@
+const DEVICE_SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
+
 export async function saveAccount(database, { subject, envelope, scopes, expiresAt, refreshTokenPresent, now }) {
   await database.prepare(`INSERT INTO oauth_accounts (google_subject, token_ciphertext, token_iv, scopes, token_expires_at, refresh_token_present, created_at, updated_at, revoked_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
@@ -30,11 +32,29 @@ export async function consumeHandoff(database, { code, now }) {
 
 export async function createSession(database, { token, subject, now }) {
   const hash = await sha256(token);
-  const expiresAt = new Date(new Date(now).getTime() + 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(new Date(now).getTime() + DEVICE_SESSION_LIFETIME_MS).toISOString();
   await database
     .prepare("INSERT INTO oauth_sessions (session_hash, google_subject, expires_at, revoked_at, created_at) VALUES (?, ?, ?, NULL, ?)")
     .bind(hash, subject, expiresAt, now)
     .run();
+  return { expiresAt };
+}
+
+export async function rotateSession(database, { token, nextToken, now }) {
+  const hash = await sha256(token);
+  const nextHash = await sha256(nextToken);
+  const expiresAt = new Date(new Date(now).getTime() + DEVICE_SESSION_LIFETIME_MS).toISOString();
+  const statements = [
+    database.prepare(`INSERT INTO oauth_sessions (session_hash, google_subject, expires_at, revoked_at, created_at)
+      SELECT ?, google_subject, ?, NULL, created_at FROM oauth_sessions
+      WHERE session_hash = ? AND expires_at > ? AND revoked_at IS NULL`).bind(nextHash, expiresAt, hash, now),
+    database.prepare("UPDATE oauth_sessions SET revoked_at = ? WHERE session_hash = ? AND revoked_at IS NULL").bind(now, hash)
+  ];
+  const results = await database.batch(statements);
+  if (!Array.isArray(results) || results.length !== statements.length || results.some((result) => result?.success === false)) {
+    throw new Error("session-rotation-failed");
+  }
+  if (results[0]?.meta?.changes === 0) return null;
   return { expiresAt };
 }
 

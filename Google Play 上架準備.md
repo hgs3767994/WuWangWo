@@ -116,6 +116,14 @@
 - [x] 重新開啟 v174 PWA 後顯示「尚未啟用」與「重新連結 Google Drive」，保留 PWA 本機資料但不提供「立即同步」；再次查核 D1 四表仍全為 0，確認未自動重建帳號。
 - [x] v174 release APK SHA-256：`0CB0CAF2F506F287F1A56F4D4A70220FDAB032BF0B23F99290333180A64D46E1`；正式 release certificate SHA-256 維持不變。
 
+### v177 Worker session 自動續期修正（2026-09-20）
+
+- [x] 重現 PWA 與原生 App 重新連結約一小時後同時顯示「Google Drive 連線已失效」；根因為 60 分鐘 Worker session 到期被誤當成 Google 授權失效。
+- [x] 裝置 session 改為最長 30 天，App 正常啟動時由 Worker 產生替代憑證並原子撤銷舊憑證；PWA 替代憑證只寫入 HttpOnly Cookie，原生 App 替代憑證保存於安全儲存。
+- [x] session 輪替保留原始 Google 授權時間，不會繞過永久刪除帳號前五分鐘內必須重新驗證的安全限制；帳號刪除仍會清除所有裝置 sessions。
+- [x] 靜態檢查、8 項核心 smoke tests與 39 項 Worker tests 全部通過；正式 Worker 已部署版本 `4d3a86c0-63ac-45c9-83af-dbb7d6b11667`。
+- [x] v177 release APK SHA-256：`3951807318086BF5569D00FC6B17FB1AB7913110234C09391AFFD767663D43C0`；v177 release AAB SHA-256：`2756727C977F13CDD215E18984ED3EA078316F1C78331BBD6D84BE6A2712B7C9`。
+
 ## 第二階段：正式隱私政策與服務條款
 
 - [x] 更新 `privacy.html`：
