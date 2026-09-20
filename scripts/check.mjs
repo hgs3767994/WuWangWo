@@ -379,6 +379,19 @@ await check("installed and mobile PWAs resume Google OAuth across a document res
   });
 });
 
+await check("PWA OAuth return removes Google pages from Settings Home navigation", async () => {
+  const appSource = await readFile("src/app.js", "utf8");
+  [
+    "pendingOAuthSettingsBackBarrier",
+    "completePendingOAuthSettingsBackBarrier",
+    "installOAuthSettingsBackBarrier",
+    'oauthHandoffCompleted && oauthReturnRoute?.name === "settings"',
+    "completePendingOAuthSettingsBackBarrier();"
+  ].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing post-unlock OAuth history isolation: ${text}`);
+  });
+});
+
 await check("public and Android release versions match", () => {
   if (!appVersion || packageConfig.version !== appVersion || androidVersionName !== appVersion) {
     throw new Error("package version, APP_CONFIG.appVersion, and Android versionName must match.");

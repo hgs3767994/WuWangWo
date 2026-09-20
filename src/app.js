@@ -139,6 +139,7 @@ let state = {
   lastRemoteSecurityCheckAt: 0,
   remoteSecurityCheckRunning: false,
   suspendedRouteAfterIdleLock: null,
+  pendingOAuthSettingsBackBarrier: false,
   installPromptEvent: null,
   installDismissed: localStorage.getItem("forget-me-not-install-dismissed") === "true",
   isInstalled: isPwaInstalled()
@@ -303,6 +304,7 @@ async function boot() {
   const localSnapshots = await loadLocalSnapshots();
   state = { ...state, localSnapshots };
   if (oauthReturnRoute) state.suspendedRouteAfterIdleLock = oauthReturnRoute;
+  if (oauthHandoffCompleted && oauthReturnRoute?.name === "settings") state.pendingOAuthSettingsBackBarrier = true;
   if (!appState || (appState.mode === "localOnly" && !storedKeyPackage) || (!vault && !(appState.mode === "localOnly" && storedKeyPackage))) {
     state = { ...state, route: { name: "welcome" } };
   } else if ((appState.mode === "driveSync" || appState.mode === "localOnly") && storedKeyPackage && !trustedSession) {
@@ -412,7 +414,7 @@ async function boot() {
   }
   render();
   registerHistoryNavigation();
-  if (oauthHandoffCompleted && state.route.name === "settings") installOAuthSettingsBackBarrier();
+  completePendingOAuthSettingsBackBarrier();
   registerServiceWorker();
   registerInstallExperience();
   if (oauthHandoffError) alert(driveErrorMessage(oauthHandoffError, "Google Drive OAuth 回跳失敗，請再試一次。"));
@@ -470,6 +472,12 @@ function installOAuthSettingsBackBarrier() {
   // Back from Settings therefore reaches Home without navigating to Google.
   history.replaceState({ appRoute: true, route: historyRouteSnapshot({ name: "home" }) }, "");
   history.pushState({ appRoute: true, route: historyRouteSnapshot(state.route) }, "");
+}
+
+function completePendingOAuthSettingsBackBarrier() {
+  if (!state.pendingOAuthSettingsBackBarrier || state.route?.name !== "settings") return;
+  state.pendingOAuthSettingsBackBarrier = false;
+  installOAuthSettingsBackBarrier();
 }
 
 function normalizeLoadedAppState(appState) {
@@ -722,7 +730,9 @@ function captureRouteForIdleUnlock() {
 async function resumeRouteAfterIdleUnlock() {
   const returnRoute = state.suspendedRouteAfterIdleLock;
   state.suspendedRouteAfterIdleLock = null;
-  return navigate(returnRoute ?? { name: "home" }, { replace: true, force: true });
+  const result = await navigate(returnRoute ?? { name: "home" }, { replace: true, force: true });
+  completePendingOAuthSettingsBackBarrier();
+  return result;
 }
 
 async function checkTrustedSessionStillValid(appState, trustedSession, alreadyLoadedKeyPackage = null) {
