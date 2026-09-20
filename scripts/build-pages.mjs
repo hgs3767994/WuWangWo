@@ -13,6 +13,7 @@ const entries = [
   "privacy.html",
   "terms.html",
   "data-deletion.html",
+  "oauth-return.html",
   "manifest.webmanifest",
   "service-worker.js",
   "assets",

@@ -7,6 +7,7 @@ const requiredFiles = [
   "privacy.html",
   "terms.html",
   "data-deletion.html",
+  "oauth-return.html",
   "manifest.webmanifest",
   "package.json",
   "service-worker.js",
@@ -25,6 +26,7 @@ const requiredFiles = [
   "src/native-file-export.js",
   "src/native-trusted-session.js",
   "src/native-oauth.js",
+  "src/oauth-return.js",
   "src/db.js",
   "src/drive.js",
   "src/drive-google.js",
@@ -361,21 +363,41 @@ await check("public legal pages exist for OAuth production readiness", async () 
   }
 });
 
-await check("installed and mobile PWAs resume Google OAuth across a document restart", async () => {
+await check("mobile PWA OAuth fallback completes outside the main history", async () => {
   const appSource = await readFile("src/app.js", "utf8");
   const driveSource = await readFile("src/drive-google.js", "utf8");
+  const returnPage = await readFile("oauth-return.html", "utf8");
+  const returnSource = await readFile("src/oauth-return.js", "utf8");
   [
-    "shouldUseFullPageOAuthRedirect",
-    "fullPageOAuth",
-    'oauthHandoffSession?.oauthResume === "drive-connect"',
+    "registerOAuthPopupFallbackListener",
+    "consumeOAuthPopupCompletion",
+    "OAUTH_POPUP_COMPLETION_KEY",
+    "popupDriveConnectionCompleted",
     "if (oauthReturnRoute) state.suspendedRouteAfterIdleLock = oauthReturnRoute",
-    "OAUTH_RETURN_ROUTE_PERSISTENT_KEY",
-    "OAUTH_RETURN_ROUTE_LIFETIME_MS"
+    "reloadScheduled"
   ].forEach((text) => {
-    if (!appSource.includes(text)) throw new Error(`src/app.js is missing restart-safe PWA OAuth support: ${text}`);
+    if (!appSource.includes(text)) throw new Error(`src/app.js is missing isolated popup fallback support: ${text}`);
   });
-  ["oauth_resume", "drive-connect", "oauth_error"].forEach((text) => {
-    if (!driveSource.includes(text)) throw new Error(`src/drive-google.js is missing restart-safe PWA OAuth support: ${text}`);
+  ["oauth-return.html", "oauth_purpose", "drive-connect", "connectGoogleDriveInPopup"].forEach((text) => {
+    if (!driveSource.includes(text)) throw new Error(`src/drive-google.js is missing isolated popup fallback support: ${text}`);
+  });
+  if (!driveSource.includes("forget-me-not-oauth-handoff-accepted")) throw new Error("PWA opener must acknowledge a delivered OAuth handoff.");
+  ["runtime-config.js", "oauth-return.js", "oauth-return-status"].forEach((text) => {
+    if (!returnPage.includes(text)) throw new Error(`oauth-return.html is missing ${text}`);
+  });
+  [
+    "forget-me-not-oauth-session-marker-v1",
+    "forget-me-not-oauth-popup-completion",
+    "BroadcastChannel",
+    'window.setTimeout(() => window.close()',
+    'credentials: "include"',
+    'Authorization: `Bearer ${sessionToken}`'
+  ].forEach((text) => {
+    if (!returnSource.includes(text)) throw new Error(`src/oauth-return.js is missing secure popup fallback support: ${text}`);
+  });
+  const workerSource = await readFile("workers/oauth/src/index.js", "utf8");
+  ["forget-me-not-oauth-handoff-accepted", "if(!accepted)window.location.replace(fallback)"].forEach((text) => {
+    if (!workerSource.includes(text)) throw new Error(`OAuth popup callback is missing acknowledged fallback delivery: ${text}`);
   });
 });
 
@@ -475,7 +497,7 @@ await check("GitHub Pages workflow builds deployable dist", () => {
   ["actions/deploy-pages", "npm run check", "npm run test", "npm run build:pages", "GOOGLE_OAUTH_CLIENT_ID"].forEach((text) => {
     if (!workflowSource.includes(text)) throw new Error(`GitHub Pages workflow is missing ${text}.`);
   });
-  ["dist", "runtime-config.js", ".nojekyll", "GOOGLE_OAUTH_CLIENT_ID"].forEach((text) => {
+  ["dist", "runtime-config.js", ".nojekyll", "GOOGLE_OAUTH_CLIENT_ID", "oauth-return.html"].forEach((text) => {
     if (!buildPagesSource.includes(text)) throw new Error(`scripts/build-pages.mjs is missing ${text}.`);
   });
 });

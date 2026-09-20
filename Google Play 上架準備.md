@@ -162,6 +162,16 @@
 - [x] OAuth 成功回跳時先保存待處理標記，待主密碼解鎖且真正返回設定頁後才建立 Home／Settings history barrier。
 - [x] PWA cache 更新為 v182；不變更 OAuth 憑證、同步或本機資料。
 
+### v183 PWA OAuth 獨立視窗完成頁（2026-09-21）
+
+- [x] 實機確認 history barrier 只能保護設定頁到首頁的第一次返回；瀏覽器規格不允許 PWA 刪除或攔截更早的跨網域 Google 歷史紀錄。
+- [x] 手機 PWA 的 Google OAuth 改回使用者手勢開啟的獨立視窗，主 PWA 不再導向 Google，因此主視窗歷史不含帳號選擇器。
+- [x] 新增同源 `oauth-return.html` 完成頁；Android 若回收 popup opener，完成頁仍可交換一次性 handoff、保存不含 bearer token 的 PWA session marker、通知主 PWA 並自行關閉。
+- [x] 主 PWA 存活時透過 `BroadcastChannel`／storage event 重新載入；被系統回收時則於下次啟動消耗最長 10 分鐘的完成標記，仍要求主密碼解鎖後才返回設定頁。
+- [x] popup handoff 加入接收確認；主 PWA 未確認時，Worker 會在 1.2 秒後改由同源完成頁接手，避免 opener 仍存在但文件已重載時遺失 handoff。
+- [x] 8 項核心 smoke tests、41 項 Worker tests、Worker 語法檢查、Pages 與 Capacitor web build 全部通過；正式 Worker 已部署版本 `a9c6506a-327d-4200-8691-8b4bc91c3715`。
+- [x] PWA cache 更新為 v183；原生 Android AuthorizationClient、短效 access session 與長效 renewal session 設計不變。
+
 ## 第二階段：正式隱私政策與服務條款
 
 - [x] 更新 `privacy.html`：

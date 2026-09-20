@@ -48,15 +48,21 @@ export async function connectGoogleDrive({ interactive = true, popupWindow = nul
   const returnTo = new URL(location.href);
   returnTo.searchParams.delete("oauth_handoff");
   const reauthorization = forceReauthorization ? "account-deletion" : selectAccount ? "account-selection" : "";
-  const startParameters = { return_to: returnTo.toString(), ...(reauthorization ? { reauth: reauthorization } : {}) };
-  const startUrl = `${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ ...startParameters, popup: "1" })}`;
-  if (popupWindow && !popupWindow.closed) return connectGoogleDriveInPopup(popupWindow, startUrl);
+  if (popupWindow && !popupWindow.closed) {
+    const popupReturnTo = new URL("oauth-return.html", returnTo);
+    popupReturnTo.searchParams.set("oauth_purpose", forceReauthorization ? "account-deletion" : "drive-connect");
+    popupReturnTo.searchParams.set("oauth_return", "settings");
+    const popupStartParameters = { return_to: popupReturnTo.toString(), ...(reauthorization ? { reauth: reauthorization } : {}) };
+    const popupStartUrl = `${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ ...popupStartParameters, popup: "1" })}`;
+    return connectGoogleDriveInPopup(popupWindow, popupStartUrl);
+  }
   if (requirePopup) throw new Error("google-drive-popup-blocked");
   // Installed and mobile PWAs can discard the opener while Google renders its
   // account chooser. Use a signed full-page return marker so authorization can
   // survive a document restart without bypassing the App unlock screen.
   returnTo.searchParams.set(OAUTH_RESUME_PARAM, "drive-connect");
-  location.replace(`${apiUrl()}/v1/oauth/google/start?${new URLSearchParams({ ...startParameters, return_to: returnTo.toString() })}`);
+  const startParameters = { return_to: returnTo.toString(), ...(reauthorization ? { reauth: reauthorization } : {}) };
+  location.replace(`${apiUrl()}/v1/oauth/google/start?${new URLSearchParams(startParameters)}`);
   return new Promise(() => {});
 }
 
@@ -155,6 +161,9 @@ function connectGoogleDriveInPopup(popupWindow, startUrl) {
       if (event.origin !== workerOrigin || event.source !== popupWindow) return;
       const message = event.data;
       if (!message || message.type !== "forget-me-not-oauth-handoff") return;
+      try {
+        event.source?.postMessage({ type: "forget-me-not-oauth-handoff-accepted" }, event.origin);
+      } catch {}
       if (message.error) return finish(() => reject(new Error(`google-drive-handoff-failed:${message.error}`)));
       if (typeof message.handoff !== "string" || !message.handoff) return finish(() => reject(new Error("google-drive-handoff-failed:handoff-invalid")));
       void exchangeOAuthHandoff(message.handoff).then(

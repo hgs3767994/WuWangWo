@@ -82,6 +82,7 @@ const DRIVE_SYNC_STALE_MS = 2 * 60 * 1000;
 const OAUTH_RETURN_ROUTE_STORAGE_KEY = "forget-me-not-oauth-return-route";
 const OAUTH_RETURN_ROUTE_PERSISTENT_KEY = "forget-me-not-oauth-return-route-persistent";
 const OAUTH_RETURN_ROUTE_LIFETIME_MS = 10 * 60 * 1000;
+const OAUTH_POPUP_COMPLETION_KEY = "forget-me-not-oauth-popup-completion";
 const PWA_RUNTIME_SESSION_KEY = "forget-me-not-pwa-runtime-session";
 const PWA_BACKGROUND_AT_KEY = "forget-me-not-pwa-background-at";
 const NO_SLIDE_ROUTE_NAMES = new Set([
@@ -129,6 +130,7 @@ let state = {
   skipNextPopstateConfirm: false,
   historyLeaveGuard: null,
   developerAccessGuardRegistered: false,
+  oauthPopupFallbackListenerRegistered: false,
   autoLockRegistered: false,
   nativeBackButtonRegistered: false,
   idleLockTimer: null,
@@ -229,6 +231,7 @@ async function boot() {
   try {
   registerDeveloperAccessGuard();
   registerAutoLock();
+  registerOAuthPopupFallbackListener();
   registerNativeBackButton();
   const freshPwaLaunch = registerPwaRuntimeSession();
   bootStage = { code: "BOOT-OAUTH-SESSION", label: "還原 Google Drive 短效連線" };
@@ -237,17 +240,23 @@ async function boot() {
     if (isDriveAuthRequiredError(error)) driveSessionAvailable = false;
     console.warn("無法還原 Google Drive 短效連線", error);
   }
+  const oauthPopupCompletion = consumeOAuthPopupCompletion();
   let oauthHandoffSession = null;
   let oauthHandoffError = null;
   bootStage = { code: "BOOT-OAUTH-HANDOFF", label: "處理 Google Drive 授權回跳" };
   try { oauthHandoffSession = await completeGoogleOAuthHandoff(); } catch (error) { oauthHandoffError = error; }
-  const oauthHandoffCompleted = Boolean(oauthHandoffSession);
-  const oauthReturnRoute = oauthHandoffCompleted ? consumeOAuthReturnRoute() : null;
+  const popupDriveConnectionCompleted = Boolean(oauthPopupCompletion?.purpose === "drive-connect" && driveSessionAvailable);
+  const oauthHandoffCompleted = Boolean(oauthHandoffSession) || popupDriveConnectionCompleted;
+  const oauthReturnRoute = oauthHandoffSession
+    ? consumeOAuthReturnRoute()
+    : popupDriveConnectionCompleted
+      ? restoreHistoryRoute({ name: oauthPopupCompletion.returnRoute || "settings" })
+      : null;
   if (oauthHandoffError) clearOAuthReturnRoute();
   bootStage = { code: "BOOT-APP-STATE", label: "讀取本機設定" };
   const storedAppState = await getItem("appState");
   let appState = normalizeLoadedAppState(storedAppState);
-  if (oauthHandoffSession?.oauthResume === "drive-connect" && appState) {
+  if ((oauthHandoffSession?.oauthResume === "drive-connect" || popupDriveConnectionCompleted) && appState) {
     appState = {
       ...appState,
       googleDrive: {
@@ -256,7 +265,7 @@ async function boot() {
         syncStatus: "needsSync",
         syncStartedAt: "",
         lastSyncError: "",
-        accountEmail: oauthHandoffSession.accountEmail ?? appState.googleDrive?.accountEmail ?? "",
+        accountEmail: oauthHandoffSession?.accountEmail ?? oauthPopupCompletion?.accountEmail ?? appState.googleDrive?.accountEmail ?? "",
         simulated: false
       }
     };
@@ -733,6 +742,37 @@ async function resumeRouteAfterIdleUnlock() {
   const result = await navigate(returnRoute ?? { name: "home" }, { replace: true, force: true });
   completePendingOAuthSettingsBackBarrier();
   return result;
+}
+
+function registerOAuthPopupFallbackListener() {
+  if (state.oauthPopupFallbackListenerRegistered) return;
+  state.oauthPopupFallbackListenerRegistered = true;
+  let reloadScheduled = false;
+  const handleCompletion = (completion) => {
+    if (completion?.purpose !== "drive-connect" || reloadScheduled) return;
+    reloadScheduled = true;
+    window.location.reload();
+  };
+  window.addEventListener("storage", (event) => {
+    if (event.key !== OAUTH_POPUP_COMPLETION_KEY || !event.newValue) return;
+    try { handleCompletion(JSON.parse(event.newValue)); } catch {}
+  });
+  try {
+    const channel = new BroadcastChannel("forget-me-not-oauth");
+    channel.addEventListener("message", (event) => {
+      if (event.data?.type === "oauth-popup-complete") handleCompletion(event.data);
+    });
+  } catch {}
+}
+
+function consumeOAuthPopupCompletion() {
+  try {
+    const completion = JSON.parse(localStorage.getItem(OAUTH_POPUP_COMPLETION_KEY) ?? "null");
+    localStorage.removeItem(OAUTH_POPUP_COMPLETION_KEY);
+    return Number(completion?.expiresAt ?? 0) > Date.now() ? completion : null;
+  } catch {
+    return null;
+  }
 }
 
 async function checkTrustedSessionStillValid(appState, trustedSession, alreadyLoadedKeyPackage = null) {
@@ -1884,15 +1924,8 @@ function openGoogleOAuthPopup() {
   if (isNativeOAuthRuntime() || isSimulatedDrive() || sessionReusable) {
     return { oauthPopup: null, requireOAuthPopup: false, fullPageOAuth: false };
   }
-  if (shouldUseFullPageOAuthRedirect()) {
-    return { oauthPopup: null, requireOAuthPopup: false, fullPageOAuth: true };
-  }
   const oauthPopup = window.open("about:blank", "forget-me-not-google-oauth", "popup=yes,width=520,height=720");
   return { oauthPopup, requireOAuthPopup: true, fullPageOAuth: false };
-}
-
-function shouldUseFullPageOAuthRedirect() {
-  return isPwaInstalled() || /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 }
 
 function closeOAuthPopup(oauthPopup) {
