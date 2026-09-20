@@ -302,6 +302,7 @@ async function boot() {
   bootStage = { code: "BOOT-LOCAL-SNAPSHOTS", label: "讀取本機資料快照" };
   const localSnapshots = await loadLocalSnapshots();
   state = { ...state, localSnapshots };
+  if (oauthReturnRoute) state.suspendedRouteAfterIdleLock = oauthReturnRoute;
   if (!appState || (appState.mode === "localOnly" && !storedKeyPackage) || (!vault && !(appState.mode === "localOnly" && storedKeyPackage))) {
     state = { ...state, route: { name: "welcome" } };
   } else if ((appState.mode === "driveSync" || appState.mode === "localOnly") && storedKeyPackage && !trustedSession) {
@@ -329,7 +330,6 @@ async function boot() {
             allowBiometric: !passwordOnlyUnlockRequired(appState) && (sessionCheck.valid || Boolean(sessionCheck.keepTrustedSession))
           }
         };
-        state.suspendedRouteAfterIdleLock = oauthReturnRoute;
         render();
         registerHistoryNavigation();
         registerServiceWorker();

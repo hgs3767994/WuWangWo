@@ -368,7 +368,7 @@ await check("installed and mobile PWAs resume Google OAuth across a document res
     "shouldUseFullPageOAuthRedirect",
     "fullPageOAuth",
     'oauthHandoffSession?.oauthResume === "drive-connect"',
-    "state.suspendedRouteAfterIdleLock = oauthReturnRoute",
+    "if (oauthReturnRoute) state.suspendedRouteAfterIdleLock = oauthReturnRoute",
     "OAUTH_RETURN_ROUTE_PERSISTENT_KEY",
     "OAUTH_RETURN_ROUTE_LIFETIME_MS"
   ].forEach((text) => {

@@ -141,6 +141,13 @@
 - [x] Google 授權取消時會安全返回 App 並顯示錯誤，不再停留於 Worker；桌面瀏覽器 popup 與原生 Android AuthorizationClient 流程維持不變。
 - [x] 8 項核心 smoke tests、41 項 Worker tests、Worker 語法檢查與部署檢查全部通過；正式 Worker 已部署版本 `b240c89e-36da-418e-9981-aaa44fc35fa2`，PWA cache 更新為 v179。
 
+### v180 OAuth 解鎖後返回設定頁修正（2026-09-20）
+
+- [x] 實機確認 v179 已能在 PWA 文件重啟後完成 OAuth、自動同步並保留 27 位人物。
+- [x] 修正沒有可直接恢復 trusted session 的啟動分支未保存 OAuth 返回頁，導致主密碼解鎖後落到首頁的問題。
+- [x] OAuth 返回目的地改在進入任何解鎖分支前統一保存；不變更主密碼驗證、Worker session 或同步資料處理。
+- [x] PWA cache 更新為 v180。
+
 ## 第二階段：正式隱私政策與服務條款
 
 - [x] 更新 `privacy.html`：
