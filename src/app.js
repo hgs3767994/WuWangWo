@@ -228,6 +228,8 @@ function closeActivePageDialog(value = false) {
 
 async function boot() {
   let bootStage = { code: "BOOT-STARTUP", label: "啟動 App" };
+  let deferredDriveSessionRestore = null;
+  let oauthHandoffCompleted = false;
   try {
   registerDeveloperAccessGuard();
   registerAutoLock();
@@ -235,18 +237,19 @@ async function boot() {
   registerNativeBackButton();
   const freshPwaLaunch = registerPwaRuntimeSession();
   bootStage = { code: "BOOT-OAUTH-SESSION", label: "還原 Google Drive 短效連線" };
-  let driveSessionAvailable = null;
-  try { driveSessionAvailable = Boolean(await restoreDriveSession()); } catch (error) {
-    if (isDriveAuthRequiredError(error)) driveSessionAvailable = false;
-    console.warn("無法還原 Google Drive 短效連線", error);
-  }
   const oauthPopupCompletion = consumeOAuthPopupCompletion();
+  let driveSessionAvailable = null;
+  deferredDriveSessionRestore = settleDriveSessionRestore();
+  if (oauthPopupCompletion?.purpose === "drive-connect") {
+    const restoredDriveSession = await deferredDriveSessionRestore;
+    driveSessionAvailable = restoredDriveSession.available;
+  }
   let oauthHandoffSession = null;
   let oauthHandoffError = null;
   bootStage = { code: "BOOT-OAUTH-HANDOFF", label: "處理 Google Drive 授權回跳" };
   try { oauthHandoffSession = await completeGoogleOAuthHandoff(); } catch (error) { oauthHandoffError = error; }
   const popupDriveConnectionCompleted = Boolean(oauthPopupCompletion?.purpose === "drive-connect" && driveSessionAvailable);
-  const oauthHandoffCompleted = Boolean(oauthHandoffSession) || popupDriveConnectionCompleted;
+  oauthHandoffCompleted = Boolean(oauthHandoffSession) || popupDriveConnectionCompleted;
   const oauthReturnRoute = oauthHandoffSession
     ? consumeOAuthReturnRoute()
     : popupDriveConnectionCompleted
@@ -429,7 +432,35 @@ async function boot() {
   if (oauthHandoffError) alert(driveErrorMessage(oauthHandoffError, "Google Drive OAuth 回跳失敗，請再試一次。"));
   } catch (error) {
     showBootFailure(bootStage, error);
+  } finally {
+    if (deferredDriveSessionRestore && !oauthHandoffCompleted && !state.bootFailure) {
+      void finalizeDeferredDriveSessionRestore(deferredDriveSessionRestore);
+    }
   }
+}
+
+async function settleDriveSessionRestore() {
+  try {
+    return { available: Boolean(await restoreDriveSession()), error: null };
+  } catch (error) {
+    console.warn("無法還原 Google Drive 短效連線", error);
+    return { available: isDriveAuthRequiredError(error) ? false : null, error };
+  }
+}
+
+async function finalizeDeferredDriveSessionRestore(restorePromise) {
+  const result = await restorePromise;
+  if (result.available === true) {
+    void resumeDriveSyncInBackground();
+    return;
+  }
+  if (result.available !== false || !state.appState?.googleDrive?.connected) return;
+  state.appState = {
+    ...state.appState,
+    googleDrive: disconnectedDriveState(state.appState.googleDrive)
+  };
+  await setItem("appState", state.appState);
+  if (!["loading", "unlock", "welcome", "startupRecovery"].includes(state.route.name)) render();
 }
 
 function showBootFailure(stage, error) {
@@ -2032,12 +2063,12 @@ async function deleteCloudAccountAndData() {
   const popupWindow = openGoogleOAuthPopup();
   const deleteLocalData = draft.deleteLocalData === true;
   const scope = [
-    "Cloudflare D1 中的 Google OAuth 帳號、所有 Worker sessions、handoff 與救援請求",
-    "Google 對莫忘的 OAuth 授權",
-    "Google Drive appDataFolder 中的莫忘加密同步檔",
-    deleteLocalData ? "這台裝置上的莫忘本機資料" : "保留這台裝置上的莫忘本機資料"
+    "莫忘APP的雲端連線、登入與救援紀錄",
+    "Google Drive 中的莫忘APP加密同步檔",
+    "莫忘APP存取目前 Google 帳號的授權",
+    `這台裝置上的本機資料：${deleteLocalData ? "一併刪除" : "保留"}`
   ].join("\n• ");
-  if (!(await confirmDialog(`刪除範圍如下：\n• ${scope}\n\n雲端帳號刪除後無法復原。確定繼續嗎？`, { confirmLabel: "重新驗證並刪除", danger: true }))) {
+  if (!(await confirmDialog(`刪除範圍如下：\n• ${scope}\n\n此操作無法復原，確定繼續嗎？`, { confirmLabel: "重新驗證並刪除", danger: true }))) {
     try { popupWindow?.close(); } catch {}
     return;
   }
@@ -2074,7 +2105,7 @@ function accountDeletionErrorMessage(error) {
   const message = String(error?.message ?? "");
   if (message.includes("authorization-cancelled")) return "已取消 Google 重新驗證，沒有刪除任何資料。";
   if (message.includes("reauth-required")) return "重新驗證已逾時，請再次操作。";
-  if (message.includes("drive-deletion-required")) return "目前版本無法完成符合政策的刪除流程，請更新莫忘後再試。沒有刪除任何資料。";
+  if (message.includes("drive-deletion-required")) return "目前版本無法完成符合政策的刪除流程，請更新莫忘APP後再試。沒有刪除任何資料。";
   if (message.includes("account-mismatch")) return "你選擇的 Google 帳號與目前同步帳號不同，因此沒有刪除任何雲端資料。請重新操作並選擇畫面所列的同步帳號。";
   if (message.includes("google-drive-request-failed")) return "無法刪除 Google Drive 同步檔，雲端帳號尚未刪除。請確認網路後再試。";
   if (message.includes("account-deletion-storage-not-ready")) return "雲端刪除服務尚未完成資料庫設定，沒有刪除任何資料。";
@@ -3714,7 +3745,7 @@ function settingsView() {
       ${gd.lastSyncError ? `<p class="danger-text">${escapeHtml(gd.lastSyncError)}</p>` : ""}
       ${syncSummaryView(gd.lastSyncSummary)}
       ${pendingConflicts.length ? `<button class="action-quiet" data-nav="syncConflicts">處理衝突資料</button>` : ""}
-      ${gd.connected ? `<button class="action-quiet" data-action="sync-now" ${isDriveSyncRecentlyStarted(gd) ? "disabled" : ""}>立即同步</button><button class="action-quiet" data-nav="driveRevisionRecovery">雲端歷史版本救援</button><button class="action-quiet" data-action="drive-logout">登出 Google Drive</button>` : `<button class="action-quiet" data-action="drive-placeholder">${state.appState.mode === "driveSync" ? "重新連結 Google Drive" : "連結 Google Drive"}</button>`}
+      ${gd.connected ? `<button class="action-quiet" data-action="sync-now" data-pending-label="同步中…" ${isDriveSyncRecentlyStarted(gd) ? "disabled" : ""}>${isDriveSyncRecentlyStarted(gd) ? "同步中…" : "立即同步"}</button><button class="action-quiet" data-nav="driveRevisionRecovery">雲端歷史版本救援</button><button class="action-quiet" data-action="drive-logout">登出 Google Drive</button>` : `<button class="action-quiet" data-action="drive-placeholder">${state.appState.mode === "driveSync" ? "重新連結 Google Drive" : "連結 Google Drive"}</button>`}
     </section>
     ${themeSettingsSection()}
     ${securitySettingsSection()}
@@ -3769,10 +3800,11 @@ function deleteCloudAccountView() {
       <span></span>
     </header>
     <section class="panel stack danger-zone">
-      <p>這會永久刪除 Cloudflare D1 中的 Google OAuth 帳號、所有 Worker sessions、handoff、救援請求、Google Drive appDataFolder 中的莫忘加密同步檔，並撤銷 Google OAuth 授權。</p>
+      <p>這項操作會永久刪除目前同步帳號在莫忘APP中的雲端連線資料、登入與救援紀錄，以及 Google Drive 中由莫忘APP建立的加密同步檔；同時解除莫忘APP存取此 Google 帳號的授權。</p>
+      <p>這不會刪除你的 Google 帳號，也不會影響 Google Drive 中的其他檔案。</p>
       <p class="danger-text"><strong>此操作無法復原。</strong>你必須重新選擇 Google 帳號完成驗證，避免誤刪其他帳號。</p>
       ${connected ? `<p>目前同步帳號：<strong>${escapeHtml(driveAccountLabel(state.appState.googleDrive))}</strong></p>` : `<p class="status-message warning-message">這台裝置目前沒有連結 Google 雲端帳號。若已移除 App，可使用下方公開網頁完成刪除。</p>`}
-      <label class="deletion-choice"><input type="checkbox" data-route-checkbox="deleteLocalData" ${draft.deleteLocalData ? "checked" : ""} /> 同時清除這台裝置上的莫忘本機資料、密碼包與本機快照</label>
+      <label class="deletion-choice"><input type="checkbox" data-route-checkbox="deleteLocalData" ${draft.deleteLocalData ? "checked" : ""} /> 同時清除這台裝置上的莫忘APP本機資料、密碼包與本機快照</label>
       <p class="muted">雲端帳號及其 Google Drive 加密同步檔一定會刪除。若未勾選，本機資料會保留並切換為僅限本機模式；日後重新連結 Google Drive 時會建立新的雲端資料。</p>
       <div class="field">
         <label>輸入 DELETE 確認永久刪除</label>
@@ -4582,7 +4614,7 @@ function basicDetailLines(person) {
 
 function lifeEventLine(event) {
   const date = event.date ? formatCustomValue({ type: "date" }, event.date) : "未填日期";
-  return detailLine(date, event.text);
+  return detailLine(date, event.text, "", "life-event-detail-line");
 }
 
 function nameField(value) {
@@ -4880,16 +4912,12 @@ function favoriteItemsEditor(rows) {
 
 function familyMembersEditor(rows, currentPersonId) {
   const deleting = Boolean(state.route.familyMemberDeleteMode);
-  const suggestions = visiblePeople(state.vault.people).filter((person) => person.id !== currentPersonId);
-  const listId = `family-name-options-${currentPersonId}`;
+  const listIdPrefix = `family-name-options-${currentPersonId}`;
   return `
     <section class="panel">
       <h2 class="section-title">家族成員</h2>
-      <datalist id="${listId}">
-        ${suggestions.map((person) => `<option value="${escapeAttr(person.name)}" data-person-id="${escapeAttr(person.id)}"></option>`).join("")}
-      </datalist>
       <div class="stack">
-        ${rows.length ? familyMemberEditorEntries(rows).map(({ row, index }) => familyMemberEditorRow(row, index, listId, deleting)).join("") : `<p class="muted">尚未新增家族成員。</p>`}
+        ${rows.length ? familyMemberEditorEntries(rows).map(({ row, index }) => familyMemberEditorRow(row, index, `${listIdPrefix}-${index}`, deleting)).join("") : `<p class="muted">尚未新增家族成員。</p>`}
       </div>
       <div class="actions">
         <button type="button" class="action-soft" data-action="add-family-member">＋ 新增家族成員</button>
@@ -4912,7 +4940,8 @@ function familyMemberEditorRow(row, index, listId, deleting) {
             ? `<input class="custom-relationship-input" data-family-member="${index}" data-prop="customRelationship" placeholder="自訂稱謂" value="${escapeAttr(customRelationshipValue(row))}" />`
             : ""
         }
-        <input data-family-member="${index}" data-prop="name" list="${listId}" placeholder="姓名" value="${escapeAttr(row.name)}" />
+        <datalist id="${listId}"></datalist>
+        <input data-family-member="${index}" data-prop="name" data-family-suggestion-list="${listId}" placeholder="姓名" value="${escapeAttr(row.name)}" />
         ${deleting ? `<button type="button" class="danger compact-row-button" data-action="remove-family-member" data-index="${index}">刪除</button>` : ""}
       </div>
     </div>
@@ -4923,6 +4952,27 @@ function familyMemberEditorEntries(rows = []) {
   return rows
     .map((row, index) => ({ row, index }))
     .sort((a, b) => compareFamilyMembers(a.row, b.row));
+}
+
+function updateFamilyMemberSuggestions(input) {
+  const listId = input.dataset.familySuggestionList;
+  const list = listId ? document.getElementById(listId) : null;
+  if (!list) return;
+  const query = input.value.trim().toLocaleLowerCase("zh-TW");
+  list.replaceChildren();
+  input.removeAttribute("list");
+  if (!query) return;
+  const matches = visiblePeople(state.vault.people)
+    .filter((person) => person.id !== state.route.draft?.id)
+    .filter((person) => String(person.name ?? "").toLocaleLowerCase("zh-TW").includes(query))
+    .slice(0, 8);
+  for (const person of matches) {
+    const option = document.createElement("option");
+    option.value = person.name;
+    option.dataset.personId = person.id;
+    list.append(option);
+  }
+  if (matches.length) input.setAttribute("list", listId);
 }
 
 function lifeEventsEditor(rows) {
@@ -5314,8 +5364,14 @@ function bind() {
     });
   });
   app.querySelectorAll("[data-family-member]").forEach((el) => {
-    el.addEventListener("input", () => updateFamilyMemberDraft(el));
+    el.addEventListener("input", () => {
+      updateFamilyMemberDraft(el);
+      if (el.dataset.prop === "name") updateFamilyMemberSuggestions(el);
+    });
     el.addEventListener("change", () => updateFamilyMemberDraft(el));
+    if (el.dataset.prop === "name") {
+      el.addEventListener("focus", () => updateFamilyMemberSuggestions(el));
+    }
   });
   app.querySelectorAll("[data-life-event]").forEach((el) => {
     if (el.classList.contains("life-event-textarea")) autoResizeTextarea(el);

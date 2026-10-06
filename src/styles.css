@@ -1477,6 +1477,11 @@ button:focus-visible,
   font-weight: 400;
 }
 
+.life-event-detail-line .muted {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .blank-detail-card {
   min-height: 96px;
 }

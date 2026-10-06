@@ -368,7 +368,7 @@ await check("Drive revision recovery preserves current credentials and is expose
   const settingsStart = appSource.indexOf("function settingsView()");
   const settingsEnd = appSource.indexOf("function deleteCloudAccountView()", settingsStart);
   const settingsSource = appSource.slice(settingsStart, settingsEnd);
-  const syncIndex = settingsSource.indexOf(">立即同步</button>");
+  const syncIndex = settingsSource.indexOf('data-action="sync-now"');
   const recoveryIndex = settingsSource.indexOf('data-nav="driveRevisionRecovery"');
   const logoutIndex = settingsSource.indexOf(">登出 Google Drive</button>");
   if (syncIndex < 0 || recoveryIndex < syncIndex || logoutIndex < recoveryIndex) {
@@ -390,6 +390,26 @@ await check("Drive revision recovery preserves current credentials and is expose
   ].forEach((text) => {
     if (!appSource.includes(text)) throw new Error(`src/app.js is missing safe Drive revision recovery support: ${text}`);
   });
+});
+
+await check("v185 interaction safeguards are present", async () => {
+  const [appSource, stylesSource] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("src/styles.css", "utf8")
+  ]);
+  [
+    ".slice(0, 8)",
+    "if (!query) return;",
+    "data-family-suggestion-list",
+    'data-pending-label="同步中…"',
+    "settleDriveSessionRestore()",
+    "莫忘APP的雲端連線、登入與救援紀錄"
+  ].forEach((text) => {
+    if (!appSource.includes(text)) throw new Error(`v185 App behavior is missing ${text}`);
+  });
+  if (!stylesSource.includes(".life-event-detail-line .muted") || !stylesSource.includes("white-space: pre-wrap")) {
+    throw new Error("important notes must preserve user-entered line breaks");
+  }
 });
 
 await check("mobile PWA OAuth fallback completes outside the main history", async () => {
@@ -494,7 +514,7 @@ await check("account deletion is available in-app and on a public self-service p
     readFile("workers/oauth/src/oauth-store.js", "utf8"),
     readFile("workers/oauth/migrations/0005-session-renewals.sql", "utf8")
   ]);
-  ["刪除雲端帳號與資料", "Google Drive appDataFolder 中的莫忘加密同步檔", "deleteLocalData", "data-deletion.html"].forEach((text) => {
+  ["刪除雲端帳號與資料", "莫忘APP的雲端連線、登入與救援紀錄", "Google Drive 中的莫忘APP加密同步檔", "deleteLocalData", "data-deletion.html"].forEach((text) => {
     if (!appSource.includes(text)) throw new Error(`src/app.js is missing account deletion support: ${text}`);
   });
   ["Cloudflare D1", "Google Drive appDataFolder", "data-delete-submit"].forEach((text) => {
