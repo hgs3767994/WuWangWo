@@ -1482,6 +1482,21 @@ button:focus-visible,
   overflow-wrap: anywhere;
 }
 
+.important-notes-summary .life-event-detail-line > span:first-child {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.important-notes-summary .life-event-detail-line .muted {
+  display: inline-block;
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
 .blank-detail-card {
   min-height: 96px;
 }

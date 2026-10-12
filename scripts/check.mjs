@@ -410,6 +410,11 @@ await check("v185 interaction safeguards are present", async () => {
   if (!stylesSource.includes(".life-event-detail-line .muted") || !stylesSource.includes("white-space: pre-wrap")) {
     throw new Error("important notes must preserve user-entered line breaks");
   }
+  if (!appSource.includes('detailGroup("重要記事", visibleLifeEvents.map(lifeEventLine).join(""), "important-notes-summary"') ||
+      !stylesSource.includes(".important-notes-summary .life-event-detail-line > span:first-child") ||
+      !stylesSource.includes("font-size: 16px")) {
+    throw new Error("person detail must emphasize important-note dates without enlarging note text");
+  }
 });
 
 await check("mobile PWA OAuth fallback completes outside the main history", async () => {

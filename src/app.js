@@ -3644,7 +3644,7 @@ function detailView(person) {
     tags.length ? detailGroup("興趣喜好", `<div class="chip-list">${tags.map((tag) => `<span class="chip selected">${tagLabel(tag)}</span>`).join("")}</div>`) : "",
     favoriteItems.length ? detailGroup("嗜好品", `<div class="chip-list">${favoriteItems.map((item) => `<span class="chip selected">${escapeHtml(item.value)}</span>`).join("")}</div>`) : "",
     familyMembers.length ? detailGroup("家族成員", familyMembers.map((member) => familyMemberLine(person, member)).join("")) : "",
-    lifeEvents.length ? detailGroup("重要記事", visibleLifeEvents.map(lifeEventLine).join(""), "", moreLifeEventsButton) : "",
+    lifeEvents.length ? detailGroup("重要記事", visibleLifeEvents.map(lifeEventLine).join(""), "important-notes-summary", moreLifeEventsButton) : "",
     customSections,
     person.note ? detailGroup("其它備註", `<p class="detail-value">${escapeHtml(person.note).replaceAll("\n", "<br>")}</p>`) : ""
   ].filter(Boolean).join("");
